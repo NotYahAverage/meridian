@@ -133,6 +133,7 @@ export class WorldRenderer {
     this.buildings.sync();
     this.buildings.rebuild(6);
     this.buildings.updateState(dt);
+    this.buildings.updateLod(camera);
     this.overlays.update(dt);
     this.terrain.updateLOD(camera.position);
     this.props.update(camera, dt);

@@ -19,7 +19,7 @@ import { StreetNamer } from './roads/streetNames';
 import { Coverage } from './services/Coverage';
 import { Pathfinder, type RoutePoint } from './traffic/Pathfinder';
 import { Signals } from './traffic/Signals';
-import { TrafficModel } from './traffic/TrafficModel';
+import { TrafficModel, type TripDemand } from './traffic/TrafficModel';
 import { TripGenerator } from './traffic/TripGenerator';
 import { Vehicles } from './traffic/Vehicles';
 import { LiveTraffic } from './traffic/LiveTraffic';
@@ -59,6 +59,8 @@ export interface CityOptions {
   unlimitedMoney?: boolean;
   /** Flat terrain height (fast generation for tests). */
   flatTerrain?: number;
+  /** The terrain's heightmap, when generated ahead of time (in parallel). */
+  terrainBase?: Float32Array;
   /** Skip creating the starting highway (used when loading). */
   empty?: boolean;
 }
@@ -89,6 +91,11 @@ export class City {
   readonly terrain: Terrain;
   /** Parcels of the map the city owns (all of it unless founded with limits). */
   readonly land = new Land();
+  /** Traffic demand being added up over several ticks (see tickCity). */
+  demandJob: Generator<void, TripDemand[], void> | null = null;
+  /** Periodic coverage and land-value refreshes in progress (a slice per tick). */
+  coverageJob: Generator<void, void, void> | null = null;
+  landValueJob: Generator<void, void, void> | null = null;
   readonly nature: Nature;
   readonly roads = new RoadNetwork();
   readonly layout: RoadLayout;
@@ -159,7 +166,7 @@ export class City {
     this.seed = opts.seed;
     this.preset = opts.preset;
     this.rng = new Rng(opts.seed ^ 0xc17e);
-    this.terrain = new Terrain(opts.seed, opts.preset, { flat: opts.flatTerrain });
+    this.terrain = new Terrain(opts.seed, opts.preset, { flat: opts.flatTerrain, base: opts.terrainBase });
     this.terrain.landCheck = (x, z) => this.land.ownsPoint(x, z);
     this.nature = new Nature(this.terrain, opts.seed);
     this.weather = new Weather(opts.seed);
@@ -189,14 +196,20 @@ export class City {
     });
     this.live = new LiveTraffic(this);
     this.spawner = new Spawner(this.roads, this.terrain, this.zones, this.buildings, (x, z) => this.landValue.at(x, z));
+    // Attractions are few: keep a list (refreshed when coverage is) instead of searching every building nearby.
+    let sights: { version: number; list: { x: number; z: number; w: number }[] } = { version: -1, list: [] };
     this.spawner.tourismAt = (x, z) => {
-      let t = 0;
-      for (const b of this.buildings.queryRadius(x, z, 900)) {
-        if (b.kind !== 'service' || b.state !== BuildingState.Active) continue;
-        const st = SERVICE_BY_ID.get(b.typeId);
-        if (!st?.tourism) continue;
-        t += (st.tourism / 4000) * Math.max(0, 1 - Math.hypot(b.cx - x, b.cz - z) / 900);
+      if (sights.version !== this.coverage.version) {
+        const list: { x: number; z: number; w: number }[] = [];
+        for (const b of this.buildings.all.values()) {
+          if (b.kind !== 'service' || b.state !== BuildingState.Active) continue;
+          const st = SERVICE_BY_ID.get(b.typeId);
+          if (st?.tourism) list.push({ x: b.cx, z: b.cz, w: st.tourism / 4000 });
+        }
+        sights = { version: this.coverage.version, list };
       }
+      let t = 0;
+      for (const s of sights.list) t += s.w * Math.max(0, 1 - Math.hypot(s.x - x, s.z - z) / 900);
       return Math.min(1, t);
     };
     this.districts.onRemove = (id) => {

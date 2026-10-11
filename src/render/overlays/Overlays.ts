@@ -1,6 +1,6 @@
 import type { Building } from '../../sim/buildings/Buildings';
 import type { City } from '../../sim/City';
-import { GRID_CELL, GRID_RES, ZONE_RES } from '../../sim/constants';
+import { GRID_CELL, GRID_RES, ZONE_CELL, ZONE_RES } from '../../sim/constants';
 import type { CoverageKind } from '../../sim/services/ServiceTypes';
 import { BuildingState, ZONE_INFO, Zone, isResidential } from '../../sim/types';
 import type { BuildingRenderer } from '../buildings/BuildingRenderer';
@@ -95,10 +95,13 @@ export class Overlays {
   update(dt: number): void {
     this.zoneTimer -= dt;
     if (this.city.zones.version !== this.zoneVersion && this.zoneTimer <= 0) {
+      const first = !this.zonesWritten;
       this.zoneVersion = this.city.zones.version;
-      this.zoneTimer = 0.1;
-      this.city.zones.dirtyRects.length = 0;
-      this.writeZones();
+      this.zoneTimer = 0.25;
+      // Only the changed parts of the (big) zone map are rewritten.
+      const rects = this.city.zones.dirtyRects.splice(0);
+      this.writeZones(first ? null : rects);
+      this.zonesWritten = true;
     }
     this.terrain.uniforms.uZonableOpacity.value = this.zonableHint;
     this.timer -= dt;
@@ -112,28 +115,37 @@ export class Overlays {
     this.writeGrid();
   }
 
-  private writeZones(): void {
+  private zonesWritten = false;
+
+  /** Writes zone colours for the given world rectangles (or everything). */
+  private writeZones(rects: { minX: number; minZ: number; maxX: number; maxZ: number }[] | null): void {
     const z = this.city.zones;
     const data = this.terrain.zoneData;
     const zonable = this.terrain.zonableData;
     const cols = Object.values(ZONE_INFO).map((i) => i.color.map((v) => Math.round(v * 255)));
-    for (let i = 0; i < ZONE_RES * ZONE_RES; i++) {
-      const zone = z.zone[i] as Zone;
-      const occ = z.occupant[i] !== 0;
-      const o = i * 4;
-      if (zone !== Zone.None && !occ) {
-        const c = cols[zone];
-        data[o] = c[0];
-        data[o + 1] = c[1];
-        data[o + 2] = c[2];
-        data[o + 3] = 200;
-      } else {
-        data[o + 3] = 0;
-      }
-      zonable[i] = z.zonable[i] && !occ && zone === Zone.None ? 255 : 0;
+    const cell = (v: number) => Math.min(ZONE_RES - 1, Math.max(0, Math.floor(v / ZONE_CELL)));
+    for (const r of rects ?? [{ minX: 0, minZ: 0, maxX: ZONE_RES * ZONE_CELL, maxZ: ZONE_RES * ZONE_CELL }]) {
+      const ix0 = cell(r.minX), ix1 = cell(r.maxX), iz0 = cell(r.minZ), iz1 = cell(r.maxZ);
+      for (let iz = iz0; iz <= iz1; iz++) for (let i = iz * ZONE_RES + ix0, end = iz * ZONE_RES + ix1; i <= end; i++) this.writeZoneCell(i, z, data, zonable, cols);
     }
     this.terrain.zoneTex.needsUpdate = true;
     this.terrain.zonableTex.needsUpdate = true;
+  }
+
+  private writeZoneCell(i: number, z: City['zones'], data: Uint8Array, zonable: Uint8Array, cols: number[][]): void {
+    const zone = z.zone[i] as Zone;
+    const occ = z.occupant[i] !== 0;
+    const o = i * 4;
+    if (zone !== Zone.None && !occ) {
+      const c = cols[zone];
+      data[o] = c[0];
+      data[o + 1] = c[1];
+      data[o + 2] = c[2];
+      data[o + 3] = 200;
+    } else {
+      data[o + 3] = 0;
+    }
+    zonable[i] = z.zonable[i] && !occ && zone === Zone.None ? 255 : 0;
   }
 
   private writeGrid(): void {

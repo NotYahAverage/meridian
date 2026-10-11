@@ -1,23 +1,29 @@
 /** Min-heap of integer items keyed by float priority. Allocation-free after warm-up. */
 export class BinaryHeap {
-  private items: number[] = [];
-  private prio: number[] = [];
+  private items = new Int32Array(256);
+  private prio = new Float64Array(256);
+  private n = 0;
 
   get size(): number {
-    return this.items.length;
+    return this.n;
   }
 
   clear(): void {
-    this.items.length = 0;
-    this.prio.length = 0;
+    this.n = 0;
   }
 
   push(item: number, priority: number): void {
+    if (this.n === this.items.length) {
+      const items = new Int32Array(this.n * 2);
+      const prio = new Float64Array(this.n * 2);
+      items.set(this.items);
+      prio.set(this.prio);
+      this.items = items;
+      this.prio = prio;
+    }
     const items = this.items;
     const prio = this.prio;
-    let i = items.length;
-    items.push(item);
-    prio.push(priority);
+    let i = this.n++;
     while (i > 0) {
       const p = (i - 1) >> 1;
       if (prio[p] <= priority) break;
@@ -37,10 +43,10 @@ export class BinaryHeap {
     const items = this.items;
     const prio = this.prio;
     const top = items[0];
-    const lastItem = items.pop()!;
-    const lastPrio = prio.pop()!;
-    const n = items.length;
+    const n = --this.n;
     if (n > 0) {
+      const lastItem = items[n];
+      const lastPrio = prio[n];
       let i = 0;
       for (;;) {
         const l = 2 * i + 1;

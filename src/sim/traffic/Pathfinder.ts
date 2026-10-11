@@ -45,6 +45,11 @@ export class Pathfinder {
   /** Travel-time multiplier per segment id (≥ 1). */
   congestion: (segId: number) => number = () => 1;
   searches = 0;
+  /** Compact adjacency (edges leaving each node) for shortest-path trees. */
+  private graph: { net: number; layout: number; start: Int32Array; to: Int32Array; seg: Int32Array; base: Float64Array; pen: Float64Array } | null = null;
+  /** Edge travel times including congestion, as of the last refreshCosts(). */
+  private edgeCost = new Float64Array(0);
+  private costsFresh = false;
 
   constructor(private net: RoadNetwork, private layout: RoadLayout) {}
 
@@ -236,27 +241,87 @@ export class Pathfinder {
     return { nodes, segs, startDir, endDir: bestDir };
   }
 
+  /** Rebuilds the compact graph when roads or junctions changed. */
+  private ensureGraph(): NonNullable<Pathfinder['graph']> {
+    const net = this.net;
+    const gr = this.graph;
+    if (gr && gr.net === net.version && gr.layout === this.layout.version) return gr;
+    const n = net.nextNodeId + 1;
+    const start = new Int32Array(n + 1);
+    for (const node of net.nodes.values()) {
+      for (const sid of node.segs) {
+        const seg = net.segments.get(sid);
+        if (seg && (seg.oneway === 0 || RoadNetwork.allows(seg, node.id))) start[node.id + 1]++;
+      }
+    }
+    for (let i = 0; i < n; i++) start[i + 1] += start[i];
+    const m = start[n];
+    const to = new Int32Array(m), seg = new Int32Array(m), base = new Float64Array(m), pen = new Float64Array(n);
+    const fill = start.slice(0, n);
+    for (const node of net.nodes.values()) {
+      pen[node.id] = this.nodePenalty(node.id);
+      for (const sid of node.segs) {
+        const s = net.segments.get(sid);
+        if (!s || !(s.oneway === 0 || RoadNetwork.allows(s, node.id))) continue;
+        const e = fill[node.id]++;
+        to[e] = s.a === node.id ? s.b : s.a;
+        seg[e] = sid;
+        base[e] = s.length / ROAD_TYPES[s.type].speed;
+      }
+    }
+    this.graph = { net: net.version, layout: this.layout.version, start, to, seg, base, pen };
+    this.costsFresh = false;
+    return this.graph;
+  }
+
+  /** Takes a snapshot of congestion for the trees that follow (called once per traffic cycle). */
+  refreshCosts(): void {
+    const gr = this.ensureGraph();
+    if (this.edgeCost.length < gr.to.length) this.edgeCost = new Float64Array(gr.to.length);
+    const mult = new Map<number, number>();
+    for (let e = 0; e < gr.to.length; e++) {
+      const sid = gr.seg[e];
+      let k = mult.get(sid);
+      if (k === undefined) mult.set(sid, (k = this.congestion(sid)));
+      this.edgeCost[e] = gr.base[e] * k;
+    }
+    this.costsFresh = true;
+  }
+
   /**
    * Single-source shortest-path tree from a point (for traffic assignment).
    * Returns per-node cost and parent segment arrays valid until the next call.
+   * Runs over the compact graph with travel times from the last refreshCosts().
    */
   tree(from: RoutePoint): { cost: Float64Array; parentSeg: Int32Array; parentNode: Int32Array; stamp: Uint32Array; gen: number } | null {
     const net = this.net;
     const fs = net.segments.get(from.segId);
     if (!fs) return null;
     this.ensure();
+    const gr = this.ensureGraph();
+    if (!this.costsFresh) this.refreshCosts();
+    const { start, to, seg, pen } = gr;
+    const ec = this.edgeCost;
     const gen = ++this.gen;
+    if (gen >= 0xfffffff0) {
+      this.stamp.fill(0);
+      this.closed.fill(0);
+      this.gen = 1;
+      return this.tree(from);
+    }
     const g = this.g;
     const stamp = this.stamp;
     const closed = this.closed;
+    const parentNode = this.parentNode;
+    const parentSeg = this.parentSeg;
     const heap = this.heap;
     heap.clear();
     const open = (nid: number, cost: number, pNode: number, pSeg: number) => {
       if (stamp[nid] === gen && g[nid] <= cost) return;
       stamp[nid] = gen;
       g[nid] = cost;
-      this.parentNode[nid] = pNode;
-      this.parentSeg[nid] = pSeg;
+      parentNode[nid] = pNode;
+      parentSeg[nid] = pSeg;
       heap.push(nid, cost);
     };
     if (fs.oneway !== -1) open(fs.b, this.segTime(fs, (fs.length - from.s) / Math.max(1, fs.length)), -1, fs.id);
@@ -265,17 +330,19 @@ export class Pathfinder {
       const nid = heap.pop();
       if (closed[nid] === gen) continue;
       closed[nid] = gen;
-      const gc = g[nid];
-      const node = net.nodes.get(nid)!;
-      const pen = this.nodePenalty(nid);
-      for (const sid of node.segs) {
-        const seg = net.segments.get(sid)!;
-        if (seg.oneway !== 0 && !RoadNetwork.allows(seg, nid)) continue;
-        const other = seg.a === nid ? seg.b : seg.a;
+      const gc = g[nid] + pen[nid];
+      for (let e = start[nid], end = start[nid + 1]; e < end; e++) {
+        const other = to[e];
         if (closed[other] === gen) continue;
-        open(other, gc + this.segTime(seg) + pen, nid, sid);
+        const c = gc + ec[e];
+        if (stamp[other] === gen && g[other] <= c) continue;
+        stamp[other] = gen;
+        g[other] = c;
+        parentNode[other] = nid;
+        parentSeg[other] = seg[e];
+        heap.push(other, c);
       }
     }
-    return { cost: g, parentSeg: this.parentSeg, parentNode: this.parentNode, stamp, gen };
+    return { cost: g, parentSeg, parentNode, stamp, gen };
   }
 }

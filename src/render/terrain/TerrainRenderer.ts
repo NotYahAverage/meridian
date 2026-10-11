@@ -8,6 +8,8 @@ const CELLS = CHUNK_SIZE / HM_STEP; // 64 quads per chunk side
 const VPS = CELLS + 1; // vertices per side
 const SKIRT = 8;
 const LOD_STEP = 4;
+/** Coarsest level: far away, or land the city doesn't own yet. */
+const FAR_STEP = 16;
 
 interface Chunk {
   mesh: THREE.Mesh;
@@ -62,7 +64,10 @@ export class TerrainRenderer {
   private landVersion = -1;
 
   /** Shades land the city doesn't own (and marks what it can buy next). */
+  private land: Land | null = null;
+
   syncLand(land: Land): void {
+    this.land = land.allOwned ? null : land;
     if (land.version === this.landVersion) return;
     this.landVersion = land.version;
     for (let i = 0; i < LAND_TILES * LAND_TILES; i++) {
@@ -101,7 +106,7 @@ export class TerrainRenderer {
     this.uniforms = createTerrainUniforms(this.zoneTex, this.zonableTex, this.overlayTex, this.soilTex, this.landTex);
     this.material = createTerrainMaterial(this.uniforms);
 
-    const indices = [buildIndex(1), buildIndex(2), buildIndex(LOD_STEP)];
+    const indices = [buildIndex(1), buildIndex(2), buildIndex(LOD_STEP), buildIndex(FAR_STEP)];
     for (let cz = 0; cz < CHUNKS; cz++) {
       for (let cx = 0; cx < CHUNKS; cx++) {
         const geo = new THREE.BufferGeometry();
@@ -234,7 +239,9 @@ export class TerrainRenderer {
       const d = Math.hypot(camPos.x - cx, camPos.z - cz, camPos.y * 0.6);
       // Hysteresis avoids flicker at band edges.
       const h = ch.lod === 0 ? 40 : -40;
-      const want = d < 620 + h ? 0 : d < 1500 + h ? 1 : 2;
+      let want = d < 620 + h ? 0 : d < 1500 + h ? 1 : d < 3400 + h ? 2 : 3;
+      // Land that isn't the city's yet is only scenery: coarse unless the camera is close.
+      if (want === 2 && this.land && !this.land.ownsPoint(cx, cz)) want = 3;
       if (want !== ch.lod) {
         ch.lod = want;
         ch.geo.setIndex(ch.levels[want]);

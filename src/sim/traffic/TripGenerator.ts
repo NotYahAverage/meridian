@@ -168,15 +168,38 @@ export class TripGenerator {
   }
 
   buildDemand(): TripDemand[] {
+    const it = this.demandSteps(Infinity);
+    for (;;) {
+      const r = it.next();
+      if (r.done) return r.value;
+    }
+  }
+
+  /**
+   * The same as buildDemand, in slices of `perStep` households so a big city
+   * can spread the work over several ticks (each next() does one slice).
+   */
+  *demandSteps(perStep: number): Generator<void, TripDemand[], void> {
     const { buildings, population: pop } = this.ctx;
-    const pairs = new Map<string, { from: RoutePoint; to: RoutePoint; trips: number }>();
+    // Numeric keys (point → point) instead of strings: big cities add up a million commutes here.
+    const out: TripDemand[] = [];
+    const pairs = new Map<number, Map<number, TripDemand>>();
+    const key = (p: RoutePoint) => p.segId * 16384 + Math.min(16383, Math.max(0, Math.round(p.s)));
     const add = (from: RoutePoint, to: RoutePoint, trips: number) => {
-      const key = `${from.segId}:${Math.round(from.s)}>${to.segId}:${Math.round(to.s)}`;
-      const p = pairs.get(key);
+      const fk = key(from);
+      let m = pairs.get(fk);
+      if (!m) pairs.set(fk, (m = new Map()));
+      const tk = key(to);
+      const p = m.get(tk);
       if (p) p.trips += trips;
-      else pairs.set(key, { from, to, trips });
+      else {
+        const d = { from, to, trips };
+        m.set(tk, d);
+        out.push(d);
+      }
     };
     for (let i = 0; i < pop.count; i++) {
+      if (i % perStep === perStep - 1) yield;
       if (!pop.alive[i]) continue;
       const home = buildings.get(pop.home[i]);
       if (!home || !home.segId) continue;
@@ -199,27 +222,27 @@ export class TripGenerator {
       const n = near.length;
       for (let k = 0; k < n; k++) add(this.pt(b), this.pt(near[k]), (b.households * TRIP_RATES.shopPerHousehold) / n);
     }
-    const out = this.ctx.outsidePoint();
-    if (out) {
+    const edge = this.ctx.outsidePoint();
+    if (edge) {
       for (const id of this.com) {
         const b = buildings.get(id)!;
-        add(out, this.pt(b), b.workers * TRIP_RATES.visitorPerCommercialJob * 0.5);
-        add(out, this.pt(b), b.workers * TRIP_RATES.importPerCommercialJob);
+        add(edge, this.pt(b), b.workers * TRIP_RATES.visitorPerCommercialJob * 0.5);
+        add(edge, this.pt(b), b.workers * TRIP_RATES.importPerCommercialJob);
       }
       for (const id of this.off) {
         const b = buildings.get(id)!;
-        add(out, this.pt(b), b.workers * TRIP_RATES.visitorPerOfficeJob);
+        add(edge, this.pt(b), b.workers * TRIP_RATES.visitorPerOfficeJob);
       }
       for (const id of this.ind) {
         const b = buildings.get(id)!;
-        add(this.pt(b), out, b.workers * TRIP_RATES.exportPerIndustrialJob);
+        add(this.pt(b), edge, b.workers * TRIP_RATES.exportPerIndustrialJob);
       }
       for (const s of this.sights) {
         const b = buildings.get(s.id);
-        if (b) add(out, this.pt(b), s.trips);
+        if (b) add(edge, this.pt(b), s.trips);
       }
     }
-    return [...pairs.values()];
+    return out;
   }
 
   /** Samples one visible trip appropriate for the time of day. */

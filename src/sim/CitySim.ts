@@ -6,7 +6,7 @@ import { householdSize } from './buildings/Archetypes';
 import { archetypesFor, capacityFor } from './buildings/Archetypes';
 import type { Building } from './buildings/Buildings';
 import type { City } from './City';
-import { DAYS_PER_MONTH, TICKS_PER_DAY } from './constants';
+import { DAYS_PER_MONTH, GRID_CELL, GRID_RES, TICKS_PER_DAY } from './constants';
 import type { DemandInputs } from './demand/Demand';
 import { GOALS, MILESTONES, milestoneIndexFor, unlocksAt } from './progress/Progress';
 import { Coverage, LANDFILL_CAPACITY } from './services/Coverage';
@@ -82,6 +82,11 @@ export function projectEconomy(city: City): void {
   });
 }
 
+/** Households whose trips are added up per tick while recomputing traffic demand. */
+const DEMAND_SLICE = 20_000;
+/** Services splatted per tick during the periodic coverage refresh. */
+const COVERAGE_SLICE = 150;
+
 /** Advances the city by one simulation tick (one game hour). */
 export function tickCity(city: City): void {
   city.clock.tick++;
@@ -92,10 +97,17 @@ export function tickCity(city: City): void {
   progressConstruction(city);
   updateFires(city);
   // Periodic work is staggered across hours so no single tick does it all.
-  if (t % 6 === 3 || t < 3) {
+  if (t < 3) {
     city.recomputeUtilities();
     refreshStats(city);
     city.demand.update(demandInputs(city));
+    projectEconomy(city);
+  } else if (t % 6 === 3) {
+    city.recomputeUtilities();
+    refreshStats(city);
+  } else if (t % 6 === 4) {
+    city.demand.update(demandInputs(city));
+  } else if (t % 6 === 5) {
     projectEconomy(city);
   }
   growBuildings(city);
@@ -105,20 +117,37 @@ export function tickCity(city: City): void {
   checkGoals(city);
   const hour = city.clock.hour;
   city.disasters.tickHour();
-  if (city.coverageDirty || (hour === 1 && city.clock.day % 2 === 0)) {
+  if (city.coverageDirty) {
+    // Something was built or removed: the player sees the new coverage at once.
+    city.coverageJob = null;
     city.coverage.recompute(city.buildings);
     city.coverageDirty = false;
+  } else if (hour === 9 && city.clock.day % 2 === 0) {
+    city.coverageJob = city.coverage.recomputeSteps(city.buildings, COVERAGE_SLICE);
   }
+  if (city.coverageJob && city.coverageJob.next().done) city.coverageJob = null;
   if (hour === 0) {
     daily(city);
     if (city.clock.day % DAYS_PER_MONTH === 0) monthly(city);
-  } else if (hour === 2) {
-    city.landValue.update(city.buildings, city.roads, city.coverage, city.traffic, 0.3, city.transit.servedStops(), landValueMods(city));
+  } else if (hour === 14) {
+    // Land value is worked out a pass per hour.
+    city.landValueJob = city.landValue.updateSteps(city.buildings, city.roads, city.coverage, city.traffic, 0.3, city.transit.servedStops(), landValueMods(city));
+  } else if (hour === 19) {
+    dailyLate(city);
   } else if (hour === 3) {
     city.transit.updateRidership();
   } else if (hour === 4 && city.clock.day % 2 === 0) {
     city.trips.refresh();
-    city.traffic.setDemand(city.trips.buildDemand());
+    // Trip demand is added up a slice at a time over the next few hours in big cities.
+    city.demandJob = city.trips.demandSteps(DEMAND_SLICE);
+  }
+  if (city.landValueJob && city.landValueJob.next().done) city.landValueJob = null;
+  if (city.demandJob) {
+    const r = city.demandJob.next();
+    if (r.done) {
+      city.demandJob = null;
+      city.traffic.setDemand(r.value);
+    }
   }
 }
 
@@ -379,11 +408,6 @@ function daily(city: City): void {
   city.terrain.regrow(9);
   city.nature.grow(city.clock.day);
   dailyBuildings(city);
-  dailyHouseholds(city);
-  // Visible-trip sampling needs current residents and jobs every day.
-  city.trips.refresh();
-  rebuildVacancies(city);
-  rebuildOpenJobs(city);
   refreshStats(city);
   recordHistory(city);
   checkMilestones(city);
@@ -391,11 +415,25 @@ function daily(city: City): void {
   city.growthBlocked.clear();
 }
 
+/** The households' half of the day's bookkeeping, a few hours after daily() so the two don't land in one tick. */
+function dailyLate(city: City): void {
+  dailyHouseholds(city);
+  // Visible-trip sampling needs current residents and jobs every day.
+  city.trips.refresh();
+  rebuildVacancies(city);
+  rebuildOpenJobs(city);
+}
+
 function rebuildVacancies(city: City): void {
   city.vacantHomes = [];
   for (const b of city.buildings.all.values()) {
     if (b.state === BuildingState.Active && isResidential(b.zone) && b.households < b.hhCap) city.vacantHomes.push(b.id);
   }
+}
+
+/** Index of the analysis-grid cell (coverage, land value, districts) containing a point. */
+function gridCell(x: number, z: number): number {
+  return clamp(Math.floor(z / GRID_CELL), 0, GRID_RES - 1) * GRID_RES + clamp(Math.floor(x / GRID_CELL), 0, GRID_RES - 1);
 }
 
 function dailyBuildings(city: City): void {
@@ -434,15 +472,18 @@ function dailyBuildings(city: City): void {
   let coveredGen = 0;
   for (const b of city.buildings.all.values()) {
     if (b.kind !== 'zoned' || b.state !== BuildingState.Active) continue;
-    coveredGen += (b.residents * 0.1 + b.workers * 0.08) * garbageScale(b) * cov.at('garbage', b.cx, b.cz);
+    coveredGen += (b.residents * 0.1 + b.workers * 0.08) * garbageScale(b) * cov.grids.garbage[gridCell(b.cx, b.cz)];
   }
   const garbageEff = coveredGen > 0 ? Math.min(1, capacity / coveredGen) : 1;
   let collected = 0;
 
   const removeList: number[] = [];
   let abandonedToday = 0;
+  const grids = cov.grids;
   for (const b of city.buildings.all.values()) {
-    b.district = city.districts.at(b.cx, b.cz);
+    // One grid lookup per building; the coverage, land-value and district maps share the grid.
+    const ci = gridCell(b.cx, b.cz);
+    b.district = city.districts.grid[ci];
     if (b.state === BuildingState.Abandoned) {
       b.age++;
       if (b.age > 16) removeList.push(b.id);
@@ -450,7 +491,7 @@ function dailyBuildings(city: City): void {
     }
     if (b.state === BuildingState.Construction) continue;
     b.age++;
-    const lv = lvMap.at(b.cx, b.cz);
+    const lv = lvMap.value[ci];
     b.landValue = lv;
     if (b.kind === 'service') {
       b.problems = b.segId ? 0 : Problem.NoRoad;
@@ -461,7 +502,7 @@ function dailyBuildings(city: City): void {
     // Garbage
     const gen = (b.residents * 0.1 + b.workers * 0.08) * garbageScale(b);
     b.garbage += gen;
-    const gc = cov.at('garbage', b.cx, b.cz);
+    const gc = grids.garbage[ci];
     if (gc > 0.05) {
       const take = Math.min(b.garbage, gen * 2.4 * gc * garbageEff + 0.5 * gc * garbageEff);
       b.garbage -= take;
@@ -480,8 +521,8 @@ function dailyBuildings(city: City): void {
     // threshold made towns hover around it, losing and regaining residents.
     const sick = residential ? clamp((stats.population - 450) / 650, 0, 1) : 0;
     const crime = clamp((stats.population - 900) / 700, 0, 1);
-    if (sick > 0 && cov.at('health', b.cx, b.cz) < 0.12) p |= Problem.Sickness;
-    if (crime > 0 && cov.at('police', b.cx, b.cz) < crimeThreshold(b)) p |= Problem.Crime;
+    if (sick > 0 && grids.health[ci] < 0.12) p |= Problem.Sickness;
+    if (crime > 0 && grids.police[ci] < crimeThreshold(b)) p |= Problem.Crime;
     if (zoneBase(b.zone) === Zone.Commercial && goodsRatio < 0.35 && !outsideConnected) p |= Problem.NoGoods;
     b.problems = p;
 
@@ -490,15 +531,15 @@ function dailyBuildings(city: City): void {
     let h: number;
     if (residential) {
       h = 52;
-      h += 12 * cov.at('police', b.cx, b.cz) + 10 * cov.at('health', b.cx, b.cz) + 9 * cov.at('education', b.cx, b.cz);
-      h += 6 * cov.at('fire', b.cx, b.cz) + parkWeight(b) * cov.at('park', b.cx, b.cz) + policyMood(b);
+      h += 12 * grids.police[ci] + 10 * grids.health[ci] + 9 * grids.education[ci];
+      h += 6 * grids.fire[ci] + parkWeight(b) * grids.park[ci] + policyMood(b);
       h += (lv - 0.35) * 30;
-      h -= lvMap.pollutionAt(b.cx, b.cz) * 38 + lvMap.noiseAt(b.cx, b.cz) * 16;
+      h -= lvMap.pollution[ci] * 38 + lvMap.noise[ci] * 16;
       h -= (tax.residential - 9) * 1.6;
       h -= Math.max(0, city.traffic.avgTripMinutes - 16) * 0.7;
       h -= Math.max(0, stats.unemployment - 0.1) * 70;
     } else {
-      h = 56 + (lv - 0.35) * 20 + 8 * cov.at('police', b.cx, b.cz) + 6 * cov.at('fire', b.cx, b.cz);
+      h = 56 + (lv - 0.35) * 20 + 8 * grids.police[ci] + 6 * grids.fire[ci];
       const cat = zoneBase(b.zone) === Zone.Commercial ? 'commercial' : zoneBase(b.zone) === Zone.Industrial ? 'industrial' : 'office';
       h -= (tax[cat] - 9) * 1.6;
       h -= Math.max(0, ratio - 1) * 22;
@@ -542,7 +583,7 @@ function dailyBuildings(city: City): void {
       }
     }
 
-    const fc = cov.at('fire', b.cx, b.cz);
+    const fc = grids.fire[ci];
     const risk = 0.00032 * (1 - fc) * (1 - fc) * (b.zone === Zone.Industrial ? 2.2 : b.zone === Zone.IndustrialLight ? 1.3 : 1) * (1 + Math.min(1, b.age / 400)) * city.weather.fireRisk() * (pol.in('smokeDetectors', b.district) ? 0.55 : 1);
     if (rng.chance(risk)) startFire(city, b);
   }

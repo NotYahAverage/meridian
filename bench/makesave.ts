@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import { tickCity } from '../src/sim/CitySim';
 import { saveToJSON } from '../src/sim/save/Serializer';
 import { buildBigCity } from './cityBuilder';
-const city = buildBigCity(1600, 100, false);
+const city = buildBigCity(Number(process.env.SIZE ?? 1600), 100, false);
 const days = Number(process.env.DAYS ?? 160);
 for (let i = 0; i < 24 * days; i++) tickCity(city);
 fs.mkdirSync('bench/.out', { recursive: true });

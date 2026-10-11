@@ -2,7 +2,7 @@ import { clamp, lerp } from '../../core/math';
 import type { Building, Buildings } from '../buildings/Buildings';
 import { GRID_CELL, GRID_RES } from '../constants';
 import type { RoadNetwork, RoadSegment } from '../roads/RoadNetwork';
-import { ROAD_TYPES } from '../roads/RoadTypes';
+import { ROAD_TYPES, isFreeway } from '../roads/RoadTypes';
 import { rasterizePolyline } from '../roads/rasterize';
 import type { Coverage } from '../services/Coverage';
 import { SERVICE_BY_ID } from '../services/ServiceTypes';
@@ -20,6 +20,15 @@ export interface LandValueMods {
   trees?: Uint16Array;
 }
 const NO_MODS: LandValueMods = { pollution: () => 1, parks: () => 1 };
+/** How far beyond the city's streets anything here can reach (the widest pollution plume). */
+const REACH = 640;
+
+interface Window {
+  ix0: number;
+  iz0: number;
+  ix1: number;
+  iz1: number;
+}
 const GRID = { cell: GRID_CELL, res: GRID_RES, centered: true };
 
 const INDUSTRY_POLLUTION: Record<string, [number, number]> = {
@@ -56,11 +65,11 @@ export class LandValue {
   private green = new Float32Array(N);
 
   /** 0–1 tree cover per cell, averaged over neighbours (a small wood shades its surroundings). */
-  private greenery(trees: Uint16Array | undefined): Float32Array {
+  private greenery(trees: Uint16Array | undefined, w: Window): Float32Array {
     const g = this.green;
     if (!trees) return g.fill(0);
-    for (let iz = 0; iz < GRID_RES; iz++) {
-      for (let ix = 0; ix < GRID_RES; ix++) {
+    for (let iz = w.iz0; iz <= w.iz1; iz++) {
+      for (let ix = w.ix0; ix <= w.ix1; ix++) {
         let sum = 0, n = 0;
         for (let dz = -1; dz <= 1; dz++) {
           const jz = iz + dz;
@@ -154,6 +163,28 @@ export class LandValue {
     }
   }
 
+  /**
+   * Grid cells the update has to visit: everything within reach of the city's
+   * streets (freeways excepted). The rest of the (large) world has nothing on it.
+   */
+  private window(net: RoadNetwork): Window | null {
+    let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+    for (const seg of net.segments.values()) {
+      if (isFreeway(seg.type)) continue;
+      for (const id of [seg.a, seg.b]) {
+        const n = net.nodes.get(id);
+        if (!n) continue;
+        x0 = Math.min(x0, n.x);
+        z0 = Math.min(z0, n.z);
+        x1 = Math.max(x1, n.x);
+        z1 = Math.max(z1, n.z);
+      }
+    }
+    if (x0 > x1) return null;
+    const cell = (v: number) => clamp(Math.floor(v / GRID_CELL), 0, GRID_RES - 1);
+    return { ix0: cell(x0 - REACH), iz0: cell(z0 - REACH), ix1: cell(x1 + REACH), iz1: cell(z1 + REACH) };
+  }
+
   /** Recomputes everything; `blend` = 1 snaps to targets (used on load). */
   update(
     buildings: Buildings,
@@ -164,7 +195,30 @@ export class LandValue {
     transitStops: { x: number; z: number }[] = [],
     mods: LandValueMods = NO_MODS,
   ): void {
+    const it = this.updateSteps(buildings, net, coverage, traffic, blend, transitStops, mods);
+    while (!it.next().done);
+  }
+
+  /** The same work as update(), one pass per next() so it can be spread over ticks. */
+  *updateSteps(
+    buildings: Buildings,
+    net: RoadNetwork,
+    coverage: Coverage,
+    traffic: TrafficModel,
+    blend = 0.3,
+    transitStops: { x: number; z: number }[] = [],
+    mods: LandValueMods = NO_MODS,
+  ): Generator<void, void, void> {
     const tmp = this.tmp;
+    const w = this.window(net);
+    if (!w) {
+      this.version++;
+      return;
+    }
+    // Every pass below visits only the window's cells.
+    const each = (fn: (i: number) => void) => {
+      for (let iz = w.iz0; iz <= w.iz1; iz++) for (let i = iz * GRID_RES + w.ix0, end = iz * GRID_RES + w.ix1; i <= end; i++) fn(i);
+    };
     // ── Pollution ────────────────────────────────────────────────────────
     tmp.fill(0);
     for (const b of buildings.all.values()) {
@@ -179,11 +233,12 @@ export class LandValue {
         if (st && st.pollution > 0) this.splat(tmp, b.cx, b.cz, 180 + st.pollution * 420, st.pollution * 1.2 * (st.kind === 'power' ? mods.pollution(b) : 1));
       }
     }
-    const green = this.greenery(mods.trees);
-    for (let i = 0; i < N; i++) {
+    const green = this.greenery(mods.trees, w);
+    each((i) => {
       const target = 1 - Math.exp(-tmp[i] * 1.4 * (1 - 0.3 * green[i]));
       this.pollution[i] = lerp(this.pollution[i], target, blend);
-    }
+    });
+    yield;
 
     // ── Noise & access from roads ────────────────────────────────────────
     tmp.fill(0);
@@ -206,7 +261,10 @@ export class LandValue {
         if (a > access[i]) access[i] = a;
       }
     }
-    for (let i = 0; i < N; i++) this.noise[i] = lerp(this.noise[i], Math.min(1, tmp[i]) * (1 - 0.3 * green[i]), blend);
+    each((i) => {
+      this.noise[i] = lerp(this.noise[i], Math.min(1, tmp[i]) * (1 - 0.3 * green[i]), blend);
+    });
+    yield;
 
     // ── Commerce proximity and garbage blight ────────────────────────────
     this.commerce.fill(0);
@@ -221,15 +279,16 @@ export class LandValue {
     const transit = this.transitAccess;
     transit.fill(0);
     for (const st of transitStops) this.splat(transit, st.x, st.z, 300, 1);
-    for (let i = 0; i < N; i++) {
+    each((i) => {
       this.commerce[i] = 1 - Math.exp(-this.commerce[i]);
       this.garbage[i] = Math.min(1, this.garbage[i]);
-    }
+    });
+    yield;
 
     // ── Land value ───────────────────────────────────────────────────────
     const g = coverage.grids;
     const scenic = this.scenicField();
-    for (let i = 0; i < N; i++) {
+    each((i) => {
       let v = 0.24 + scenic[i];
       v += 0.24 * mods.parks(i) * g.park[i];
       v += 0.05 * green[i];
@@ -241,7 +300,7 @@ export class LandValue {
       v -= 0.22 * this.noise[i];
       v -= 0.16 * this.garbage[i];
       this.value[i] = lerp(this.value[i], clamp(v, 0, 1), blend);
-    }
+    });
     this.version++;
   }
 

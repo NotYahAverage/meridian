@@ -6,7 +6,7 @@ import { VEHICLE_LENGTH } from '../sim/traffic/Vehicles';
 import { AudioEngine, type Sfx } from '../audio/AudioEngine';
 import { hash01, randomSeed } from '../core/rng';
 import { pointInOBB } from '../core/geom2d';
-import { type IndexedDbStorage, type Settings, loadSettings, platform, saveSettings } from '../platform/Platform';
+import { type IndexedDbStorage, LARGE_CITY_POPULATION, type Settings, loadSettings, platform, saveSettings } from '../platform/Platform';
 import { AssetLibrary } from '../render/assets/AssetLibrary';
 import { CameraController } from '../render/CameraController';
 import { Environment } from '../render/Environment';
@@ -15,11 +15,17 @@ import { Renderer } from '../render/Renderer';
 import { Keybinds } from './Keybinds';
 import { Thumbnails } from '../render/Thumbnails';
 import { QUALITY_PRESETS } from '../render/shared';
+import { BUILDING_LOD_DISTANCE } from '../render/buildings/BuildingRenderer';
+import { VEHICLE_FAR_DIST } from '../render/vehicles/VehicleRenderer';
 import { WorldRenderer } from '../render/WorldRenderer';
 import { lotOBB } from '../sim/buildings/Buildings';
 import { City } from '../sim/City';
+import { generateBaseParallel } from '../sim/world/parallelTerrain';
 import { tickCity } from '../sim/CitySim';
 import { DAY_CYCLE_SECONDS, TICK_SECONDS } from '../sim/constants';
+
+/** Simulation time allowed per rendered frame (ms). */
+const SIM_BUDGET_MS = 10;
 
 /** Classic camera: a Q / E press shorter than this is a tap (switch dock tab), not a hold (turn). */
 const TAP_MS = 220;
@@ -27,7 +33,7 @@ const TAP_MS = 220;
 /** Seconds of play between autosaves. */
 const AUTOSAVE_SECONDS = 180;
 import type { Notice } from '../sim/Notifications';
-import { type SaveData, deserializeCity, migrate, serializeCity } from '../sim/save/Serializer';
+import { type SaveData, deserializeCity, migrate, serializeCity, serializeCityAsync } from '../sim/save/Serializer';
 import { type GameSpeed, SPEED_MULT } from '../sim/types';
 import type { MapPreset } from '../sim/world/Terrain';
 import { BulldozeTool } from '../tools/BulldozeTool';
@@ -261,7 +267,8 @@ export class Game {
     this.ui.hideMenu();
     this.ui.loading.show('Generating terrain…', 0.1);
     await nextFrame();
-    const city = new City({ name: opts.name, seed: opts.seed, preset: opts.preset, unlimitedMoney: opts.unlimited });
+    const terrainBase = await generateBaseParallel(opts.seed, opts.preset);
+    const city = new City({ name: opts.name, seed: opts.seed, preset: opts.preset, unlimitedMoney: opts.unlimited, terrainBase });
     this.ui.loading.progress('Planting forests…', 0.6);
     await nextFrame();
     // A new city owns the land around its start; more can be bought a ring at a time.
@@ -330,7 +337,9 @@ export class Game {
     try {
       this.world?.ghost.clear();
       const thumb = this.renderer.captureThumbnail();
-      await platform.storage.save(this.slotId, serializeCity(city), thumb);
+      // A piece per frame; the clock waits (see frame()) so the save is consistent.
+      const data = await serializeCityAsync(city, yieldFrame);
+      await platform.storage.save(this.slotId, data, thumb);
       // A save resets the autosave clock so the two don't run back to back.
       this.autosaveTimer = AUTOSAVE_SECONDS;
       this.ui.saveStatus.done(true);
@@ -399,7 +408,8 @@ export class Game {
     this.ui.hideMenu();
     this.ui.loading.progress('Rebuilding the city…', 0.5);
     await nextFrame();
-    const city = deserializeCity(data);
+    const terrainBase = await generateBaseParallel(data.city.seed, data.city.preset);
+    const city = deserializeCity(data, { terrainBase });
     this.attachCity(city);
     this.beginPlay();
     const b = [...city.buildings.all.values()];
@@ -539,8 +549,57 @@ export class Game {
     this.cam.lookSpeed = s.lookSpeed ?? 1;
     if (this.city) this.city.live.density = s.trafficDensity;
     if (this.world) this.world.icons.visible = s.showIcons;
+    this.largeMode = null;
+    this.shadowStep = 0;
     this.applyAudio();
     saveSettings(s);
+  }
+
+  /** Whether Large city mode is in effect (null until first worked out). */
+  private largeMode: boolean | null = null;
+  /** How many steps the shadow detail has been lowered (Large city mode only). */
+  private shadowStep = 0;
+  private slowFor = 0;
+  private fastFor = 0;
+
+  get largeCityActive(): boolean {
+    const m = this.settings.largeCityMode ?? 'auto';
+    if (m !== 'auto') return m === 'on';
+    return (this.city?.population.residents ?? 0) >= LARGE_CITY_POPULATION;
+  }
+
+  /**
+   * Large city mode: buildings turn to boxes and cars stop being drawn sooner,
+   * and shadow detail drops a step while the frame rate stays low (and comes
+   * back once it recovers).
+   */
+  private updateLargeCityMode(dt: number): void {
+    const world = this.world;
+    if (!world) return;
+    const on = this.largeCityActive;
+    if (on !== this.largeMode) {
+      this.largeMode = on;
+      world.buildings.lodDistance = on ? 700 : BUILDING_LOD_DISTANCE;
+      world.vehicles.farDist = on ? 1700 : VEHICLE_FAR_DIST;
+      if (!on && this.shadowStep) {
+        this.shadowStep = 0;
+        this.env.setShadowSize(QUALITY_PRESETS[this.settings.quality].shadowSize);
+      }
+    }
+    if (!on || !QUALITY_PRESETS[this.settings.quality].shadows) return;
+    const fps = this.fps;
+    this.slowFor = fps > 0 && fps < 28 ? this.slowFor + dt : 0;
+    this.fastFor = fps > 50 ? this.fastFor + dt : 0;
+    const base = QUALITY_PRESETS[this.settings.quality].shadowSize;
+    if (this.slowFor > 4 && this.shadowStep < 2) {
+      this.shadowStep++;
+      this.slowFor = 0;
+      this.env.setShadowSize(Math.max(1024, base >> this.shadowStep));
+    } else if (this.fastFor > 12 && this.shadowStep > 0) {
+      this.shadowStep--;
+      this.fastFor = 0;
+      this.env.setShadowSize(Math.max(1024, base >> this.shadowStep));
+    }
   }
 
   private applyAudio(): void {
@@ -719,15 +778,18 @@ export class Game {
     if (!city || !world) return;
     const playing = this.state === 'playing';
     const mult = playing ? SPEED_MULT[this.speed] : 0.6;
-    if (playing && mult > 0) {
+    if (playing && mult > 0 && !this.saving) {
       this.tickAcc += dt * mult;
+      // At most ~10 ms of simulation per frame: in a huge city the clock runs a little
+      // slower than asked rather than the frame rate collapsing.
       let n = 0;
-      while (this.tickAcc >= TICK_SECONDS && n < 8) {
+      const t0 = performance.now();
+      while (this.tickAcc >= TICK_SECONDS && n < 8 && (n === 0 || performance.now() - t0 < SIM_BUDGET_MS)) {
         tickCity(city);
         this.tickAcc -= TICK_SECONDS;
         n++;
       }
-      if (n === 8) this.tickAcc = Math.min(this.tickAcc, TICK_SECONDS);
+      if (this.tickAcc >= TICK_SECONDS) this.tickAcc = Math.min(this.tickAcc, TICK_SECONDS);
       if (this.settings.dayNight) this.hour = (this.hour + (dt * mult * 24) / DAY_CYCLE_SECONDS) % 24;
       else this.hour = 13;
       this.autosaveTimer -= dt;
@@ -744,6 +806,7 @@ export class Game {
       this.cam.goal.x = s.x + 160;
       this.cam.goal.z = s.z;
     }
+    this.updateLargeCityMode(dt);
     city.live.update(dt, mult, this.hour);
     city.disasters.enabled = !!this.settings.disasters;
     city.disasters.update(dt * Math.min(mult, 3));
@@ -935,4 +998,15 @@ export class Game {
 
 function nextFrame(): Promise<void> {
   return new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+}
+
+/** Lets a frame draw between pieces of work, without stalling when the window is hidden (no frames come). */
+function yieldFrame(): Promise<void> {
+  return new Promise((r) => {
+    const t = setTimeout(r, 50);
+    requestAnimationFrame(() => {
+      clearTimeout(t);
+      setTimeout(r, 0);
+    });
+  });
 }

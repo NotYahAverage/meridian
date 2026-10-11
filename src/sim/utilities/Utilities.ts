@@ -100,12 +100,26 @@ export class Utilities {
         const prods = producers[kind].get(c) ?? [];
         let supply = 0;
         for (const p of prods) supply += p.out;
-        // Order by distance to the nearest producer.
-        const ranked = list.map((b) => {
-          let best = Infinity;
-          for (const p of prods) best = Math.min(best, (p.x - b.cx) ** 2 + (p.z - b.cz) ** 2);
-          return { b, d: best, use: buildingUse(b, kind) };
+        let total = 0;
+        const uses = list.map((b) => {
+          const u = buildingUse(b, kind);
+          total += u;
+          return u;
         });
+        // Enough for everyone (the usual case): no need to rank by distance.
+        if (prods.length && total <= supply + 1e-9) {
+          for (const b of list) {
+            if (kind === 'power') b.power = true;
+            else if (kind === 'water') b.water = true;
+            else b.sewage = true;
+          }
+          this.totals[kind].consumption += total;
+          this.componentBalance.set(`${kind}:${c}`, supply - total);
+          continue;
+        }
+        // Short: the buildings nearest a producer are served first.
+        const near = nearestProducer(prods);
+        const ranked = list.map((b, i) => ({ b, d: near(b.cx, b.cz), use: uses[i] }));
         ranked.sort((p, q) => p.d - q.d);
         let used = 0;
         let demand = 0;
@@ -126,4 +140,40 @@ export class Utilities {
       }
     }
   }
+}
+
+/** Squared distance to the nearest producer, via a coarse bucket grid (exact). */
+function nearestProducer(prods: { x: number; z: number }[]): (x: number, z: number) => number {
+  if (prods.length < 8) {
+    return (x, z) => {
+      let best = Infinity;
+      for (const p of prods) best = Math.min(best, (p.x - x) ** 2 + (p.z - z) ** 2);
+      return best;
+    };
+  }
+  const CELL = 384;
+  const buckets = new Map<number, { x: number; z: number }[]>();
+  const key = (ix: number, iz: number) => iz * 4096 + ix;
+  for (const p of prods) {
+    const k = key(Math.floor(p.x / CELL), Math.floor(p.z / CELL));
+    const l = buckets.get(k);
+    if (l) l.push(p);
+    else buckets.set(k, [p]);
+  }
+  return (x, z) => {
+    const ix = Math.floor(x / CELL), iz = Math.floor(z / CELL);
+    let best = Infinity;
+    for (let r = 0; r < 64; r++) {
+      // Anything in ring r is at least (r - 1) cells away.
+      if (r > 1 && ((r - 1) * CELL) ** 2 > best) break;
+      for (let dz = -r; dz <= r; dz++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+          const l = buckets.get(key(ix + dx, iz + dz));
+          if (l) for (const p of l) best = Math.min(best, (p.x - x) ** 2 + (p.z - z) ** 2);
+        }
+      }
+    }
+    return best;
+  };
 }

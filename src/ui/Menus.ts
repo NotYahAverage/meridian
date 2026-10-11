@@ -1,7 +1,7 @@
 import { formatInt, formatMoney } from '../core/math';
 import { randomSeed } from '../core/rng';
 import type { Game } from '../game/Game';
-import { DEFAULT_SETTINGS, type SlotInfo, platform } from '../platform/Platform';
+import { DEFAULT_SETTINGS, LARGE_CITY_POPULATION, type SlotInfo, platform } from '../platform/Platform';
 import { MAP_PRESETS, type MapPreset } from '../sim/world/Terrain';
 import { h } from './dom';
 import { icon } from './icons';
@@ -313,6 +313,8 @@ export class SettingsDialog extends Modal {
       chk('Day & night cycle', s.dayNight, (v) => (s.dayNight = v)),
       chk('Problem icons over buildings', s.showIcons, (v) => (s.showIcons = v)),
       rng('Traffic density', s.trafficDensity, (v) => (s.trafficDensity = v), 0.25, 1.5, 0.05),
+      sel('Large city mode', s.largeCityMode ?? 'auto', [['auto', `Automatic (from ${LARGE_CITY_POPULATION.toLocaleString('en-US')} residents)`], ['on', 'On'], ['off', 'Off']], (v) => (s.largeCityMode = v as 'auto' | 'on' | 'off')),
+      h('div', { class: 'hint small' }, 'Draws distant buildings as simple shapes and far-off cars not at all, and lowers shadow detail while the frame rate is low.'),
       h('div', { class: 'section-title' }, 'Audio'),
       rng('Master volume', s.masterVolume, (v) => (s.masterVolume = v)),
       rng('Effects', s.sfxVolume, (v) => (s.sfxVolume = v)),

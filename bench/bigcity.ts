@@ -8,7 +8,7 @@ function fmt(ms: number): string {
   return ms.toFixed(1).padStart(7);
 }
 
-const city = buildBigCity();
+const city = buildBigCity(Number(process.env.SIZE ?? 1600), 100, process.env.REAL !== "1");
 city.economy.money = 1e9;
 const t0 = performance.now();
 let slow = 0;

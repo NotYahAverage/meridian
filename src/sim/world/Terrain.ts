@@ -85,7 +85,11 @@ export class Terrain {
   private lakes: Lake[];
   private flatHeight: number | null;
 
-  constructor(readonly seed: number, readonly preset: MapPreset, opts: { flat?: number } = {}) {
+  /**
+   * `base` is the generated heightmap when it was worked out elsewhere (in
+   * parallel, see generateBaseRows); `shapeOnly` makes just enough for baseAt.
+   */
+  constructor(readonly seed: number, readonly preset: MapPreset, opts: { flat?: number; base?: Float32Array; shapeOnly?: boolean } = {}) {
     this.n1 = new Noise2D(seed ^ 0x1234);
     this.n2 = new Noise2D(seed ^ 0x5678);
     this.n3 = new Noise2D(seed ^ 0x9abc);
@@ -94,16 +98,18 @@ export class Terrain {
     this.lakes = this.makeLakes();
     this.spawn = this.makeSpawn();
 
-    const n = HM_RES * HM_RES;
-    this.base = new Float32Array(n);
+    const n = opts.shapeOnly ? 0 : HM_RES * HM_RES;
+    const given = opts.base && opts.base.length === n && this.flatHeight === null ? opts.base : null;
+    this.base = given ?? new Float32Array(n);
     this.road = new Float32Array(n);
     this.bridge = new Float32Array(n);
     this.height = new Float32Array(n);
-    for (let iz = 0; iz < HM_RES; iz++) {
-      for (let ix = 0; ix < HM_RES; ix++) {
-        this.base[iz * HM_RES + ix] = this.baseAt(ix * HM_STEP, iz * HM_STEP);
-      }
+    if (opts.shapeOnly) {
+      this.shoreDist = new Float32Array(0);
+      this.forest = new Float32Array(0);
+      return;
     }
+    if (!given) this.base.set(generateBaseRows(this, 0, HM_RES));
     this.height.set(this.base);
     this.computeRoadField();
     this.shoreDist = this.computeShoreDistance();
@@ -473,4 +479,13 @@ function boxBlur(src: Float32Array, dst: Float32Array, res: number, r: number, h
       acc += at(k + r + 1) - at(k - r);
     }
   }
+}
+
+/** Heightmap rows [iz0, iz1) of a terrain's generated shape (also run in parallel by workers). */
+export function generateBaseRows(t: Pick<Terrain, 'baseAt'>, iz0: number, iz1: number): Float32Array {
+  const out = new Float32Array((iz1 - iz0) * HM_RES);
+  for (let iz = iz0; iz < iz1; iz++) {
+    for (let ix = 0; ix < HM_RES; ix++) out[(iz - iz0) * HM_RES + ix] = t.baseAt(ix * HM_STEP, iz * HM_STEP);
+  }
+  return out;
 }

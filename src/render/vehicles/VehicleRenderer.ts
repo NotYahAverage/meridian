@@ -6,6 +6,8 @@ import { Pool, createAssetMaterial, writeMatrix } from '../assets/AssetMaterials
 import { globalUniforms } from '../shared';
 
 const HI_DIST = 700;
+/** Beyond this a car is under a pixel or two: it isn't drawn at all. */
+export const VEHICLE_FAR_DIST = 2600;
 
 /** Draws moving vehicles: detailed models nearby, simple boxes far away, headlight pools at night. */
 export class VehicleRenderer {
@@ -54,6 +56,9 @@ export class VehicleRenderer {
     return c;
   }
 
+  /** Draw distance for cars (Large city mode shortens it). */
+  farDist = VEHICLE_FAR_DIST;
+
   update(v: Vehicles, camera: THREE.Camera): void {
     const counts = new Array(this.hi.length).fill(0);
     let lo = 0;
@@ -71,6 +76,7 @@ export class VehicleRenderer {
       const x = v.x[i], y = v.y[i], z = v.z[i];
       const dx = x - cam.x, dy = y - cam.y, dz = z - cam.z;
       const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > this.farDist * this.farDist) continue;
       const model = v.model[i];
       const col = this.color(v.color[i]);
       if (d2 < HI_DIST * HI_DIST) {

@@ -53,8 +53,26 @@ export class Coverage {
   funding: (kind: string) => number = () => 1;
 
   recompute(buildings: Buildings): void {
-    for (const k of COVERAGE_KINDS) this.grids[k].fill(0);
-    this.status.clear();
+    const it = this.recomputeSteps(buildings, Infinity);
+    while (!it.next().done);
+  }
+
+  private spare: Record<CoverageKind, Float32Array> | null = null;
+
+  /**
+   * The same as recompute(), `perStep` services per next(). Big cities spread
+   * the periodic refresh over several ticks: the new grids are built aside and
+   * swapped in at the end, so readers never see a half-finished map.
+   */
+  *recomputeSteps(buildings: Buildings, perStep: number): Generator<void, void, void> {
+    const live = this.grids;
+    const fresh = this.spare ?? ({} as Record<CoverageKind, Float32Array>);
+    for (const k of COVERAGE_KINDS) {
+      if (!fresh[k]) fresh[k] = new Float32Array(GRID_RES * GRID_RES);
+      fresh[k].fill(0);
+    }
+    const status = new Map<number, ServiceStatus>();
+    this.building = { grids: fresh, status };
     const res = this.residents;
     res.fill(0);
     for (const b of buildings.all.values()) {
@@ -63,12 +81,16 @@ export class Coverage {
       const iz = clamp(Math.floor(b.cz / LOAD_CELL), 0, LOAD_RES - 1);
       res[iz * LOAD_RES + ix] += b.residents;
     }
-    for (const b of buildings.all.values()) {
-      if (b.kind !== 'service') continue;
+    let done = 0;
+    const services = [...buildings.all.values()].filter((b) => b.kind === 'service');
+    for (const b of services) {
+      if (++done % perStep === 0) yield;
+      // Removed while this was running.
+      if (!buildings.get(b.id)) continue;
       const st = SERVICE_BY_ID.get(b.typeId);
       if (!st || st.radius <= 0) continue;
       if (!Coverage.isOperational(b)) {
-        this.status.set(b.id, { load: 0, effectiveness: 0 });
+        status.set(b.id, { load: 0, effectiveness: 0 });
         continue;
       }
       const f = this.funding(st.kind);
@@ -77,8 +99,21 @@ export class Coverage {
       const eff = this.effectiveness(b, st, radius, f);
       this.splat(st.kind === 'landmark' ? 'park' : (st.kind as CoverageKind), b.cx, b.cz, radius, eff);
     }
+    // Swap the finished grids in (keeping the same objects readers hold).
+    for (const k of COVERAGE_KINDS) {
+      const old = live[k];
+      live[k] = fresh[k];
+      fresh[k] = old;
+    }
+    this.spare = fresh;
+    this.status.clear();
+    for (const [id, v] of status) this.status.set(id, v);
+    this.building = null;
     this.version++;
   }
+
+  /** Grids and status being filled by the recompute in progress. */
+  private building: { grids: Record<CoverageKind, Float32Array>; status: Map<number, ServiceStatus> } | null = null;
 
   private effectiveness(b: Building, st: ServiceType, radius = st.radius, funding = 1): number {
     let eff = 1;
@@ -107,7 +142,7 @@ export class Coverage {
       const cap = st.capacity * funding;
       eff = load > cap ? cap / load : 1;
     }
-    this.status.set(b.id, { load, effectiveness: eff });
+    (this.building?.status ?? this.status).set(b.id, { load, effectiveness: eff });
     return eff;
   }
 
@@ -128,7 +163,7 @@ export class Coverage {
 
   private splat(kind: CoverageKind, x: number, z: number, radius: number, strength: number): void {
     if (strength <= 0) return;
-    const g = this.grids[kind];
+    const g = (this.building?.grids ?? this.grids)[kind];
     const { r, w } = this.kernel(radius);
     const n = 2 * r + 1;
     // Snap the source to its cell; coverage is evaluated at cell centres.
@@ -148,16 +183,28 @@ export class Coverage {
     }
   }
 
-  /** Average coverage weighted by residents. */
+  private avgCache: { version: number; residents: number; values: Record<CoverageKind, number> } | null = null;
+
+  /** Average coverage weighted by residents (all kinds worked out in one pass, cached until coverage changes). */
   averageFor(kind: CoverageKind, buildings: Buildings): number {
+    let residents = 0;
+    for (const b of buildings.all.values()) residents += b.residents;
+    const c = this.avgCache;
+    if (c && c.version === this.version && c.residents === residents) return c.values[kind];
+    const sums = {} as Record<CoverageKind, number>;
+    for (const k of COVERAGE_KINDS) sums[k] = 0;
     let w = 0;
-    let s = 0;
     for (const b of buildings.all.values()) {
       if (b.residents <= 0) continue;
       w += b.residents;
-      s += b.residents * this.at(kind, b.cx, b.cz);
+      const ix = clamp(Math.floor(b.cx / GRID_CELL), 0, GRID_RES - 1);
+      const iz = clamp(Math.floor(b.cz / GRID_CELL), 0, GRID_RES - 1);
+      const i = iz * GRID_RES + ix;
+      for (const k of COVERAGE_KINDS) sums[k] += b.residents * this.grids[k][i];
     }
-    return w > 0 ? s / w : 0;
+    for (const k of COVERAGE_KINDS) sums[k] = w > 0 ? sums[k] / w : 0;
+    this.avgCache = { version: this.version, residents, values: sums };
+    return sums[kind];
   }
 }
 

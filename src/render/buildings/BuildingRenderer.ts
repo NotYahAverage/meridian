@@ -3,7 +3,8 @@ import type { Building } from '../../sim/buildings/Buildings';
 import type { City } from '../../sim/City';
 import { CHUNKS, CHUNK_SIZE } from '../../sim/constants';
 import { BuildingState, Problem } from '../../sim/types';
-import type { BuildingProp, BuiltGeometry } from './BuildingKit';
+import { type BuildingProp, type BuiltGeometry, GeoBuilder, type Mat } from './BuildingKit';
+import { Rng } from '../../core/rng';
 import { type BuildingUniforms, createBuildingDepthMaterial, createBuildingMaterial } from './BuildingMaterial';
 import { generateBuilding } from './generators';
 
@@ -13,11 +14,79 @@ interface Cached {
   sig: string;
   geo: BuiltGeometry;
   chunk: number;
+  /** Simple box version for distant views (made on demand). */
+  lod?: BuiltGeometry;
 }
 
 interface BChunk {
   mesh: THREE.Mesh | null;
+  /** The same buildings as plain boxes, drawn instead when the chunk is far away. */
+  lod: THREE.Mesh | null;
   ids: Set<number>;
+}
+
+/** Chunks whose centre is further than this from the camera draw their buildings as boxes. */
+export const BUILDING_LOD_DISTANCE = 1100;
+
+/**
+ * A distant stand-in for a building: one box over the parts above the ground,
+ * coloured and patterned like its main walls and roof, so windows still read.
+ */
+export function lodGeometry(b: Pick<Building, 'cx' | 'cz' | 'angle' | 'hw' | 'hd' | 'y'>, geo: BuiltGeometry): BuiltGeometry {
+  const ca = Math.cos(b.angle), sa = Math.sin(b.angle);
+  let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity, wallTop = 0;
+  // Footprint and wall height in lot space, from everything above the ground.
+  for (let i = 0; i < geo.vertexCount; i++) {
+    const y = geo.pos[i * 3 + 1] - b.y;
+    if (y < 1) continue;
+    const dx = geo.pos[i * 3] - b.cx, dz = geo.pos[i * 3 + 2] - b.cz;
+    const lx = dx * ca + dz * sa, lz = -dx * sa + dz * ca;
+    x0 = Math.min(x0, lx);
+    x1 = Math.max(x1, lx);
+    z0 = Math.min(z0, lz);
+    z1 = Math.max(z1, lz);
+    if (Math.abs(geo.nor[i * 3 + 1]) < 40) wallTop = Math.max(wallTop, y);
+  }
+  // The wall and roof finishes covering the most area (trim has many vertices but little surface).
+  const walls = new Map<string, { n: number; i: number }>();
+  const roofs = new Map<string, { n: number; i: number }>();
+  const P = geo.pos;
+  for (let t = 0; t < geo.idx.length; t += 3) {
+    const a = geo.idx[t], b2 = geo.idx[t + 1], c = geo.idx[t + 2];
+    if (P[a * 3 + 1] - b.y < 0.5 && P[b2 * 3 + 1] - b.y < 0.5 && P[c * 3 + 1] - b.y < 0.5) continue;
+    const ux = P[b2 * 3] - P[a * 3], uy = P[b2 * 3 + 1] - P[a * 3 + 1], uz = P[b2 * 3 + 2] - P[a * 3 + 2];
+    const vx = P[c * 3] - P[a * 3], vy = P[c * 3 + 1] - P[a * 3 + 1], vz = P[c * 3 + 2] - P[a * 3 + 2];
+    const area = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2;
+    const ny = geo.nor[a * 3 + 1];
+    const into = Math.abs(ny) < 40 ? walls : ny > 90 ? roofs : null;
+    if (!into) continue;
+    const key = `${geo.col[a * 3]},${geo.col[a * 3 + 1]},${geo.col[a * 3 + 2]},${geo.pat[a * 4]},${geo.pat[a * 4 + 1]},${geo.pat[a * 4 + 2]}`;
+    const e = into.get(key);
+    if (e) e.n += area;
+    else into.set(key, { n: area, i: a });
+  }
+  const g = new GeoBuilder(b.hw * 2, b.hd * 2, new Rng(1));
+  if (x0 > x1) return g.build(b.cx, b.cz, b.angle, b.hd, b.y);
+  const top = Math.max(2, wallTop || geo.height);
+  const matOf = (m: Map<string, { n: number; i: number }>): Mat | null => {
+    let best: { n: number; i: number } | null = null;
+    for (const e of m.values()) if (!best || e.n > best.n) best = e;
+    if (!best) return null;
+    const i = best.i;
+    return {
+      color: [geo.col[i * 3] / 255, geo.col[i * 3 + 1] / 255, geo.col[i * 3 + 2] / 255],
+      pattern: geo.pat[i * 4],
+      fh: geo.pat[i * 4 + 1] / 10,
+      bay: geo.pat[i * 4 + 2] / 10,
+      seed: geo.pat[i * 4 + 3],
+    };
+  };
+  const wall = matOf(walls) ?? matOf(roofs);
+  if (!wall) return g.build(b.cx, b.cz, b.angle, b.hd, b.y);
+  const roof = matOf(roofs) ?? wall;
+  // GeoBuilder works in lot space: x across, z from the front (0) to the back (2·hd).
+  g.box(x0, z0 + b.hd, x1, z1 + b.hd, 0, top, wall, roof);
+  return g.build(b.cx, b.cz, b.angle, b.hd, b.y);
 }
 
 export function buildingChunk(b: { cx: number; cz: number }): number {
@@ -117,7 +186,7 @@ export class BuildingRenderer {
     };
     this.material = createBuildingMaterial(this.uniforms);
     this.depthMaterial = createBuildingDepthMaterial(this.uniforms);
-    for (let i = 0; i < CHUNKS * CHUNKS; i++) this.chunks.push({ mesh: null, ids: new Set() });
+    for (let i = 0; i < CHUNKS * CHUNKS; i++) this.chunks.push({ mesh: null, lod: null, ids: new Set() });
   }
 
   /** Full rebuild from the city (after load / new game). */
@@ -194,25 +263,59 @@ export class BuildingRenderer {
 
   private rebuildChunk(ch: number): void {
     const c = this.chunks[ch];
-    if (c.mesh) {
-      this.group.remove(c.mesh);
-      c.mesh.geometry.dispose();
-      c.mesh = null;
+    for (const m of [c.mesh, c.lod]) {
+      if (!m) continue;
+      this.group.remove(m);
+      m.geometry.dispose();
     }
+    c.mesh = c.lod = null;
     const parts: { geo: BuiltGeometry; slot: number; baseY: number }[] = [];
+    const boxes: { geo: BuiltGeometry; slot: number; baseY: number }[] = [];
     for (const id of c.ids) {
       const b = this.city.buildings.get(id);
       if (!b) continue;
-      parts.push({ geo: this.geometryFor(b, ch), slot: b.slot, baseY: b.y });
+      const geo = this.geometryFor(b, ch);
+      parts.push({ geo, slot: b.slot, baseY: b.y });
+      const cached = this.cache.get(id)!;
+      cached.lod ??= lodGeometry(b, geo);
+      boxes.push({ geo: cached.lod, slot: b.slot, baseY: b.y });
     }
     if (!parts.length) return;
-    const mesh = new THREE.Mesh(mergeBuilt(parts), this.material);
-    mesh.customDepthMaterial = this.depthMaterial;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.matrixAutoUpdate = false;
-    c.mesh = mesh;
-    this.group.add(mesh);
+    const make = (geo: THREE.BufferGeometry) => {
+      const mesh = new THREE.Mesh(geo, this.material);
+      mesh.customDepthMaterial = this.depthMaterial;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.matrixAutoUpdate = false;
+      this.group.add(mesh);
+      return mesh;
+    };
+    c.mesh = make(mergeBuilt(parts));
+    c.lod = make(mergeBuilt(boxes));
+    this.applyLod(ch);
+  }
+
+  private camX = 0;
+  private camY = 0;
+  private camZ = 0;
+  /** Detail switch distance (Large city mode brings it closer). */
+  lodDistance = BUILDING_LOD_DISTANCE;
+
+  private applyLod(ch: number): void {
+    const c = this.chunks[ch];
+    if (!c.mesh || !c.lod) return;
+    const x = ((ch % CHUNKS) + 0.5) * CHUNK_SIZE, z = (Math.floor(ch / CHUNKS) + 0.5) * CHUNK_SIZE;
+    const far = Math.hypot(x - this.camX, this.camY, z - this.camZ) > this.lodDistance;
+    c.mesh.visible = !far;
+    c.lod.visible = far;
+  }
+
+  /** Picks full detail or boxes for every chunk from where the camera is. */
+  updateLod(camera: THREE.Camera): void {
+    this.camX = camera.position.x;
+    this.camY = camera.position.y;
+    this.camZ = camera.position.z;
+    for (let ch = 0; ch < this.chunks.length; ch++) this.applyLod(ch);
   }
 
   private rebuildProps(ch: number): void {
@@ -302,7 +405,10 @@ export class BuildingRenderer {
   }
 
   dispose(): void {
-    for (const c of this.chunks) c.mesh?.geometry.dispose();
+    for (const c of this.chunks) {
+      c.mesh?.geometry.dispose();
+      c.lod?.geometry.dispose();
+    }
     this.material.dispose();
     this.stateTex.dispose();
   }

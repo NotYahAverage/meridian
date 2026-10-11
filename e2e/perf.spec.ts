@@ -24,6 +24,7 @@ test('large city frame times', async ({ page }) => {
     g.__cpu = [];
     g.frame = (dt) => { const s = performance.now(); orig(dt); g.__cpu.push(performance.now() - s); };
     g.setSpeed(3);
+    if (${JSON.stringify(process.env.PERF_EVAL ?? '')}) eval(${JSON.stringify(process.env.PERF_EVAL ?? '')});
   `);
   const views: [string, string][] = [
     ['overview', 'distance: 1500, pitch: 0.95, yaw: 0.45'],

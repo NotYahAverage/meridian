@@ -131,6 +131,8 @@ export interface Settings {
   lookSpeed?: number;
   /** Mouse layout: free cam (right-drag looks) or the classic city-builder one (right-drag pans). */
   cameraStyle?: 'free' | 'classic';
+  /** Cheaper drawing for very big cities: automatic (from LARGE_CITY_POPULATION), always or never. */
+  largeCityMode?: 'auto' | 'on' | 'off';
   /** Set once Classic became the default camera (older settings are moved over to it). */
   cameraDefaultV2?: boolean;
   /** Player keybinding overrides (action id → bindings). */
@@ -153,6 +155,9 @@ export interface Settings {
   /** Interface scale: 0 = automatic (follows screen height), otherwise a factor. */
   uiScale: number;
 }
+
+/** Large city mode switches itself on at this population (when set to automatic). */
+export const LARGE_CITY_POPULATION = 40_000;
 
 export const DEFAULT_SETTINGS: Settings = {
   quality: 'high',

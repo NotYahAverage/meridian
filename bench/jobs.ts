@@ -1,0 +1,30 @@
+// Times each periodic simulation job on a grown big city.
+import { tickCity, landValueMods, refreshStats, demandInputs, projectEconomy } from '../src/sim/CitySim';
+import { buildBigCity } from './cityBuilder';
+const city = buildBigCity(Number(process.env.SIZE ?? 3600), 100, true);
+for (let i = 0; i < 24 * Number(process.env.DAYS ?? 100); i++) tickCity(city);
+const time = (name: string, fn: () => void) => {
+  fn();
+  const t = performance.now();
+  for (let k = 0; k < 5; k++) fn();
+  console.log(`${name.padEnd(22)} ${((performance.now() - t) / 5).toFixed(1)} ms`);
+};
+console.log(`pop ${city.population.residents} bldg ${city.buildings.count}`);
+time('coverage', () => city.coverage.recompute(city.buildings));
+time('landValue', () => city.landValue.update(city.buildings, city.roads, city.coverage, city.traffic, 0.3, city.transit.servedStops(), landValueMods(city)));
+time('ridership', () => city.transit.updateRidership());
+time('trips.refresh', () => city.trips.refresh());
+time('buildDemand', () => city.trips.buildDemand());
+time('setDemand', () => city.traffic.setDemand(city.trips.buildDemand()));
+time('utilities', () => city.recomputeUtilities());
+time('refreshStats', () => refreshStats(city));
+time('demandInputs', () => demandInputs(city));
+time('projectEconomy', () => projectEconomy(city));
+time('traffic.step(1/40)', () => city.traffic.step(1));
+const tm = city.traffic as unknown as { queue: { dests: unknown[] }[] };
+city.traffic.setDemand(city.trips.buildDemand());
+console.log('origin groups', tm.queue.length, 'dests', tm.queue.reduce((a, g) => a + g.dests.length, 0), 'nodes', city.roads.nodes.size);
+const t = performance.now();
+const paths = (city as unknown as { paths: { tree: (p: unknown) => unknown } }).paths;
+for (let k = 0; k < 200; k++) paths.tree({ segId: [...city.roads.segments.keys()][k * 7], s: 1 });
+console.log('tree ms', ((performance.now() - t) / 200).toFixed(3));

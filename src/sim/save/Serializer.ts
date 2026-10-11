@@ -119,6 +119,27 @@ export interface SaveData {
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
 
 export function serializeCity(city: City): SaveData {
+  const it = serializeSteps(city);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+
+/**
+ * The same as serializeCity, in pieces: the game saves a big city a piece per
+ * frame (with the clock paused) so the screen doesn't freeze.
+ */
+export async function serializeCityAsync(city: City, between: () => Promise<void>): Promise<SaveData> {
+  const it = serializeSteps(city);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+    await between();
+  }
+}
+
+function* serializeSteps(city: City): Generator<void, SaveData, void> {
   const nodes: SaveData['roads']['nodes'] = [];
   for (const n of city.roads.nodes.values()) nodes.push([n.id, r3(n.x), r3(n.z), n.outside ? 1 : 0]);
   const segments: SaveData['roads']['segments'] = [];
@@ -134,9 +155,30 @@ export function serializeCity(city: City): SaveData {
       b.unhappyDays, b.fireHours, b.rezoneDays, b.district, r3(b.efficiency), r3(b.stock),
     ]);
   }
+  yield;
   const pop = city.population;
   const n = pop.count;
   const e = city.economy;
+  const population = {
+    count: n,
+    home: encodeTyped(pop.home, n),
+    size: encodeTyped(pop.size, n),
+    workers: encodeTyped(pop.workers, n),
+    educated: encodeTyped(pop.educated, n),
+    job: encodeTyped(pop.job, n * 2),
+    wealth: encodeTyped(pop.wealth, n),
+    alive: encodeTyped(pop.alive, n),
+    happiness: encodeTyped(pop.happiness, n),
+    moveInTick: encodeTyped(pop.moveInTick, n),
+  };
+  yield;
+  const zones = rleEncode(city.zones.zone);
+  const landValue = { value: encodeTyped(city.landValue.value), pollution: encodeTyped(city.landValue.pollution) };
+  const districtGrid = rleEncode(city.districts.grid);
+  yield;
+  const terrainEdits = serializeTerrainEdits(city.terrain);
+  const nature = serializeNature(city);
+  yield;
   return {
     format: SAVE_FORMAT,
     version: SAVE_VERSION,
@@ -164,21 +206,10 @@ export function serializeCity(city: City): SaveData {
       districtRng: city.districts.rngState,
     },
     roads: { nodes, segments, nextNodeId: city.roads.nextNodeId, nextSegId: city.roads.nextSegId, roundabouts: [...city.roads.roundabouts.values()].map((r) => [r.id, r3(r.x), r3(r.z), r.r] as [number, number, number, number]) },
-    zones: rleEncode(city.zones.zone),
+    zones,
     buildings,
     nextBuildingId: city.buildings.nextId,
-    population: {
-      count: n,
-      home: encodeTyped(pop.home, n),
-      size: encodeTyped(pop.size, n),
-      workers: encodeTyped(pop.workers, n),
-      educated: encodeTyped(pop.educated, n),
-      job: encodeTyped(pop.job, n * 2),
-      wealth: encodeTyped(pop.wealth, n),
-      alive: encodeTyped(pop.alive, n),
-      happiness: encodeTyped(pop.happiness, n),
-      moveInTick: encodeTyped(pop.moveInTick, n),
-    },
+    population,
     economy: {
       money: e.money,
       taxes: { ...e.taxes },
@@ -192,17 +223,17 @@ export function serializeCity(city: City): SaveData {
     },
     demand: { ...city.demand.value },
     attraction: city.demand.attraction,
-    landValue: { value: encodeTyped(city.landValue.value), pollution: encodeTyped(city.landValue.pollution) },
-    districts: { grid: rleEncode(city.districts.grid), list: [...city.districts.list.values()].map((d) => ({ ...d, color: [...d.color] as [number, number, number] })), nextId: city.districts.nextId },
+    landValue,
+    districts: { grid: districtGrid, list: [...city.districts.list.values()].map((d) => ({ ...d, color: [...d.color] as [number, number, number] })), nextId: city.districts.nextId },
     history: city.history.map((h) => ({ ...h, demand: [...h.demand] as [number, number, number, number] })),
     traffic: [...city.traffic.volume.entries()].map(([k, v]) => [k, Math.round(v * 10) / 10]),
     transit: city.transit.serialize(),
     weather: city.weather.serialize(),
     policies: city.policies.serialize(),
     districtPolicies: city.policies.serializeLocal(),
-    terrainEdits: serializeTerrainEdits(city.terrain),
+    terrainEdits,
     land: city.land.serialize(),
-    nature: serializeNature(city),
+    nature,
     achievements: city.achievements.serialize(),
     scenario: city.scenario ? { ...city.scenario } : null,
     news: city.news.serialize(),
@@ -239,10 +270,10 @@ export function migrate(data: SaveData): SaveData {
   return d;
 }
 
-export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number } = {}): City {
+export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; terrainBase?: Float32Array } = {}): City {
   const data = migrate(raw);
   const c = data.city;
-  const city = new City({ name: c.name, seed: c.seed, preset: c.preset, unlimitedMoney: c.unlimited, empty: true, flatTerrain: opts.flatTerrain });
+  const city = new City({ name: c.name, seed: c.seed, preset: c.preset, unlimitedMoney: c.unlimited, empty: true, flatTerrain: opts.flatTerrain, terrainBase: opts.terrainBase });
   city.clock.tick = c.tick;
   city.peakPopulation = c.peak;
   city.milestoneIndex = c.milestone;

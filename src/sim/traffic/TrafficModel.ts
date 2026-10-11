@@ -12,7 +12,12 @@ export interface TripDemand {
 interface OriginGroup {
   from: RoutePoint;
   dests: { to: RoutePoint; trips: number }[];
+  /** Streets merged into this group and the trips leaving each. */
+  local?: { segId: number; trips: number }[];
 }
+
+/** Shortest-path trees per assignment cycle before nearby origins are merged. */
+const MAX_TREES = 1000;
 
 /**
  * Aggregated (macroscopic) traffic assignment. Origin–destination demand is
@@ -22,7 +27,8 @@ interface OriginGroup {
 export class TrafficModel {
   /** Peak-hour volume (vehicles/hour, both directions) per segment. */
   readonly volume = new Map<number, number>();
-  private next = new Map<number, number>();
+  /** Volumes being accumulated this cycle, by segment id. */
+  private next = new Float64Array(256);
   private queue: OriginGroup[] = [];
   private cursor = 0;
   cycles = 0;
@@ -57,10 +63,11 @@ export class TrafficModel {
 
   /** Replaces the demand set; a new assignment cycle starts. */
   setDemand(trips: TripDemand[]): void {
-    const groups = new Map<string, OriginGroup>();
+    const groups = new Map<number, OriginGroup>();
     for (const t of trips) {
       if (t.trips <= 0) continue;
-      const key = `${t.from.segId}:${Math.round(t.from.s / 40)}`;
+      // Trips leaving the same street share one shortest-path tree.
+      const key = t.from.segId;
       let g = groups.get(key);
       if (!g) {
         g = { from: t.from, dests: [] };
@@ -68,18 +75,67 @@ export class TrafficModel {
       }
       g.dests.push({ to: t.to, trips: t.trips });
     }
-    this.queue = [...groups.values()];
+    this.queue = this.cluster([...groups.values()]);
     this.cursor = 0;
-    this.next.clear();
+    this.next.fill(0);
+    // Route this cycle with the congestion the last one found.
+    this.paths.refreshCosts();
     this.accTime = this.accTrips = this.accUnreach = this.accTotal = 0;
+  }
+
+  /**
+   * Huge cities: streets close together share one shortest-path tree, so a
+   * cycle needs at most about MAX_TREES of them. Each street still carries its
+   * own outgoing trips (`local`), which the cluster's tree would otherwise miss.
+   */
+  private cluster(groups: OriginGroup[]): OriginGroup[] {
+    if (groups.length <= MAX_TREES) return groups;
+    const pos = (g: OriginGroup) => {
+      const seg = this.net.segments.get(g.from.segId);
+      return seg ? { x: seg.cx, z: seg.cz } : { x: 0, z: 0 };
+    };
+    // Cell size so that the occupied cells come to about MAX_TREES.
+    let cell = 96;
+    let cells = new Map<number, OriginGroup[]>();
+    for (let tries = 0; tries < 8; tries++) {
+      cells = new Map();
+      for (const g of groups) {
+        const p = pos(g);
+        const k = Math.floor(p.z / cell) * 4096 + Math.floor(p.x / cell);
+        const list = cells.get(k);
+        if (list) list.push(g);
+        else cells.set(k, [g]);
+      }
+      if (cells.size <= MAX_TREES) break;
+      cell *= 1.4;
+    }
+    const out: OriginGroup[] = [];
+    for (const list of cells.values()) {
+      const head = list[0];
+      const merged: OriginGroup = { from: head.from, dests: [], local: [] };
+      for (const g of list) {
+        let trips = 0;
+        for (const d of g.dests) {
+          merged.dests.push(d);
+          trips += d.trips;
+        }
+        if (g !== head) merged.local!.push({ segId: g.from.segId, trips });
+      }
+      out.push(merged);
+    }
+    return out;
   }
 
   get pending(): number {
     return this.queue.length - this.cursor;
   }
 
-  /** Processes up to `budget` origins. Returns true when a cycle completed. */
+  /**
+   * Processes at least `budget` origins (more in big cities, so a cycle always
+   * finishes within about 40 ticks). Returns true when a cycle completed.
+   */
   step(budget: number): boolean {
+    budget = Math.max(budget, Math.ceil(this.queue.length / 40));
     if (this.queue.length === 0) {
       if (this.volume.size) {
         this.volume.clear();
@@ -105,10 +161,16 @@ export class TrafficModel {
   }
 
   private add(segId: number, v: number): void {
-    this.next.set(segId, (this.next.get(segId) ?? 0) + v);
+    if (segId >= this.next.length) {
+      const grown = new Float64Array(Math.max(segId + 1, this.next.length * 2));
+      grown.set(this.next);
+      this.next = grown;
+    }
+    this.next[segId] += v;
   }
 
   private assignGroup(g: OriginGroup): void {
+    if (g.local) for (const l of g.local) this.add(l.segId, l.trips);
     const tree = this.paths.tree(g.from);
     if (!tree) {
       for (const d of g.dests) {
@@ -157,8 +219,9 @@ export class TrafficModel {
 
   private finish(): void {
     this.volume.clear();
-    for (const [k, v] of this.next) this.volume.set(k, v);
-    this.next.clear();
+    const next = this.next;
+    for (let k = 0; k < next.length; k++) if (next[k] > 0) this.volume.set(k, next[k]);
+    next.fill(0);
     this.totalTrips = this.accTotal;
     this.routedTrips = this.accTrips;
     this.unreachableTrips = this.accUnreach;
@@ -171,12 +234,12 @@ export class TrafficModel {
   /** Drops volume for removed segments. */
   forget(segId: number): void {
     this.volume.delete(segId);
-    this.next.delete(segId);
+    if (segId < this.next.length) this.next[segId] = 0;
   }
 
   clear(): void {
     this.volume.clear();
-    this.next.clear();
+    this.next.fill(0);
     this.queue = [];
     this.cursor = 0;
   }
