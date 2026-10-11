@@ -319,17 +319,18 @@ export class City {
     this.paths.invalidate();
   }
 
-  /** Buys a parcel next to owned land. */
-  buyLand(i: number): { ok: boolean; error?: string; cost?: number } {
+  /** Buys the next ring of land around the city. */
+  buyLandRing(): { ok: boolean; error?: string; cost?: number } {
     const land = this.land;
-    if (i < 0 || i >= land.owned.length || land.owned[i]) return { ok: false, error: 'Already owned' };
-    if (!land.isBuyable(i)) return { ok: false, error: 'You can only buy land next to land you own' };
+    if (!land.nextRing) return { ok: false, error: 'The city already owns the whole map' };
     const cost = land.price;
     if (!this.economy.spend(cost, 'Construction')) return { ok: false, error: 'Not enough money' };
-    land.grant(i);
     // Streets along the old border can now be zoned on the new side.
-    const c = Land.center(i), h = LAND_TILE / 2 + 60;
-    this.pendingRects.push({ minX: c.x - h, minZ: c.z - h, maxX: c.x + h, maxZ: c.z + h });
+    const h = LAND_TILE / 2 + 60;
+    for (const i of land.grantRing()) {
+      const c = Land.center(i);
+      this.pendingRects.push({ minX: c.x - h, minZ: c.z - h, maxX: c.x + h, maxZ: c.z + h });
+    }
     this.processRoadChanges();
     return { ok: true, cost };
   }

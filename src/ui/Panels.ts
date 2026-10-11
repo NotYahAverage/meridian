@@ -13,7 +13,7 @@ import { projectEconomy, tourismIncome } from '../sim/CitySim';
 import { isLocalPolicy, LOCAL_POLICIES, POLICIES, POLICY_BY_ID } from '../sim/policies/Policies';
 import { BUS, lineProblemText } from '../sim/transit/Transit';
 import { type Series, drawChart } from './charts';
-import { Land } from '../sim/world/Land';
+import { LAND_PRICE_GROWTH, Land } from '../sim/world/Land';
 import { h, setText } from './dom';
 import { icon } from './icons';
 
@@ -757,7 +757,6 @@ export class PoliciesPanel extends Panel {
 /** Map of the city's land parcels; adjacent ones can be bought (expensively). */
 export class LandPanel extends Panel {
   readonly id = 'land';
-  private selected = -1;
 
   constructor(game: Game) {
     super(game, 'Land', 'compass');
@@ -773,10 +772,12 @@ export class LandPanel extends Panel {
       b.append(h('div', { class: 'hint' }, 'Your city owns the whole map.'));
       return;
     }
+    const ring = land.ringParcels;
+    const afford = city.economy.canAfford(land.price);
     b.append(
-      h('div', { class: 'hint' }, 'Roads, zoning and buildings only go on land the city owns. Buy a neighbouring parcel to expand; each one costs more than the last.'),
+      h('div', { class: 'hint' }, 'Roads, zoning and buildings only go on land the city owns. Expand outwards by buying the whole ring of land around your city; each ring costs more than the last.'),
       row('Owned', `${land.ownedCount} of ${land.owned.length} parcels`),
-      row('Next parcel', formatMoney(land.price)),
+      row('Next ring', `${ring.length} parcels · ${formatMoney(land.price)}`),
     );
     const grid = h('div', { class: 'land-grid', role: 'grid', 'aria-label': 'Land parcels' });
     const cam = this.game.cam.goal;
@@ -784,47 +785,39 @@ export class LandPanel extends Panel {
     for (let i = 0; i < land.owned.length; i++) {
       const owned = land.owned[i] === 1;
       const buyable = land.isBuyable(i);
-      const cls = `land-cell${owned ? ' owned' : buyable ? ' buyable' : ''}${i === this.selected ? ' selected' : ''}${i === here ? ' here' : ''}`;
+      const cls = `land-cell${owned ? ' owned' : buyable ? ' buyable' : ''}${i === here ? ' here' : ''}`;
       grid.append(h('button', {
         class: cls,
         'data-tile': String(i),
-        'aria-label': owned ? 'Owned parcel' : buyable ? `Parcel for sale, ${formatMoney(land.price)}` : 'Parcel (buy a neighbour first)',
-        'data-tip': owned ? 'Owned' : buyable ? `For sale · ${formatMoney(land.price)}` : 'Buy a neighbouring parcel first',
+        'aria-label': owned ? 'Owned parcel' : buyable ? 'Parcel in the next ring' : 'Parcel in a later ring',
+        'data-tip': owned ? 'Owned' : buyable ? `Next ring · ${formatMoney(land.price)}` : 'Buy the rings inside it first',
         onclick: () => {
-          this.selected = i;
           const c = Land.center(i);
           this.game.flyTo(c.x, c.z, 1400);
           this.render();
         },
       }));
     }
-    b.append(grid, h('div', { class: 'land-legend muted small' }, h('span', { class: 'land-key owned' }), 'Owned', h('span', { class: 'land-key buyable' }), 'For sale', h('span', { class: 'land-key' }), 'Not yet available'));
-    const i = this.selected;
-    if (i >= 0 && !land.owned[i]) {
-      const can = land.isBuyable(i);
-      const afford = city.economy.canAfford(land.price);
-      b.append(
-        h('div', { class: 'land-buy' },
-          h('div', null, can ? `Buy this parcel for ${formatMoney(land.price)}?` : 'Buy a parcel next to it first.'),
-          can
-            ? h('button', {
-                class: 'btn primary',
-                disabled: afford ? null : '',
-                onclick: async () => {
-                  if (!(await this.game.ui.confirm('Buy land', `Buy this parcel for ${formatMoney(land.price)}? Each parcel after it costs 50% more.`, 'Buy land'))) return;
-                  const res = city.buyLand(i);
-                  if (!res.ok) this.game.toastError(res.error ?? 'Could not buy land');
-                  else {
-                    this.game.play('good');
-                    this.game.flashMoney(-(res.cost ?? 0));
-                    this.selected = -1;
-                  }
-                  this.render();
-                },
-              }, icon('compass', 15), afford ? 'Buy land' : 'Not enough money')
-            : null,
-        ),
-      );
-    }
+    b.append(
+      grid,
+      h('div', { class: 'land-legend muted small' }, h('span', { class: 'land-key owned' }), 'Owned', h('span', { class: 'land-key buyable' }), 'Next ring', h('span', { class: 'land-key' }), 'Later rings'),
+      h('div', { class: 'land-buy' },
+        h('div', null, `Buy the next ring of ${ring.length} parcels for ${formatMoney(land.price)}?`),
+        h('button', {
+          class: 'btn primary',
+          disabled: afford ? null : '',
+          onclick: async () => {
+            if (!(await this.game.ui.confirm('Buy land', `Buy the next ring of land (${ring.length} parcels) for ${formatMoney(land.price)}? The ring after it costs ${LAND_PRICE_GROWTH}× as much.`, 'Buy land'))) return;
+            const res = city.buyLandRing();
+            if (!res.ok) this.game.toastError(res.error ?? 'Could not buy land');
+            else {
+              this.game.play('good');
+              this.game.flashMoney(-(res.cost ?? 0));
+            }
+            this.render();
+          },
+        }, icon('compass', 15), afford ? 'Buy ring' : 'Not enough money'),
+      ),
+    );
   }
 }
