@@ -15,8 +15,6 @@ import { Renderer } from '../render/Renderer';
 import { Keybinds } from './Keybinds';
 import { Thumbnails } from '../render/Thumbnails';
 import { QUALITY_PRESETS } from '../render/shared';
-import { BUILDING_LOD_DISTANCE } from '../render/buildings/BuildingRenderer';
-import { VEHICLE_FAR_DIST } from '../render/vehicles/VehicleRenderer';
 import { WorldRenderer } from '../render/WorldRenderer';
 import { lotOBB } from '../sim/buildings/Buildings';
 import { City } from '../sim/City';
@@ -569,9 +567,9 @@ export class Game {
   }
 
   /**
-   * Large city mode: buildings turn to boxes and cars stop being drawn sooner,
-   * and shadow detail drops a step while the frame rate stays low (and comes
-   * back once it recovers).
+   * Large city mode: shadow detail drops a step while the frame rate stays low
+   * (and comes back once it recovers). Distance detail is the same for every
+   * city: full inside the detail square around the camera, simplified beyond.
    */
   private updateLargeCityMode(dt: number): void {
     const world = this.world;
@@ -579,8 +577,6 @@ export class Game {
     const on = this.largeCityActive;
     if (on !== this.largeMode) {
       this.largeMode = on;
-      world.buildings.lodDistance = on ? 700 : BUILDING_LOD_DISTANCE;
-      world.vehicles.farDist = on ? 1700 : VEHICLE_FAR_DIST;
       if (!on && this.shadowStep) {
         this.shadowStep = 0;
         this.env.setShadowSize(QUALITY_PRESETS[this.settings.quality].shadowSize);

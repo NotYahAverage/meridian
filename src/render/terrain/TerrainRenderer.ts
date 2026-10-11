@@ -1,3 +1,4 @@
+import { beyondDetail } from '../shared';
 import * as THREE from 'three';
 import { CHUNKS, CHUNK_SIZE, HM_RES, HM_STEP, WORLD_SIZE, ZONE_RES } from '../../sim/constants';
 import type { Rect, Terrain } from '../../sim/world/Terrain';
@@ -8,7 +9,7 @@ const CELLS = CHUNK_SIZE / HM_STEP; // 64 quads per chunk side
 const VPS = CELLS + 1; // vertices per side
 const SKIRT = 8;
 const LOD_STEP = 4;
-/** Coarsest level: far away, or land the city doesn't own yet. */
+/** Coarsest level: beyond the full-detail square around the camera's focus. */
 const FAR_STEP = 16;
 
 interface Chunk {
@@ -64,10 +65,7 @@ export class TerrainRenderer {
   private landVersion = -1;
 
   /** Shades land the city doesn't own (and marks what it can buy next). */
-  private land: Land | null = null;
-
   syncLand(land: Land): void {
-    this.land = land.allOwned ? null : land;
     if (land.version === this.landVersion) return;
     this.landVersion = land.version;
     for (let i = 0; i < LAND_TILES * LAND_TILES; i++) {
@@ -232,16 +230,15 @@ export class TerrainRenderer {
   }
 
   /** Chooses LOD per chunk from camera distance. */
-  updateLOD(camPos: THREE.Vector3): void {
+  updateLOD(camPos: THREE.Vector3, focus: { x: number; z: number }): void {
     for (const ch of this.chunks) {
       const cx = (ch.cx + 0.5) * CHUNK_SIZE;
       const cz = (ch.cz + 0.5) * CHUNK_SIZE;
       const d = Math.hypot(camPos.x - cx, camPos.z - cz, camPos.y * 0.6);
       // Hysteresis avoids flicker at band edges.
       const h = ch.lod === 0 ? 40 : -40;
-      let want = d < 620 + h ? 0 : d < 1500 + h ? 1 : d < 3400 + h ? 2 : 3;
-      // Land that isn't the city's yet is only scenery: coarse unless the camera is close.
-      if (want === 2 && this.land && !this.land.ownsPoint(cx, cz)) want = 3;
+      // Usual detail inside the detail square around the camera's focus; coarse beyond it.
+      const want = beyondDetail(cx, cz, CHUNK_SIZE / 2, focus.x, focus.z) ? 3 : d < 620 + h ? 0 : d < 1500 + h ? 1 : 2;
       if (want !== ch.lod) {
         ch.lod = want;
         ch.geo.setIndex(ch.levels[want]);

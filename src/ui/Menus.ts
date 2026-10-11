@@ -314,7 +314,7 @@ export class SettingsDialog extends Modal {
       chk('Problem icons over buildings', s.showIcons, (v) => (s.showIcons = v)),
       rng('Traffic density', s.trafficDensity, (v) => (s.trafficDensity = v), 0.25, 1.5, 0.05),
       sel('Large city mode', s.largeCityMode ?? 'auto', [['auto', `Automatic (from ${LARGE_CITY_POPULATION.toLocaleString('en-US')} residents)`], ['on', 'On'], ['off', 'Off']], (v) => (s.largeCityMode = v as 'auto' | 'on' | 'off')),
-      h('div', { class: 'hint small' }, 'Draws distant buildings as simple shapes and far-off cars not at all, and lowers shadow detail while the frame rate is low.'),
+      h('div', { class: 'hint small' }, 'Lowers shadow detail while the frame rate is low. (Everything within about 1.5 km of where you look is always drawn in full; beyond that buildings are simple shapes and cars are hidden.)'),
       h('div', { class: 'section-title' }, 'Audio'),
       rng('Master volume', s.masterVolume, (v) => (s.masterVolume = v)),
       rng('Effects', s.sfxVolume, (v) => (s.sfxVolume = v)),

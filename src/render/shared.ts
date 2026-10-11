@@ -91,3 +91,15 @@ export const QUALITY_PRESETS: Record<'low' | 'medium' | 'high', QualitySettings>
   medium: { shadows: true, shadowSize: 2048, bloom: true, pixelRatio: 1, antialias: true },
   high: { shadows: true, shadowSize: 4096, bloom: true, pixelRatio: 2, antialias: true },
 };
+
+/**
+ * Everything within this distance (east–west and north–south) of the point the
+ * camera looks at is drawn in full detail: a square the size of the original
+ * map. Beyond it, buildings become boxes, cars aren't drawn and terrain is coarse.
+ */
+export const DETAIL_HALF = 1536;
+
+/** True when a square of half-size `half` centred at (x, z) lies wholly outside the detail square around (fx, fz). */
+export function beyondDetail(x: number, z: number, half: number, fx: number, fz: number): boolean {
+  return Math.max(Math.abs(x - fx), Math.abs(z - fz)) - half > DETAIL_HALF;
+}

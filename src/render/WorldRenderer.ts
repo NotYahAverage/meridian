@@ -133,14 +133,14 @@ export class WorldRenderer {
     this.buildings.sync();
     this.buildings.rebuild(6);
     this.buildings.updateState(dt);
-    this.buildings.updateLod(camera);
+    this.buildings.updateLod(focus);
     this.overlays.update(dt);
-    this.terrain.updateLOD(camera.position);
+    this.terrain.updateLOD(camera.position, focus);
     this.props.update(camera, dt);
     city.vehicles.lodX = focus.x;
     city.vehicles.lodZ = focus.z;
     city.vehicles.lodRadius = Math.max(600, camDist * 1.2);
-    this.vehicles.update(city.vehicles, camera);
+    this.vehicles.update(city.vehicles, camera, focus);
     this.pedestrians.update(dt, simDt, focus, camDist, env.hour);
     this.effects.update(dt, this.props.emitters, camera.position, viewportH, camera.fov, simRunning);
     this.icons.update(dt, camDist, globalUniforms.uTime.value);

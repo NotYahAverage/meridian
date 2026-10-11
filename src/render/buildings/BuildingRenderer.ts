@@ -5,6 +5,7 @@ import { CHUNKS, CHUNK_SIZE } from '../../sim/constants';
 import { BuildingState, Problem } from '../../sim/types';
 import { type BuildingProp, type BuiltGeometry, GeoBuilder, type Mat } from './BuildingKit';
 import { Rng } from '../../core/rng';
+import { beyondDetail } from '../shared';
 import { type BuildingUniforms, createBuildingDepthMaterial, createBuildingMaterial } from './BuildingMaterial';
 import { generateBuilding } from './generators';
 
@@ -25,8 +26,6 @@ interface BChunk {
   ids: Set<number>;
 }
 
-/** Chunks whose centre is further than this from the camera draw their buildings as boxes. */
-export const BUILDING_LOD_DISTANCE = 1100;
 
 /**
  * A distant stand-in for a building: one box over the parts above the ground,
@@ -295,26 +294,22 @@ export class BuildingRenderer {
     this.applyLod(ch);
   }
 
-  private camX = 0;
-  private camY = 0;
-  private camZ = 0;
-  /** Detail switch distance (Large city mode brings it closer). */
-  lodDistance = BUILDING_LOD_DISTANCE;
+  private focusX = 0;
+  private focusZ = 0;
 
   private applyLod(ch: number): void {
     const c = this.chunks[ch];
     if (!c.mesh || !c.lod) return;
     const x = ((ch % CHUNKS) + 0.5) * CHUNK_SIZE, z = (Math.floor(ch / CHUNKS) + 0.5) * CHUNK_SIZE;
-    const far = Math.hypot(x - this.camX, this.camY, z - this.camZ) > this.lodDistance;
+    const far = beyondDetail(x, z, CHUNK_SIZE / 2, this.focusX, this.focusZ);
     c.mesh.visible = !far;
     c.lod.visible = far;
   }
 
-  /** Picks full detail or boxes for every chunk from where the camera is. */
-  updateLod(camera: THREE.Camera): void {
-    this.camX = camera.position.x;
-    this.camY = camera.position.y;
-    this.camZ = camera.position.z;
+  /** Full detail inside the detail square around the camera's focus, boxes beyond it. */
+  updateLod(focus: { x: number; z: number }): void {
+    this.focusX = focus.x;
+    this.focusZ = focus.z;
     for (let ch = 0; ch < this.chunks.length; ch++) this.applyLod(ch);
   }
 
