@@ -1,11 +1,11 @@
 import { WORLD_SIZE } from '../constants';
 
 /** The map is divided into LAND_TILES × LAND_TILES parcels of land. */
-export const LAND_TILES = 6;
+export const LAND_TILES = 12;
 export const LAND_TILE = WORLD_SIZE / LAND_TILES;
 /** Price of the first ring of land; each ring after it costs LAND_PRICE_GROWTH times the last. */
 export const LAND_BASE_PRICE = 1_500_000;
-export const LAND_PRICE_GROWTH = 2.5;
+export const LAND_PRICE_GROWTH = 2;
 
 /**
  * Which parts of the map the city owns. Roads, zoning, buildings, terraforming

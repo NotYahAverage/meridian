@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { City } from '../src/sim/City';
 import { buildRoad, bulldozeRoad, previewRoad, snap } from '../src/sim/CityCommands';
-import { WATER_LEVEL } from '../src/sim/constants';
+import { CORE_OFFSET, WATER_LEVEL } from '../src/sim/constants';
 import { ROAD_TYPES } from '../src/sim/roads/RoadTypes';
 import { deserializeCity, serializeCity } from '../src/sim/save/Serializer';
 import { BRIDGE_CLEARANCE } from '../src/sim/world/Terrain';
@@ -9,9 +9,11 @@ import { BRIDGE_CLEARANCE } from '../src/sim/world/Terrain';
 /** Finds a straight east–west crossing over a lake with land on both sides. */
 function findCrossing(city: City): { z: number; x0: number; x1: number; wa: number; wb: number } {
   const t = city.terrain;
-  for (let z = 400; z < 2700; z += 40) {
+  // Look on the starting map (the middle of the world).
+  const O = CORE_OFFSET;
+  for (let z = O + 400; z < O + 2700; z += 40) {
     let start = -1;
-    for (let x = 200; x < 2900; x += 4) {
+    for (let x = O + 200; x < O + 2900; x += 4) {
       const water = t.isWater(x, z, 0.35);
       if (water && start < 0) start = x;
       if (!water && start >= 0) {
@@ -92,10 +94,11 @@ describe('river valley map', () => {
     const city = new City({ name: 'River', seed: 4242, preset: 'river', empty: true });
     const t = city.terrain;
     // Every east-west line meets water somewhere east of the start.
-    for (const z of [200, 800, 1500, 2200, 2900]) {
+    const { CORE_OFFSET: O } = await import('../src/sim/constants');
+    for (const z of [200, 800, 1500, 2200, 2900].map((v) => v + O)) {
       let wet = false;
-      for (let x = 1500; x < 2400 && !wet; x += 8) wet = t.isWater(x, z);
-      expect(wet, `river at z=${z}`).toBe(true);
+      for (let x = O + 1500; x < O + 2400 && !wet; x += 8) wet = t.isWater(x, z);
+      expect(wet, `river at z=${z - O}`).toBe(true);
     }
     const sp = t.spawn;
     for (let x = sp.endX; x < sp.endX + 300; x += 20) expect(t.isWater(x, sp.endZ)).toBe(false);

@@ -178,7 +178,7 @@ export class TerrainRenderer {
 
   private buildOuter(): THREE.Mesh {
     const span = WORLD_SIZE * 3;
-    const step = 48;
+    const step = 64;
     const n = Math.round(span / step) + 1;
     const geo = new THREE.PlaneGeometry(span, span, n - 1, n - 1);
     geo.rotateX(-Math.PI / 2);

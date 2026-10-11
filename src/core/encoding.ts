@@ -50,9 +50,11 @@ export function rleEncode(a: Uint8Array): string {
   return bytesToBase64(Uint8Array.from(out));
 }
 
-export function rleDecode(b64: string, length: number): Uint8Array {
+/** `fill` is the value of anything past the encoded data (a grid that has since grown). */
+export function rleDecode(b64: string, length: number, fill = 0): Uint8Array {
   const src = base64ToBytes(b64);
   const out = new Uint8Array(length);
+  if (fill) out.fill(fill);
   let o = 0;
   for (let i = 0; i + 2 < src.length; i += 3) {
     const v = src[i];

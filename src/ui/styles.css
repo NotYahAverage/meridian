@@ -688,7 +688,7 @@ canvas { touch-action: none; /* map */ }
 .slot-badge { margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 600; color: var(--accent-strong); background: var(--accent-soft); vertical-align: 1px; }
 
 /* Land parcels */
-.land-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 3px; margin: 12px 0 8px; aspect-ratio: 1; }
+.land-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 2px; margin: 12px 0 8px; aspect-ratio: 1; }
 .land-cell { border: 1px solid var(--line); border-radius: 3px; background: var(--panel-3); padding: 0; cursor: pointer; position: relative; }
 .land-cell.owned { background: color-mix(in srgb, var(--good) 38%, var(--panel-2)); border-color: color-mix(in srgb, var(--good) 50%, transparent); }
 .land-cell.buyable { background: color-mix(in srgb, var(--accent) 14%, var(--panel-2)); border: 1px dashed var(--accent); }

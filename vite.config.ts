@@ -30,6 +30,7 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     environment: 'node',
     // Some tests generate full terrain and round-trip saves; give them room on busy machines.
-    testTimeout: 30_000,
+    // Generating the full-size world and saving/loading it takes a few seconds per city.
+    testTimeout: 120_000,
   },
 });

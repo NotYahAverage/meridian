@@ -2,7 +2,7 @@ import { Noise2D } from '../../core/noise';
 import { rasterizePolyline } from '../roads/rasterize';
 import type { Polyline } from '../../core/geom2d';
 import { clamp, lerp, smoothstep } from '../../core/math';
-import { GRID_CELL, GRID_RES, HM_RES, HM_STEP, WATER_LEVEL, WORLD_SIZE } from '../constants';
+import { CORE_OFFSET, CORE_SIZE, GRID_CELL, GRID_RES, HM_RES, HM_STEP, WATER_LEVEL, WORLD_SIZE } from '../constants';
 
 export type MapPreset = 'coastal' | 'lakes' | 'highlands' | 'river';
 
@@ -129,18 +129,20 @@ export class Terrain {
     }
   }
 
+  /** The highway comes in from the west edge of the world and ends inside the starting map. */
   private makeSpawn(): SpawnInfo {
-    const W = WORLD_SIZE;
-    const z = W * (0.44 + this.n1.noise(3.1, 9.7) * 0.04);
-    return { edgeX: 0, edgeZ: z, endX: W * 0.3, endZ: z + W * 0.02 };
+    const C = CORE_SIZE, O = CORE_OFFSET;
+    const z = O + C * (0.44 + this.n1.noise(3.1, 9.7) * 0.04);
+    return { edgeX: 0, edgeZ: z, endX: O + C * 0.3, endZ: z + C * 0.02 };
   }
 
   /** Analytic terrain height; valid inside and outside the playable map. */
   baseAt(x: number, z: number): number {
     if (this.flatHeight !== null) return this.flatHeight;
-    const W = WORLD_SIZE;
-    const u = x / W;
-    const v = z / W;
+    // Shapes are laid out in units of the starting map (u, v in 0–1 there); the land around it carries on from them.
+    const W = CORE_SIZE;
+    const u = (x - CORE_OFFSET) / W;
+    const v = (z - CORE_OFFSET) / W;
     const wx = u + 0.07 * this.n1.noise(u * 3, v * 3);
     const wz = v + 0.07 * this.n1.noise(u * 3 + 17.3, v * 3 + 9.1);
     const rolling = this.n2.fbm(wx * 3.2, wz * 3.2, 5);
@@ -216,13 +218,13 @@ export class Terrain {
     for (let i = 0; i < src.length; i++) this.road[i] = Math.max(src[i], WATER_LEVEL + 1.2);
   }
 
-  private computeShoreDistance(): Float32Array {
-    const n = GRID_RES;
+  /** Distance to water on the analysis grid (or on an n × n window of it starting at cell ox, oz). */
+  private computeShoreDistance(ox = 0, oz = 0, n = GRID_RES): Float32Array {
     const d = new Float32Array(n * n);
     const INF = 1e6;
     for (let iz = 0; iz < n; iz++) {
       for (let ix = 0; ix < n; ix++) {
-        const h = this.sampleBase((ix + 0.5) * GRID_CELL, (iz + 0.5) * GRID_CELL);
+        const h = this.sampleBase((ox + ix + 0.5) * GRID_CELL, (oz + iz + 0.5) * GRID_CELL);
         d[iz * n + ix] = h < WATER_LEVEL ? 0 : INF;
       }
     }
@@ -262,15 +264,19 @@ export class Terrain {
     const n = GRID_RES;
     const f = new Float32Array(n * n);
     if (this.flatHeight !== null) return f;
+    // The starting map measures shores within itself only, so its forests match older versions exactly.
+    const c0 = CORE_OFFSET / GRID_CELL, cn = CORE_SIZE / GRID_CELL;
+    const coreShore = this.computeShoreDistance(c0, c0, cn);
     for (let iz = 0; iz < n; iz++) {
       for (let ix = 0; ix < n; ix++) {
         const x = (ix + 0.5) * GRID_CELL;
         const z = (iz + 0.5) * GRID_CELL;
-        const u = x / WORLD_SIZE;
-        const v = z / WORLD_SIZE;
+        const u = (x - CORE_OFFSET) / CORE_SIZE;
+        const v = (z - CORE_OFFSET) / CORE_SIZE;
         const h = this.sampleBase(x, z);
         if (h < WATER_LEVEL + 1.5) continue;
-        const shore = this.shoreDist[iz * n + ix];
+        const inCore = ix >= c0 && iz >= c0 && ix < c0 + cn && iz < c0 + cn;
+        const shore = inCore ? coreShore[(iz - c0) * cn + (ix - c0)] : this.shoreDist[iz * n + ix];
         let dens = this.n4.fbm(u * 7 + 3, v * 7 - 5, 4) * 1.4 + 0.1;
         dens += smoothstep(14, 50, h) * 0.45;
         dens -= smoothstep(120, 20, shore) * 0.4;

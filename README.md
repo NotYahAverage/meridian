@@ -27,7 +27,7 @@ Requirements: Node 20+, a browser with WebGL 2. Blender 4.2+ is only needed if y
 
 ## Playing
 
-Found a city on one of four maps: **Coastal Bay**, **Lakeland Valley**, **Highland Ridge** or **River Valley** (a meandering river east of the start that you bridge to expand). Any seed gives a new layout.
+Found a city on one of four maps: **Coastal Bay**, **Lakeland Valley**, **Highland Ridge** or **River Valley** (a meandering river east of the start that you bridge to expand). Any seed gives a new layout. Your city starts on the 3 × 3 plots in the middle of a much larger world. To grow, buy the whole ring of land around what you own (City Info → Land); each ring costs twice the last, until the city owns the entire world. Cities saved by older versions are moved into the middle of the bigger world when loaded, with their highway extended to the new edge.
 
 For a challenge, choose **Scenarios** on the main menu. Each one sets a hand-picked map, starting funds, a time limit and a set of objectives: *First Steps* (easy), *Across the River* and *Green Valley* (medium), and *Tourist Coast* and *Mountain Metro* (hard). A chip in the top bar counts down the time left and shows how many objectives you have met, and the Goals panel shows progress on each one. When every objective is met at a month's end you win. If time runs out first you lose and can try again. Either way you can keep building afterwards. The menu marks the scenarios you have won.
 

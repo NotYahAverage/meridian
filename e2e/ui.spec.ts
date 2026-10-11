@@ -108,8 +108,10 @@ test('touch gestures', async ({ page }) => {
   expect(Math.hypot(c2.x - c1.x, c2.z - c1.z)).toBeGreaterThan(20);
   expect(await game<string>(page, 'return JSON.stringify(g.selection);')).toBe('null');
   // A tap selects what is under the finger.
-  const target = await game<{ x: number; y: number }>(page, `const b = [...g.city.buildings.all.values()].find((q) => q.kind === 'zoned' && q.floors >= 3); g.cam.jumpTo({ x: b.cx, z: b.cz, distance: 160, pitch: 0.9, yaw: 1.0 }); return g.worldToScreen(b.cx, b.y + 6, b.cz);`);
+  await game(page, `const b = [...g.city.buildings.all.values()].find((q) => q.kind === 'zoned' && q.floors >= 3); window.__tapB = b; g.cam.jumpTo({ x: b.cx, z: b.cz, distance: 160, pitch: 0.9, yaw: 1.0 });`);
   await frames(page, 3);
+  // Measured once the camera has arrived.
+  const target = await game<{ x: number; y: number }>(page, `const b = window.__tapB; return g.worldToScreen(b.cx, b.y + 6, b.cz);`);
   await game(page, `__touch('pointerdown', 4, ${target.x}, ${target.y}); __touch('pointerup', 4, ${target.x}, ${target.y});`);
   const sel = await game<string>(page, 'return JSON.stringify(g.selection);');
   console.log('TAP', sel);

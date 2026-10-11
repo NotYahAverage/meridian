@@ -1,5 +1,12 @@
-/** World extent in meters (square). The playable map spans [0, WORLD_SIZE]². */
-export const WORLD_SIZE = 3072;
+/** World extent in meters (square). The whole map spans [0, WORLD_SIZE]². */
+export const WORLD_SIZE = 6144;
+
+/**
+ * The original map: the terrain is generated in its units, and cities start in
+ * it. It sits in the middle of the world; the land around it is bought later.
+ */
+export const CORE_SIZE = 3072;
+export const CORE_OFFSET = (WORLD_SIZE - CORE_SIZE) / 2;
 
 /** Heightmap vertex spacing in meters. */
 export const HM_STEP = 4;

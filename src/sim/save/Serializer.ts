@@ -15,11 +15,13 @@ import { BuildingState, type DemandKind, Zone } from '../types';
 import type { MapPreset } from '../world/Terrain';
 import { type TerrainEdits, loadTerrainEdits, serializeTerrainEdits } from '../world/Terraform';
 import { conformTerrain } from '../world/TerrainConform';
+import type { LandData } from '../world/Land';
+import { migrateToBigWorld } from './WorldMigration';
 import type { AchievementSave } from '../progress/Achievements';
 import type { ScenarioState } from '../progress/Scenarios';
 
 export const SAVE_FORMAT = 'meridian-city';
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 
 export interface SaveMeta {
   name: string;
@@ -106,7 +108,7 @@ export interface SaveData {
   /** Terraforming: sparse height changes against the generated map. */
   terrainEdits?: TerrainEdits;
   /** Owned land parcels (absent: the whole map, as in older saves). */
-  land?: { owned: number[]; bought: number };
+  land?: LandData;
   /** Natural trees still standing (run-length flags) and planted trees. */
   nature?: { natural: string; planted: string; kinds: string };
   achievements?: AchievementSave;
@@ -221,6 +223,8 @@ function serializeNature(city: City): SaveData['nature'] {
 const MIGRATIONS: Record<number, (d: SaveData) => SaveData> = {
   // v2: public transit.
   1: (d) => ({ ...d, version: 2, transit: { stops: [], lines: [], nextStopId: 1, nextLineId: 1 } }),
+  // v3: the world grew to four times the area around the old map.
+  2: migrateToBigWorld,
 };
 
 export function migrate(data: SaveData): SaveData {
@@ -288,7 +292,8 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number } = 
   city.buildings.nextId = Math.max(city.buildings.nextId, data.nextBuildingId);
   conformTerrain(city.terrain, city.roads, city.buildings, { minX: 0, minZ: 0, maxX: WORLD_SIZE, maxZ: WORLD_SIZE });
   if (data.nature) {
-    city.nature.load(rleDecode(data.nature.natural, city.nature.naturalCount), {
+    // Trees beyond the end of an older save's list grew on land the world gained since: still standing.
+    city.nature.load(rleDecode(data.nature.natural, city.nature.naturalCount, 1), {
       data: data.nature.planted ? decodeFloat32(data.nature.planted) : new Float32Array(0),
       kinds: data.nature.kinds ? decodeUint8(data.nature.kinds) : new Uint8Array(0),
     });

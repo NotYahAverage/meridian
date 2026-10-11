@@ -264,9 +264,9 @@ export class Game {
     const city = new City({ name: opts.name, seed: opts.seed, preset: opts.preset, unlimitedMoney: opts.unlimited });
     this.ui.loading.progress('Planting forests…', 0.6);
     await nextFrame();
-    // A new city owns the land around its start and the highway; more can be bought.
+    // A new city owns the land around its start; more can be bought a ring at a time.
     const st = city.startPoint;
-    city.land.startAround(st.x, st.z, [...city.roads.nodes.values()]);
+    city.land.startAround(st.x, st.z);
     this.attachCity(city);
     this.slotId = `city-${opts.seed}-${Date.now().toString(36)}`;
     this.beginPlay();

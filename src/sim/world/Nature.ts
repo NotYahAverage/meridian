@@ -1,6 +1,6 @@
 import { type OBB, type Polyline, obbBounds, pointInOBB } from '../../core/geom2d';
 import { Rng } from '../../core/rng';
-import { CHUNKS, CHUNK_SIZE, GRID_CELL, GRID_RES, WATER_LEVEL } from '../constants';
+import { CHUNKS, CHUNK_SIZE, CORE_OFFSET, CORE_SIZE, GRID_CELL, GRID_RES, WATER_LEVEL } from '../constants';
 import { rasterizePolyline } from '../roads/rasterize';
 import type { Rect, Terrain } from './Terrain';
 
@@ -52,14 +52,23 @@ export class Nature {
   version = 0;
 
   constructor(terrain: Terrain, seed: number) {
-    const rng = new Rng(seed ^ 0x7ee5);
+    const coreRng = new Rng(seed ^ 0x7ee5);
+    const outerRng = new Rng(seed ^ 0x3c1d);
     this.rng = new Rng(seed ^ 0x51ab);
     const xs: number[] = [];
     const zs: number[] = [];
     const ks: number[] = [];
     const ss: number[] = [];
-    for (let iz = 0; iz < GRID_RES; iz++) {
-      for (let ix = 0; ix < GRID_RES; ix++) {
+    // Trees on the starting map come first, in the same order (and so with the same indices) as older versions.
+    const c0 = CORE_OFFSET / GRID_CELL, c1 = c0 + CORE_SIZE / GRID_CELL;
+    const inCore = (ix: number, iz: number) => ix >= c0 && iz >= c0 && ix < c1 && iz < c1;
+    const cells: [number, number, Rng][] = [];
+    for (let iz = c0; iz < c1; iz++) for (let ix = c0; ix < c1; ix++) cells.push([ix, iz, coreRng]);
+    for (let iz = 0; iz < GRID_RES; iz++) for (let ix = 0; ix < GRID_RES; ix++) if (!inCore(ix, iz)) cells.push([ix, iz, outerRng]);
+    let coreTrees = -1;
+    for (const [ix, iz, rng] of cells) {
+      {
+        if (rng === outerRng && coreTrees < 0) coreTrees = xs.length;
         const f = terrain.forest[iz * GRID_RES + ix];
         let n = Math.floor(f * 3.4 + rng.next());
         if (f < 0.05 && rng.next() < 0.04) n = 1;
@@ -83,6 +92,7 @@ export class Nature {
       }
     }
     const n = xs.length;
+    if (coreTrees < 0) coreTrees = n;
     this.count = n;
     this.naturalCount = n;
     this.x = Float32Array.from(xs);
@@ -90,7 +100,7 @@ export class Nature {
     this.kind = Uint8Array.from(ks);
     this.scale = Float32Array.from(ss);
     this.rot = new Float32Array(n);
-    for (let i = 0; i < n; i++) this.rot[i] = rng.next() * Math.PI * 2;
+    for (let i = 0; i < n; i++) this.rot[i] = (i < coreTrees ? coreRng : outerRng).next() * Math.PI * 2;
     this.alive = new Uint8Array(n).fill(1);
     this.planted = new Float32Array(n).fill(-1e6);
     this.chunk = new Uint16Array(n);
