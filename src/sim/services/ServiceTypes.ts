@@ -1,0 +1,283 @@
+import type { ServiceStyle } from '../buildings/Archetypes';
+
+export type CoverageKind = 'police' | 'fire' | 'health' | 'education' | 'garbage' | 'park';
+export type UtilityKind = 'power' | 'water' | 'sewage';
+export type ServiceKind = CoverageKind | UtilityKind | 'transit' | 'landmark';
+export type ServiceCategory = 'services' | 'utilities' | 'parks' | 'transit' | 'landmarks';
+
+export interface ServiceType {
+  id: string;
+  name: string;
+  description: string;
+  kind: ServiceKind;
+  category: ServiceCategory;
+  style: ServiceStyle;
+  cost: number;
+  /** Monthly upkeep. */
+  upkeep: number;
+  /** Coverage radius in meters (coverage services and parks). */
+  radius: number;
+  /** Residents served at full effectiveness (coverage), or garbage units/day processed. */
+  capacity: number;
+  /** Utility output: MW for power, m³/day for water and sewage. */
+  output: number;
+  w: number;
+  d: number;
+  jobs: number;
+  /** Ground pollution emitted (0–1 scale). */
+  pollution: number;
+  /** Land value bonus applied within radius (parks). */
+  attractiveness: number;
+  needsShore: boolean;
+  unlockPopulation: number;
+  /** Monthly tourism income at full city happiness (landmarks). */
+  tourism: number;
+  /** Only one may be built. */
+  unique: boolean;
+}
+
+function svc(t: Partial<ServiceType> & Pick<ServiceType, 'id' | 'name' | 'description' | 'kind' | 'category' | 'style' | 'cost' | 'upkeep' | 'w' | 'd'>): ServiceType {
+  return {
+    radius: 0,
+    capacity: 0,
+    output: 0,
+    jobs: 0,
+    pollution: 0,
+    attractiveness: 0,
+    needsShore: false,
+    unlockPopulation: 0,
+    tourism: 0,
+    unique: false,
+    ...t,
+  };
+}
+
+export const SERVICE_TYPES: ServiceType[] = [
+  // ── Services ────────────────────────────────────────────────────────────
+  svc({
+    id: 'police_station', name: 'Police Station', kind: 'police', category: 'services', style: 'police',
+    description: 'Patrols reduce crime in surrounding neighbourhoods.',
+    cost: 26_000, upkeep: 1_100, radius: 560, capacity: 9_000, w: 28, d: 32, jobs: 24,
+  }),
+  svc({
+    id: 'police_hq', name: 'Police Headquarters', kind: 'police', category: 'services', style: 'policeHQ',
+    description: 'Citywide command centre with a rooftop helipad. Covers a wide area and handles a large population.',
+    cost: 92_000, upkeep: 3_300, radius: 1_050, capacity: 32_000, w: 44, d: 44, jobs: 90, unlockPopulation: 4_000,
+  }),
+  svc({
+    id: 'fire_station', name: 'Fire Station', kind: 'fire', category: 'services', style: 'fire',
+    description: 'Responds to fires and lowers fire risk nearby.',
+    cost: 28_000, upkeep: 1_200, radius: 640, capacity: 10_000, w: 30, d: 32, jobs: 22,
+  }),
+  svc({
+    id: 'fire_hq', name: 'Fire Headquarters', kind: 'fire', category: 'services', style: 'fire',
+    description: 'A large station with many engine bays. Covers far more of the city than a local station.',
+    cost: 96_000, upkeep: 3_400, radius: 1_100, capacity: 34_000, w: 50, d: 40, jobs: 80, unlockPopulation: 4_000,
+  }),
+  svc({
+    id: 'clinic', name: 'Medical Clinic', kind: 'health', category: 'services', style: 'clinic',
+    description: 'Keeps residents healthy. Small coverage area.',
+    cost: 22_000, upkeep: 950, radius: 480, capacity: 6_500, w: 26, d: 28, jobs: 18,
+  }),
+  svc({
+    id: 'hospital', name: 'General Hospital', kind: 'health', category: 'services', style: 'hospital',
+    description: 'Large regional hospital with emergency care and a helipad.',
+    cost: 95_000, upkeep: 3_600, radius: 1_150, capacity: 42_000, w: 48, d: 40, jobs: 140, unlockPopulation: 2_500,
+  }),
+  svc({
+    id: 'elementary_school', name: 'Elementary School', kind: 'education', category: 'services', style: 'school',
+    description: 'Educates local children. Educated citizens attract offices.',
+    cost: 30_000, upkeep: 1_300, radius: 460, capacity: 6_000, w: 36, d: 40, jobs: 30,
+  }),
+  svc({
+    id: 'library', name: 'Public Library', kind: 'education', category: 'services', style: 'library',
+    description: 'Books, classes and study space. A cheap way to add some education coverage to a neighbourhood.',
+    cost: 18_000, upkeep: 700, radius: 520, capacity: 4_000, w: 30, d: 32, jobs: 12, unlockPopulation: 500,
+  }),
+  svc({
+    id: 'high_school', name: 'High School', kind: 'education', category: 'services', style: 'highschool',
+    description: 'Larger campus with sports fields and wider coverage.',
+    cost: 62_000, upkeep: 2_400, radius: 950, capacity: 20_000, w: 48, d: 40, jobs: 60, unlockPopulation: 1_000,
+  }),
+  svc({
+    id: 'university', name: 'University', kind: 'education', category: 'services', style: 'university',
+    description: 'A campus of lecture halls and libraries. Residents nearby are far more likely to earn degrees, and graduates draw offices to the city.',
+    cost: 240_000, upkeep: 6_400, radius: 1_700, capacity: 60_000, w: 112, d: 92, jobs: 240, tourism: 600, unlockPopulation: 6_000,
+  }),
+  svc({
+    id: 'landfill', name: 'Landfill', kind: 'garbage', category: 'services', style: 'landfill',
+    description: 'Collects garbage across a wide area. Pollutes nearby land.',
+    cost: 32_000, upkeep: 900, radius: 1_400, capacity: 1_400, w: 48, d: 40, jobs: 20, pollution: 0.45,
+  }),
+  svc({
+    id: 'recycling_center', name: 'Recycling Center', kind: 'garbage', category: 'services', style: 'recycling',
+    description: 'Processes garbage cleanly with much less pollution.',
+    cost: 72_000, upkeep: 2_100, radius: 1_300, capacity: 3_200, w: 44, d: 40, jobs: 45, pollution: 0.12, unlockPopulation: 6_000,
+  }),
+  svc({
+    id: 'incinerator', name: 'Waste Incinerator', kind: 'garbage', category: 'services', style: 'incinerator',
+    description: 'Burns a lot of garbage and never fills up. Spare capacity also burns off old landfill waste. Pollutes the area around it.',
+    cost: 110_000, upkeep: 3_200, radius: 1_500, capacity: 5_000, w: 48, d: 44, jobs: 55, pollution: 0.6, unlockPopulation: 4_000,
+  }),
+  // ── Parks ───────────────────────────────────────────────────────────────
+  svc({
+    id: 'pocket_park', name: 'Pocket Park', kind: 'park', category: 'parks', style: 'parkSmall',
+    description: 'A small green space with a playground. Raises nearby land value.',
+    cost: 3_000, upkeep: 70, radius: 180, w: 20, d: 20, attractiveness: 0.35,
+  }),
+  svc({
+    id: 'plaza', name: 'Civic Plaza', kind: 'park', category: 'parks', style: 'plaza',
+    description: 'Paved plaza with a fountain. Great next to shops.',
+    cost: 7_500, upkeep: 160, radius: 230, w: 26, d: 26, attractiveness: 0.45,
+  }),
+  svc({
+    id: 'town_park', name: 'Town Park', kind: 'park', category: 'parks', style: 'parkTown',
+    description: 'Lawns, paths and a pond. Strong boost to happiness.',
+    cost: 14_000, upkeep: 320, radius: 330, w: 40, d: 40, attractiveness: 0.6, unlockPopulation: 500,
+  }),
+  svc({
+    id: 'community_garden', name: 'Community Garden', kind: 'park', category: 'parks', style: 'communityGarden',
+    description: 'Allotments where neighbours grow vegetables together. Cheap and well loved.',
+    cost: 4_500, upkeep: 90, radius: 200, w: 26, d: 24, attractiveness: 0.4,
+  }),
+  svc({
+    id: 'sports_courts', name: 'Sports Courts', kind: 'park', category: 'parks', style: 'sportsCourts',
+    description: 'Basketball and tennis courts behind a fence. Popular with teenagers.',
+    cost: 6_500, upkeep: 140, radius: 220, w: 30, d: 20, attractiveness: 0.42, unlockPopulation: 500,
+  }),
+  svc({
+    id: 'sports_field', name: 'Sports Field', kind: 'park', category: 'parks', style: 'sportsField',
+    description: 'A football pitch with a small stand and floodlights for evening matches.',
+    cost: 16_000, upkeep: 380, radius: 340, w: 48, d: 36, attractiveness: 0.55, jobs: 4, unlockPopulation: 1_000,
+  }),
+  svc({
+    id: 'botanical_garden', name: 'Botanical Garden', kind: 'park', category: 'parks', style: 'botanicalGarden',
+    description: 'A glass palm house, flower beds and a lily pond. Lifts a wide area and draws visitors.',
+    cost: 32_000, upkeep: 760, radius: 450, w: 56, d: 44, attractiveness: 0.75, jobs: 12, tourism: 900, unlockPopulation: 2_500,
+  }),
+  svc({
+    id: 'central_park', name: 'Central Park', kind: 'park', category: 'parks', style: 'parkLarge',
+    description: 'A grand urban park with a lake. Transforms its district.',
+    cost: 38_000, upkeep: 850, radius: 520, w: 64, d: 40, attractiveness: 0.85, unlockPopulation: 6_000,
+  }),
+  // ── Utilities ───────────────────────────────────────────────────────────
+  svc({
+    id: 'wind_turbine', name: 'Wind Turbine', kind: 'power', category: 'utilities', style: 'wind',
+    description: 'Clean but modest electricity. Power is distributed along roads.',
+    cost: 6_500, upkeep: 220, output: 2.2, w: 16, d: 16, jobs: 2,
+  }),
+  svc({
+    id: 'coal_plant', name: 'Coal Power Plant', kind: 'power', category: 'utilities', style: 'coal',
+    description: 'Cheap, plentiful power — and a lot of pollution.',
+    cost: 52_000, upkeep: 2_300, output: 60, w: 56, d: 40, jobs: 70, pollution: 1, unlockPopulation: 1_000,
+  }),
+  svc({
+    id: 'gas_plant', name: 'Gas Power Plant', kind: 'power', category: 'utilities', style: 'gasPlant',
+    description: 'Twice the output of coal with about a third of the pollution, at a higher running cost.',
+    cost: 95_000, upkeep: 3_100, output: 120, w: 52, d: 44, jobs: 60, pollution: 0.35, unlockPopulation: 3_000,
+  }),
+  svc({
+    id: 'nuclear_plant', name: 'Nuclear Power Plant', kind: 'power', category: 'utilities', style: 'nuclear',
+    description: 'Enormous, almost pollution-free output for a big city. Very expensive to build and run. One per city.',
+    cost: 520_000, upkeep: 12_000, output: 600, w: 112, d: 96, jobs: 320, pollution: 0.04, unlockPopulation: 15_000, unique: true,
+  }),
+  svc({
+    id: 'solar_farm', name: 'Solar Farm', kind: 'power', category: 'utilities', style: 'solar',
+    description: 'Clean, reliable power from rows of photovoltaic panels.',
+    cost: 46_000, upkeep: 900, output: 26, w: 48, d: 40, jobs: 8, unlockPopulation: 6_000,
+  }),
+  svc({
+    id: 'water_tower', name: 'Water Tower', kind: 'water', category: 'utilities', style: 'waterTower',
+    description: 'Draws groundwater. Small capacity, can be placed anywhere.',
+    cost: 8_000, upkeep: 240, output: 260, w: 16, d: 16, jobs: 2,
+  }),
+  svc({
+    id: 'pumping_station', name: 'Water Pumping Station', kind: 'water', category: 'utilities', style: 'pump',
+    description: 'Pumps fresh water from a shoreline. Must be placed near water.',
+    cost: 24_000, upkeep: 780, output: 2_600, w: 24, d: 24, jobs: 10, needsShore: true,
+  }),
+  svc({
+    id: 'water_purification', name: 'Water Purification Plant', kind: 'water', category: 'utilities', style: 'purification',
+    description: 'Draws and cleans large volumes of water from a shoreline. Must be placed near water.',
+    cost: 85_000, upkeep: 2_600, output: 12_000, w: 56, d: 44, jobs: 35, needsShore: true, unlockPopulation: 3_000,
+  }),
+  svc({
+    id: 'sewage_outfall', name: 'Sewage Outfall', kind: 'sewage', category: 'utilities', style: 'outfall',
+    description: 'Discharges sewage into open water. Must be placed near water.',
+    cost: 14_000, upkeep: 520, output: 2_400, w: 20, d: 20, jobs: 6, needsShore: true, pollution: 0.35,
+  }),
+  svc({
+    id: 'treatment_plant', name: 'Sewage Treatment Plant', kind: 'sewage', category: 'utilities', style: 'treatment',
+    description: 'Cleans wastewater with no pollution. Can be built anywhere.',
+    cost: 58_000, upkeep: 1_700, output: 6_500, w: 44, d: 40, jobs: 30, unlockPopulation: 2_500,
+  }),
+  // ── Landmarks ───────────────────────────────────────────────────────────
+  svc({
+    id: 'city_hall', name: 'City Hall', kind: 'landmark', category: 'landmarks', style: 'cityHall',
+    description: 'The seat of local government. A proud civic landmark that lifts the whole neighbourhood.',
+    cost: 60_000, upkeep: 1_400, radius: 650, w: 58, d: 52, jobs: 70, attractiveness: 0.55, tourism: 900, unique: true, unlockPopulation: 1_000,
+  }),
+  svc({
+    id: 'museum', name: 'Museum of Art & History', kind: 'landmark', category: 'landmarks', style: 'museum',
+    description: 'A striking modern museum that draws visitors from across the region.',
+    cost: 95_000, upkeep: 2_200, radius: 700, w: 62, d: 54, jobs: 50, attractiveness: 0.6, tourism: 3_200, unique: true, unlockPopulation: 2_500,
+  }),
+  svc({
+    id: 'cathedral', name: 'Cathedral', kind: 'landmark', category: 'landmarks', style: 'cathedral',
+    description: 'A soaring stone cathedral, the heart of the old town and a favourite with tourists.',
+    cost: 110_000, upkeep: 1_600, radius: 700, w: 44, d: 72, jobs: 15, attractiveness: 0.65, tourism: 2_600, unique: true, unlockPopulation: 2_500,
+  }),
+  svc({
+    id: 'stadium', name: 'Stadium', kind: 'landmark', category: 'landmarks', style: 'stadium',
+    description: 'A 40,000-seat arena. Match days bring crowds, traffic and plenty of income.',
+    cost: 240_000, upkeep: 5_500, radius: 1_000, w: 140, d: 124, jobs: 160, attractiveness: 0.5, tourism: 9_500, pollution: 0.05, unique: true, unlockPopulation: 6_000,
+  }),
+  svc({
+    id: 'tower', name: 'Observation Tower', kind: 'landmark', category: 'landmarks', style: 'obsTower',
+    description: 'A slender 200 m tower with a viewing deck and revolving restaurant. Visible from everywhere.',
+    cost: 320_000, upkeep: 4_000, radius: 1_200, w: 48, d: 48, jobs: 60, attractiveness: 0.8, tourism: 12_000, unique: true, unlockPopulation: 12_000,
+  }),
+  // ── Transit ─────────────────────────────────────────────────────────────
+  svc({
+    id: 'bus_depot', name: 'Bus Depot', kind: 'transit', category: 'transit', style: 'busDepot',
+    description: 'Garages and maintains the city buses. Bus lines need a depot on the same road network.',
+    cost: 34_000, upkeep: 1_100, w: 44, d: 40, jobs: 40, unlockPopulation: 1_000,
+  }),
+  svc({
+    id: 'airport', name: 'Regional Airport', kind: 'transit', category: 'transit', style: 'airport', unique: true,
+    description: 'A runway, terminal and control tower. Flights bring tourists and business: commerce, industry and offices all grow. Planes are loud, so keep homes away.',
+    cost: 380_000, upkeep: 7_500, w: 300, d: 110, jobs: 260, pollution: 0.32, tourism: 9_000, unlockPopulation: 12_000,
+  }),
+  svc({
+    id: 'metro_station', name: 'Metro Station', kind: 'transit', category: 'transit', style: 'metroStation',
+    description: 'An underground station. Join stations with the Metro Line tool; trains are fast and carry far more riders than buses.',
+    cost: 26_000, upkeep: 850, w: 30, d: 26, jobs: 14, unlockPopulation: 5_000,
+  }),
+  svc({
+    id: 'cargo_port', name: 'Cargo Harbour', kind: 'transit', category: 'transit', style: 'cargoPort',
+    description: 'Container quays with ship-to-shore cranes. Freighters call from the open sea, giving industry an outlet for its goods. The quay side must face deep water.',
+    cost: 150_000, upkeep: 3_200, w: 110, d: 80, jobs: 160, pollution: 0.12, needsShore: true, unlockPopulation: 2_500,
+  }),
+];
+
+export const SERVICE_BY_ID = new Map(SERVICE_TYPES.map((s) => [s.id, s]));
+
+export const COVERAGE_KINDS: CoverageKind[] = ['police', 'fire', 'health', 'education', 'garbage', 'park'];
+
+export const COVERAGE_LABEL: Record<CoverageKind, string> = {
+  police: 'Police',
+  fire: 'Fire',
+  health: 'Healthcare',
+  education: 'Education',
+  garbage: 'Garbage',
+  park: 'Parks',
+};
+
+/** Utility consumption per building. */
+export function powerUse(households: number, jobs: number): number {
+  return households * 0.0035 + jobs * 0.005;
+}
+
+export function waterUse(households: number, jobs: number): number {
+  return households * 0.55 + jobs * 0.12;
+}

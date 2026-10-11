@@ -1,0 +1,70 @@
+{
+  "name": "meridian-desktop",
+  "productName": "Meridian",
+  "version": "0.1.0",
+  "description": "Meridian city builder \u2014 desktop app",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir"
+  },
+  "devDependencies": {
+    "electron": "^43.7.0",
+    "electron-builder": "^26.15.0"
+  },
+  "build": {
+    "appId": "com.meridian.citybuilder",
+    "productName": "Meridian",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "build/icon.png"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "web"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "category": "public.app-category.simulation-games",
+      "identity": null
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Game"
+    },
+    "icon": "build/icon.png"
+  },
+  "author": "Meridian"
+}
