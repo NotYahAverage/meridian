@@ -102,7 +102,17 @@ float stripes(float x) {
   vec3 col;
   float lampable = 0.0;
   if (kind == 0 || kind == 4) {
-    vec3 asph = m_srgb(vec3(0.27, 0.272, 0.28)) * (0.82 + 0.16 * n + 0.14 * n2 + 0.06 * n3);
+    // Weathered asphalt: warm grey, lighter where it has aged, patched repairs and fine aggregate.
+    vec3 asph = m_srgb(vec3(0.3, 0.297, 0.29)) * (0.82 + 0.16 * n + 0.14 * n2 + 0.06 * n3);
+    float age = smoothstep(0.35, 0.8, m_vnoise(vWPos.xz * 0.023 + 3.1));
+    asph = mix(asph, asph * vec3(1.1, 1.08, 1.05), age * 0.6);
+    vec2 pc = floor(vec2(u / 2.6, v / 5.5));
+    float ph = m_hash12(pc + floor(vWPos.xz / 400.0));
+    vec2 pf = fract(vec2(u / 2.6, v / 5.5));
+    float patchM = step(0.93, ph) * step(0.12, pf.x) * step(pf.x, 0.88) * step(0.1, pf.y) * step(pf.y, 0.9);
+    asph = mix(asph, asph * 0.8, patchM * (1.0 - smoothstep(0.25, 0.6, fwidth(v))));
+    float grain = m_hash12(floor(vWPos.xz * 22.0));
+    asph *= 1.0 + (grain - 0.5) * 0.12 * (1.0 - smoothstep(0.02, 0.08, fwidth(vWPos.x)));
     float mark = 0.0;
     vec3 mc = vec3(0.92);
     bool ow = mod(floor(flags / 4.0), 2.0) > 0.5;
@@ -128,7 +138,8 @@ float stripes(float x) {
     if (kind == 0 && !ow) {
       float a = abs(u) - med;
       float lf = fract(max(a, 0.0) / lw);
-      asph *= 0.965 + 0.035 * cos(lf * 12.566);
+      // Wheel tracks: darker paths worn into each lane.
+      asph *= 0.955 + 0.045 * cos(lf * 12.566);
       // Lane separators (dashed), centre line, edge lines.
       for (int k = 1; k < 3; k++) {
         if (float(k) >= lanes) break;
@@ -168,9 +179,11 @@ float stripes(float x) {
     r_rough = mix(0.9, 0.6, mark);
     lampable = 1.0;
   } else if (kind == 1) {
-    vec3 c = m_srgb(vec3(0.68, 0.67, 0.64)) * (0.88 + 0.12 * n + 0.05 * n3);
+    vec3 c = m_srgb(vec3(0.66, 0.645, 0.615)) * (0.88 + 0.12 * n + 0.05 * n3);
     float j = 1.0 - smoothstep(0.0, 0.04, abs(fract(v / 1.8) - 0.5) - 0.46);
-    col = c * (1.0 - j * 0.25);
+    // Slab-to-slab tone and a little grime along the joints.
+    float slab = m_hash12(vec2(floor(v / 1.8), floor(u / 1.6)));
+    col = c * (0.95 + 0.08 * slab) * (1.0 - j * 0.25);
     r_rough = 0.92;
     lampable = 1.0;
   } else if (kind == 2) {
@@ -178,13 +191,13 @@ float stripes(float x) {
     r_rough = 0.85;
     lampable = 1.0;
   } else if (kind == 3) {
-    col = m_srgb(vec3(0.33, 0.44, 0.2)) * (0.82 + 0.3 * n + 0.1 * n3);
+    col = m_srgb(vec3(0.33, 0.39, 0.21)) * (0.82 + 0.3 * n + 0.1 * n3);
     r_rough = 0.95;
   } else if (kind == 5) {
     col = m_srgb(vec3(0.66, 0.65, 0.62)) * (0.9 + 0.1 * n);
     r_rough = 0.8;
   } else {
-    col = m_srgb(vec3(0.36, 0.44, 0.22)) * (0.85 + 0.2 * n);
+    col = m_srgb(vec3(0.345, 0.395, 0.22)) * (0.85 + 0.2 * n);
     r_rough = 0.95;
   }
   // Weather: wet surfaces darken and turn glossy (with puddles); snow settles

@@ -24,6 +24,24 @@ export const P = {
   CONCRETE: 19,
   TRACK: 20,
   METAL: 21,
+  /** Ashlar stone with punched windows (classical bases, civic buildings). */
+  STONE: 22,
+  /** Rainscreen panels in two tones with punched windows (modern housing). */
+  PANEL: 23,
+  /** Standing-seam metal roof. */
+  ROOF_METAL: 24,
+  /** Horizontal louvres (plant rooms, garages, screens). */
+  LOUVRE: 25,
+  /** Vertical timber boards. */
+  WOOD: 26,
+  /** Smooth painted trim: cornices, copings, fascias, sills. */
+  TRIM: 27,
+  /** Horizontal lap siding with punched windows (and shutters on some houses). */
+  SIDING: 28,
+  /** Striped canvas (awnings). */
+  AWNING: 29,
+  /** Fan grilles on top of air handlers (one fan per cell). */
+  FAN: 30,
 } as const;
 
 export type RGB = [number, number, number];
@@ -178,8 +196,9 @@ export class GeoBuilder {
       const yl = y0 - (o * rise) / ((z1 - z0) / 2);
       this.quad([x1 + o, yl, z0 - o], [x0 - o, yl, z0 - o], [x0 - o, yr, zm], [x1 + o, yr, zm], n1, roof, [[0, 0], [x1 - x0, 0], [x1 - x0, slope], [0, slope]]);
       this.quad([x0 - o, yl, z1 + o], [x1 + o, yl, z1 + o], [x1 + o, yr, zm], [x0 - o, yr, zm], n2, roof, [[0, 0], [x1 - x0, 0], [x1 - x0, slope], [0, slope]]);
-      this.tri([x0, y0, z0], [x0, y0, z1], [x0, yr, zm], [-1, 0, 0], end, [[0, y0], [1, y0], [0.5, yr]]);
-      this.tri([x1, y0, z1], [x1, y0, z0], [x1, yr, zm], [1, 0, 0], end, [[0, y0], [1, y0], [0.5, yr]]);
+      // Gable ends use heights from the eaves, so a facade pattern never finds a window there.
+      this.tri([x0, y0, z0], [x0, y0, z1], [x0, yr, zm], [-1, 0, 0], end, [[0, 0], [1, 0], [0.5, rise]]);
+      this.tri([x1, y0, z1], [x1, y0, z0], [x1, yr, zm], [1, 0, 0], end, [[0, 0], [1, 0], [0.5, rise]]);
     } else {
       const xm = (x0 + x1) / 2;
       const yr = y0 + rise;
@@ -189,8 +208,8 @@ export class GeoBuilder {
       const n2 = normalize(rise, (x1 - x0) / 2, 0);
       this.quad([x0 - o, yl, z0 - o], [x0 - o, yl, z1 + o], [xm, yr, z1 + o], [xm, yr, z0 - o], n1, roof, [[0, 0], [z1 - z0, 0], [z1 - z0, slope], [0, slope]]);
       this.quad([x1 + o, yl, z1 + o], [x1 + o, yl, z0 - o], [xm, yr, z0 - o], [xm, yr, z1 + o], n2, roof, [[0, 0], [z1 - z0, 0], [z1 - z0, slope], [0, slope]]);
-      this.tri([x1, y0, z0], [x0, y0, z0], [xm, yr, z0], [0, 0, -1], end, [[0, y0], [1, y0], [0.5, yr]]);
-      this.tri([x0, y0, z1], [x1, y0, z1], [xm, yr, z1], [0, 0, 1], end, [[0, y0], [1, y0], [0.5, yr]]);
+      this.tri([x1, y0, z0], [x0, y0, z0], [xm, yr, z0], [0, 0, -1], end, [[0, 0], [1, 0], [0.5, rise]]);
+      this.tri([x0, y0, z1], [x1, y0, z1], [xm, yr, z1], [0, 0, 1], end, [[0, 0], [1, 0], [0.5, rise]]);
     }
   }
 

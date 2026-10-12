@@ -822,6 +822,7 @@ export class Game {
     this.env.update(this.hour, this.cam.target, this.cam.distance, this.renderer.camera);
     this.env.updateEnvironmentMap();
     this.renderer.setNight(this.env.night);
+    this.renderer.setFogRange(this.env.fog.near, this.env.fog.far);
     world.update(dt, dt * Math.min(mult, 3), this.renderer.camera, this.env, this.cam.target, this.cam.distance, h, mult > 0);
     this.tool.update(dt);
     this.ui.update(dt);

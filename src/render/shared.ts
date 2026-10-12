@@ -17,6 +17,8 @@ export const globalUniforms = {
   uRain: { value: 0 },
   /** Drifting cloud shadows: offset x, offset z, coverage 0–1, strength 0–1. */
   uCloudShadow: { value: new THREE.Vector4(0, 0, 0, 0) },
+  /** Direction towards the key light (sun by day, moon by night), world space. */
+  uSunDir: { value: new THREE.Vector3(0.3, 0.8, 0.5).normalize() },
 };
 
 /** GLSL helpers: hashing, value noise and sRGB conversion. */
@@ -84,12 +86,14 @@ export interface QualitySettings {
   bloom: boolean;
   pixelRatio: number;
   antialias: boolean;
+  /** Screen-space ambient occlusion. */
+  ao: boolean;
 }
 
 export const QUALITY_PRESETS: Record<'low' | 'medium' | 'high', QualitySettings> = {
-  low: { shadows: false, shadowSize: 1024, bloom: false, pixelRatio: 1, antialias: false },
-  medium: { shadows: true, shadowSize: 2048, bloom: true, pixelRatio: 1, antialias: true },
-  high: { shadows: true, shadowSize: 4096, bloom: true, pixelRatio: 2, antialias: true },
+  low: { shadows: false, shadowSize: 1024, bloom: false, pixelRatio: 1, antialias: false, ao: false },
+  medium: { shadows: true, shadowSize: 2048, bloom: true, pixelRatio: 1, antialias: true, ao: true },
+  high: { shadows: true, shadowSize: 4096, bloom: true, pixelRatio: 2, antialias: true, ao: true },
 };
 
 /**

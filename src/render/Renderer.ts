@@ -1,18 +1,21 @@
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { GradePass, ScenePass } from './post/ScenePass';
 import { type QualitySettings, QUALITY_PRESETS } from './shared';
 
-/** Owns the WebGL context, the main scene/camera and the post-processing chain. */
+/**
+ * Owns the WebGL context, the main scene/camera and the post-processing chain:
+ * scene (multisampled, with ambient occlusion) → bloom → tone map and grade.
+ */
 export class Renderer {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
   readonly camera: THREE.PerspectiveCamera;
   private composer: EffectComposer;
   private bloom: UnrealBloomPass;
-  private renderPass: RenderPass;
+  readonly scenePass: ScenePass;
+  readonly grade: GradePass;
   quality: QualitySettings = { ...QUALITY_PRESETS.high };
   private width = 1;
   private height = 1;
@@ -28,17 +31,20 @@ export class Renderer {
     });
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 0.88;
+    // Tone mapping happens in the grade pass at the end of the chain.
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.camera = new THREE.PerspectiveCamera(42, 1, 2, 16000);
-    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 });
+    // The composer's own buffers only carry post-processing; the scene pass multisamples.
+    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, depthBuffer: false });
     this.composer = new EffectComposer(this.renderer, rt);
-    this.renderPass = new RenderPass(this.scene, this.camera);
-    this.composer.addPass(this.renderPass);
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.35, 0.55, 0.92);
+    this.scenePass = new ScenePass(this.scene, this.camera);
+    this.composer.addPass(this.scenePass);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.35, 0.4, 0.92);
     this.composer.addPass(this.bloom);
-    this.composer.addPass(new OutputPass());
+    this.grade = new GradePass();
+    this.composer.addPass(this.grade);
     this.resize();
   }
 
@@ -46,15 +52,23 @@ export class Renderer {
     this.quality = { ...q };
     this.renderer.shadowMap.enabled = q.shadows;
     this.bloom.enabled = q.bloom;
-    this.composer.renderTarget1.samples = q.antialias ? 4 : 0;
-    this.composer.renderTarget2.samples = q.antialias ? 4 : 0;
+    this.scenePass.setSamples(q.antialias ? 4 : 0);
+    this.scenePass.ao = q.ao;
     this.resize();
   }
 
-  /** Bloom grows at night so lit windows and street lamps glow. */
+  /** Bloom grows at night so lit windows and street lamps glow; the grade cools. */
   setNight(night: number): void {
-    this.bloom.strength = 0.12 + night * 0.6;
-    this.bloom.threshold = 1.15 - night * 0.45;
+    // By day only real highlights (sun glints) bloom; at night lit windows and lamps do.
+    this.bloom.strength = 0.06 + night * 0.46;
+    this.bloom.threshold = 2.4 - night * 1.55;
+    this.bloom.radius = 0.35 + night * 0.15;
+    this.grade.uniforms.uNight.value = night;
+  }
+
+  /** Ambient occlusion fades out with distance so it doesn't darken the haze. */
+  setFogRange(near: number, far: number): void {
+    this.scenePass.fade.set(Math.max(300, near * 0.9), Math.max(800, near * 0.9 + (far - near) * 0.35));
   }
 
   resize(): void {
@@ -76,6 +90,7 @@ export class Renderer {
   }
 
   render(): void {
+    this.grade.uniforms.uExposure.value = this.renderer.toneMappingExposure;
     this.composer.render();
   }
 
@@ -93,13 +108,13 @@ export class Renderer {
     performance.measure('boot:compileAsync', { start: t0, end: performance.now() });
     const t1 = performance.now();
     // Shadow and post-processing programs compile on the first real frame.
-    this.composer.render();
+    this.render();
     performance.measure('boot:firstFrame', { start: t1, end: performance.now() });
   }
 
   /** Renders one frame and returns a small JPEG thumbnail (for save slots). */
   captureThumbnail(width = 320, height = 180): string {
-    this.composer.render();
+    this.render();
     const src = this.renderer.domElement;
     const c = document.createElement('canvas');
     c.width = width;

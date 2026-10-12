@@ -177,6 +177,7 @@ export class WorldRenderer {
     s.snowCover += (w.snowCover - s.snowCover) * k * 0.5;
     s.wind += (w.wind - s.wind) * k;
     env.cloud = s.cloud;
+    env.windDrift = s.wind;
     env.fogAmount = s.fog;
     env.precip = Math.max(s.rain, s.snow);
     globalUniforms.uWet.value = s.wet;

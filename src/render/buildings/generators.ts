@@ -1,389 +1,17 @@
 import { Rng } from '../../core/rng';
-import type { StyleId } from '../../sim/buildings/Archetypes';
+export type { GenInput } from './lot';
 import { VM } from '../../sim/traffic/Vehicles';
-import { type BuiltGeometry, GeoBuilder, type Mat, P, type RGB, hex, mixRGB, shade } from './BuildingKit';
+import { type BuiltGeometry, GeoBuilder, type Mat, P, shade } from './BuildingKit';
+import type { StyleId } from '../../sim/buildings/Archetypes';
+import { ACCENTS, ASPH, CAR_COLORS, CONC, GLASS, type Gen, type GenInput, GRASS, INDUSTRY, PAVE, RENDER, bushes, c, fence, m, parking, pick, rooftop, trees } from './lot';
 import { archForStyle } from '../../sim/research/Architecture';
 import { buildArch } from './procedural';
-
-export interface GenInput {
-  style: StyleId;
-  w: number;
-  d: number;
-  floors: number;
-  level: number;
-  seed: number;
-}
-
-type Gen = (g: GeoBuilder, b: GenInput, r: Rng) => void;
-
-// ── Palettes (sRGB) ─────────────────────────────────────────────────────────
-const SIDING = [0xefebe2, 0xe3d9c6, 0xd6d6d2, 0xb9c6cc, 0xb8c2a8, 0xf1e6cf, 0xc7b9a6, 0xa9b4bd, 0xe8e2d6, 0xd9cbb3];
-const BRICKS = [0x9a5b45, 0x8c4c3c, 0xa8735a, 0xb48a6c, 0x7d5a4c, 0xc9b8a0, 0x9e8f84];
-const RENDER = [0xe6e1d8, 0xd8d2c6, 0xc9c3b8, 0xece7dc, 0xbdb6aa, 0xd2c4ae, 0xa7a49e];
-const ROOFS = [0x3b3d40, 0x4a4038, 0x56585c, 0x7a4636, 0x41474a, 0x5b4b3d, 0x2f3236];
-const GLASS = [0x4f6170, 0x506b6a, 0x5c5a52, 0x6d7c88, 0x3d4b5a, 0x617783];
-const SPANDREL = [0xcfd2d4, 0x9ea3a8, 0x6a6f74, 0xd8d1c4, 0x3c4045];
-const INDUSTRY = [0xc5c8c8, 0xa9b2b6, 0xd7d0bf, 0x9aa79f, 0xb7b0a2, 0x8e9aa6, 0xe0dfd8];
-const ACCENTS = [0xc0392b, 0x2e86c1, 0x27ae60, 0xf39c12, 0x8e44ad, 0x16a085, 0xd35400, 0x2c3e50];
-const OFFICE_GLASS = [0x6d8fa8, 0x5e8a86, 0x8a8478, 0x9aa6b0, 0x4f6170, 0x617783, 0x3d4b5a];
-const CAR_COLORS = [0xf2f2f0, 0x1b1c1f, 0xa9adb2, 0x5d6168, 0x1f3550, 0x8e1b1b, 0xc9bfa8, 0x3c7ac0];
-
-const c = (h: number): RGB => hex(h);
-const pick = <T>(r: Rng, a: readonly T[]) => r.pick(a);
-
-function m(color: RGB, pattern: number, seed: number, fh = 3, bay = 3): Mat {
-  return { color, pattern, seed, fh, bay };
-}
-
-const GRASS = (s: number): Mat => m(c(0x6f8a45), P.GRASS, s);
-const PAVE = (s: number): Mat => m(c(0xb9b5ad), P.PAVING, s);
-const CONC = (s: number): Mat => m(c(0xa8a49c), P.CONCRETE, s);
-const ASPH = (s: number): Mat => m(c(0x4a4b4e), P.PARKING, s);
-
-// ── Shared lot helpers ──────────────────────────────────────────────────────
-
-function trees(g: GeoBuilder, r: Rng, n: number, x0: number, z0: number, x1: number, z1: number, avoid?: [number, number, number, number], scale = 1): void {
-  for (let i = 0; i < n * 3 && n > 0; i++) {
-    const x = r.range(x0, x1);
-    const z = r.range(z0, z1);
-    if (avoid && x > avoid[0] - 2 && x < avoid[2] + 2 && z > avoid[1] - 2 && z < avoid[3] + 2) continue;
-    g.prop({ kind: 'tree', x, y: 0, z, rot: r.next() * 6.28, scale: scale * r.range(0.65, 1.05), variant: r.int(0, 2) });
-    n--;
-  }
-}
-
-function bushes(g: GeoBuilder, r: Rng, n: number, x0: number, x1: number, z: number): void {
-  for (let i = 0; i < n; i++) {
-    g.prop({ kind: 'bush', x: x0 + ((x1 - x0) * (i + 0.5)) / n + r.range(-0.4, 0.4), y: 0, z: z + r.range(-0.3, 0.3), rot: r.next() * 6, scale: r.range(0.6, 1.0) });
-  }
-}
-
-/** Parking lot with stall rows along x and some parked cars. */
-function parking(g: GeoBuilder, r: Rng, x0: number, z0: number, x1: number, z1: number, fill: number, seed: number): void {
-  g.ground(x0, z0, x1, z1, ASPH(seed), 0.05);
-  const rowDepth = 5.2;
-  const aisle = 6;
-  for (let z = z0 + 0.4; z + rowDepth <= z1 + 0.1; z += rowDepth * 2 + aisle) {
-    for (const rz of [z + rowDepth / 2, z + rowDepth + aisle + rowDepth / 2]) {
-      if (rz + rowDepth / 2 > z1) continue;
-      for (let x = x0 + 1.4; x < x1 - 1.3; x += 2.6) {
-        if (r.next() > fill) continue;
-        const flip = rz > z + rowDepth ? Math.PI / 2 : -Math.PI / 2;
-        g.prop({ kind: 'car', x, y: 0.05, z: rz, rot: flip + r.range(-0.04, 0.04), variant: r.pick([VM.sedan, VM.hatchback, VM.suv, VM.sedan]), color: r.pick(CAR_COLORS) });
-      }
-    }
-  }
-}
-
-function fence(g: GeoBuilder, x0: number, z0: number, x1: number, z1: number, h: number, color: RGB, sides: [boolean, boolean, boolean, boolean] = [false, true, true, true]): void {
-  const t = 0.08;
-  const mat: Mat = { color, pattern: P.PLAIN, seed: 0 };
-  if (sides[0]) g.box(x0, z0, x1, z0 + t, 0, h, mat, mat);
-  if (sides[1]) g.box(x1 - t, z0, x1, z1, 0, h, mat, mat);
-  if (sides[2]) g.box(x0, z1 - t, x1, z1, 0, h, mat, mat);
-  if (sides[3]) g.box(x0, z0, x0 + t, z1, 0, h, mat, mat);
-}
-
-function rooftop(g: GeoBuilder, r: Rng, x0: number, z0: number, x1: number, z1: number, y: number, seed: number, parapet = 0.8): void {
-  const pc: Mat = { color: c(0xb5b2aa), pattern: P.PLAIN, seed };
-  const t = 0.35;
-  if (parapet > 0) {
-    g.box(x0, z0, x1, z0 + t, y, y + parapet, pc, pc);
-    g.box(x0, z1 - t, x1, z1, y, y + parapet, pc, pc);
-    g.box(x0, z0 + t, x0 + t, z1 - t, y, y + parapet, pc, pc);
-    g.box(x1 - t, z0 + t, x1, z1 - t, y, y + parapet, pc, pc);
-  }
-  const hv: Mat = { color: c(0xc9cbcc), pattern: P.METAL, seed };
-  const n = Math.min(5, Math.floor(((x1 - x0) * (z1 - z0)) / 120) + 1);
-  for (let i = 0; i < n; i++) {
-    const w = r.range(1.5, 3.2), d = r.range(1.5, 3);
-    const x = r.range(x0 + 1.5, x1 - 1.5 - w), z = r.range(z0 + 1.5, z1 - 1.5 - d);
-    if (x1 - x0 < 6 || z1 - z0 < 6) break;
-    g.box(x, z, x + w, z + d, y, y + r.range(1, 1.8), hv, hv);
-  }
-}
+import { house, lowrise, midrise, tower, townhouse } from './residential';
+import { bigbox, mixeduse, office, officeTower, shop, stripmall } from './commercial';
+import { PAL, balcony, canopy, cornice, outline, parapet, piers, roofscape } from './architecture';
 
 // ── Residential ─────────────────────────────────────────────────────────────
 
-const house: Gen = (g, b, r) => {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
-  const wall = c(pick(r, SIDING));
-  const roof = c(pick(r, ROOFS));
-  const garage = r.chance(0.6) && w >= 16;
-  const bw = Math.min(w - (garage ? 7.5 : 4), r.range(9, 12) + b.level * 1.2);
-  const bd = Math.min(d - 12, r.range(8, 10.5) + b.level * 0.8);
-  const setback = r.range(5.5, 7.5);
-  const side = r.chance(0.5) ? 1 : -1;
-  const off = garage ? -side * 2 : r.range(-0.8, 0.8);
-  const x0 = off - bw / 2, x1 = off + bw / 2, z0 = setback, z1 = setback + bd;
-  const floors = Math.max(1, Math.min(2, b.floors));
-  const fh = 2.95;
-  const plinth = 0.45;
-  const facade: Mat = m(wall, b.level >= 3 && r.chance(0.4) ? P.BRICK : P.RES, s, fh, 3.2);
-  const roofM: Mat = m(roof, P.ROOF_TILE, s);
-  g.box(x0 - 0.15, z0 - 0.15, x1 + 0.15, z1 + 0.15, 0, plinth, CONC(s), null);
-  g.box(x0, z0, x1, z1, plinth, plinth + floors * fh, facade, null);
-  const top = plinth + floors * fh;
-  const rs = r.next();
-  const gableEnd = m(wall, P.PLAIN, s);
-  if (rs < 0.5) g.gable(x0, z0, x1, z1, top, r.range(2.2, 3.2), true, roofM, gableEnd);
-  else if (rs < 0.75) g.gable(x0, z0, x1, z1, top, r.range(2.4, 3.4), false, roofM, gableEnd);
-  else g.hip(x0, z0, x1, z1, top, r.range(2.0, 2.8), roofM);
-  if (r.chance(0.45)) {
-    const cx = r.range(x0 + 1, x1 - 1.6);
-    g.box(cx, z0 + bd * 0.4, cx + 0.8, z0 + bd * 0.4 + 0.8, top, top + 3.4, m(c(pick(r, BRICKS)), P.BRICK, s), m(c(0x3a3a3a), P.PLAIN, s));
-  }
-  // Porch canopy and steps.
-  const px = off + r.range(-bw * 0.2, bw * 0.2);
-  g.box(px - 1.3, z0 - 1.4, px + 1.3, z0, 2.55, 2.7, m(wall, P.PLAIN, s), m(roof, P.PLAIN, s));
-  g.box(px - 1.1, z0 - 1.3, px + 1.1, z0, 0, plinth, CONC(s), CONC(s));
-  // Garage
-  if (garage) {
-    const gx0 = side > 0 ? x1 : x0 - 4;
-    const gx1 = side > 0 ? x1 + 4 : x0;
-    const gz0 = z0 + 0.8;
-    const gz1 = gz0 + 6.5;
-    g.box(gx0, gz0, gx1, gz1, 0, 2.9, m(wall, P.PLAIN, s), null);
-    g.wall(gx1 - 0.35, gz0 - 0.02, gx0 + 0.35, gz0 - 0.02, 0.05, 2.35, m(shade(wall, 0.92), P.DOOR, s));
-    g.gable(gx0, gz0, gx1, gz1, 2.9, 1.2, false, roofM, m(wall, P.PLAIN, s), 0.25);
-    g.ground(gx0 + 0.3, 0, gx1 - 0.3, gz0, CONC(s), 0.05);
-    if (r.chance(0.55)) g.prop({ kind: 'car', x: (gx0 + gx1) / 2, y: 0.05, z: gz0 * 0.45, rot: Math.PI / 2, variant: r.pick([VM.sedan, VM.suv, VM.hatchback]), color: r.pick(CAR_COLORS) });
-  } else {
-    const dx = side > 0 ? x1 + 0.8 : x0 - 3.6;
-    g.ground(dx, 0, dx + 2.8, z0 + 4, CONC(s), 0.05);
-    if (r.chance(0.5)) g.prop({ kind: 'car', x: dx + 1.4, y: 0.05, z: 3.2, rot: Math.PI / 2, variant: r.pick([VM.sedan, VM.hatchback]), color: r.pick(CAR_COLORS) });
-  }
-  g.ground(px - 0.6, 0, px + 0.6, z0 - 1.3, PAVE(s), 0.045);
-  // Back yard: fence, maybe a pool, trees.
-  if (r.chance(0.7)) fence(g, -w / 2 + 0.2, z1 + 1, w / 2 - 0.2, d - 0.2, r.range(1.1, 1.7), c(r.pick([0xcdb69a, 0xe8e6e0, 0x8b7355])), [false, true, true, true]);
-  if (b.level >= 2 && r.chance(0.35) && d - z1 > 9) {
-    const pw = Math.min(4, w * 0.25), pd = 6.5;
-    const pxc = r.range(-w / 2 + 3, w / 2 - 3 - pw);
-    g.ground(pxc - 1, z1 + 2, pxc + pw + 1, z1 + 2 + pd + 2, PAVE(s), 0.05);
-    g.ground(pxc, z1 + 3, pxc + pw, z1 + 3 + pd, m(c(0x3aa0c8), P.WATER, s), 0.08);
-  }
-  trees(g, r, r.int(1, 3), -w / 2 + 1.5, z1 + 2, w / 2 - 1.5, d - 1.5, undefined, 0.9);
-  if (r.chance(0.5)) trees(g, r, 1, -w / 2 + 1.5, 1.5, w / 2 - 1.5, z0 - 2, [x0, z0, x1, z1], 0.8);
-  bushes(g, r, Math.max(2, Math.floor(bw / 2.2)), x0 + 0.5, x1 - 0.5, z0 - 0.8);
-};
-
-const townhouse: Gen = (g, b, r) => {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
-  const n = Math.max(2, Math.floor((w - 1) / 6.2));
-  const uw = (w - 1) / n;
-  const setback = r.range(3, 4.5);
-  const bd = Math.min(d - 8, r.range(10, 12.5));
-  const brick = r.chance(0.6);
-  const baseCol = c(pick(r, brick ? BRICKS : RENDER));
-  const flat = r.chance(0.5);
-  const roof = c(pick(r, ROOFS));
-  for (let i = 0; i < n; i++) {
-    const x0 = -w / 2 + 0.5 + i * uw;
-    const x1 = x0 + uw;
-    const col = mixRGB(baseCol, c(pick(r, brick ? BRICKS : SIDING)), 0.35);
-    const fl = Math.max(2, b.floors + (r.chance(0.25) ? 1 : 0));
-    const h = 0.5 + fl * 3.0;
-    const zb = setback + r.range(-0.3, 0.3);
-    const mat = m(col, brick ? P.BRICK : P.RES, s + i, 3.0, uw / 2);
-    g.box(x0, zb, x1, zb + bd, 0, h, mat, null);
-    if (flat) {
-      g.flat(x0, zb, x1, zb + bd, h, m(c(0x77746e), P.ROOF_FLAT, s));
-      g.box(x0, zb, x1, zb + 0.3, h, h + 0.7, m(shade(col, 0.9), P.PLAIN, s), m(c(0x9a968e), P.PLAIN, s));
-    } else {
-      g.gable(x0, zb, x1, zb + bd, h, 2.6, false, m(roof, P.ROOF_TILE, s), m(col, P.PLAIN, s), 0.05);
-    }
-    // Stoop and door canopy
-    g.box(x0 + uw * 0.35, zb - 1.4, x0 + uw * 0.65, zb, 0, 0.5, CONC(s), CONC(s));
-    g.ground(x0 + uw * 0.4, 0, x0 + uw * 0.6, zb - 1.4, PAVE(s), 0.045);
-    if (i % 2 === 0) bushes(g, r, 2, x0 + 0.6, x0 + uw * 0.3, zb - 0.9);
-  }
-  const back = setback + bd;
-  if (d - back > 7) {
-    parking(g, r, -w / 2 + 1, d - 6.5, w / 2 - 1, d - 0.5, 0.5, s);
-    fence(g, -w / 2 + 0.2, back + 0.5, w / 2 - 0.2, d - 7, 1.4, c(0xcdb69a), [false, true, true, true]);
-  }
-  trees(g, r, Math.floor(n / 2), -w / 2 + 2, back + 1.5, w / 2 - 2, Math.max(back + 2, d - 8), undefined, 0.85);
-};
-
-function apartmentBlock(g: GeoBuilder, b: GenInput, r: Rng, tall: boolean): void {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
-  const setback = r.range(3.5, 6);
-  const rearPark = d > 30 ? r.range(8, 12) : 0;
-  const bw = w - r.range(3, 6);
-  const bd = Math.max(10, d - setback - rearPark - 2);
-  const x0 = -bw / 2, x1 = bw / 2, z0 = setback, z1 = setback + bd;
-  const fh = 3.05;
-  const floors = Math.max(3, b.floors);
-  const brick = r.chance(tall ? 0.3 : 0.5);
-  const col = c(pick(r, brick ? BRICKS : RENDER));
-  const facade = m(col, brick ? P.BRICK : P.RES, s, fh, r.range(3.0, 3.8));
-  const base = m(shade(col, 0.82), b.level >= 2 && r.chance(0.5) ? P.STORE : P.RES, s, fh, 3.6);
-  const lShape = !tall && r.chance(0.35) && bd > 16;
-  const h = 0.4 + floors * fh;
-  if (lShape) {
-    const wingW = bw * 0.45;
-    g.box(x0, z0, x1, z0 + bd * 0.5, 0.4, fh + 0.4, base, null);
-    g.box(x0, z0, x1, z0 + bd * 0.5, fh + 0.4, h, facade, null);
-    g.box(x0, z0 + bd * 0.5, x0 + wingW, z1, 0.4, h, facade, null);
-    g.flat(x0, z0, x1, z0 + bd * 0.5, h, m(c(0x8a8780), P.ROOF_FLAT, s));
-    g.flat(x0, z0 + bd * 0.5, x0 + wingW, z1, h, m(c(0x8a8780), P.ROOF_FLAT, s));
-    rooftop(g, r, x0, z0, x1, z0 + bd * 0.5, h, s);
-    parking(g, r, x0 + wingW + 2, z0 + bd * 0.5 + 2, x1, z1, 0.6, s);
-  } else {
-    g.box(x0 - 0.2, z0 - 0.2, x1 + 0.2, z1 + 0.2, 0, 0.4, CONC(s), null);
-    g.box(x0, z0, x1, z1, 0.4, fh + 0.4, base, null);
-    g.box(x0, z0, x1, z1, fh + 0.4, h, facade, null);
-    g.flat(x0, z0, x1, z1, h, m(c(0x8a8780), P.ROOF_FLAT, s));
-    rooftop(g, r, x0, z0, x1, z1, h, s);
-    // Stair/elevator housing.
-    const sx = r.range(x0 + 3, x1 - 7);
-    g.box(sx, z0 + bd * 0.4, sx + 4, z0 + bd * 0.4 + 4, h, h + 3, m(shade(col, 0.9), P.PLAIN, s), m(c(0x7d7a74), P.ROOF_FLAT, s));
-  }
-  // Balconies on the street face.
-  if (r.chance(0.6)) {
-    const slab = m(c(0xd8d6d0), P.PLAIN, s);
-    const rail = m(c(0x6f7a80), P.GLASS_PLAIN, s);
-    const bays = Math.max(1, Math.round(bw / 3.4));
-    const bayW = bw / bays;
-    for (let f = 1; f < floors; f++) {
-      for (let k = 0; k < bays; k++) {
-        if ((k + f) % 2 !== 0) continue;
-        const bx = x0 + k * bayW + bayW * 0.12;
-        const y = 0.4 + f * fh;
-        g.box(bx, z0 - 1.2, bx + bayW * 0.76, z0, y - 0.15, y, slab, slab);
-        g.wall(bx + bayW * 0.76, z0 - 1.2, bx, z0 - 1.2, y, y + 1.0, rail);
-      }
-    }
-  }
-  // Entrance canopy and walkway.
-  g.box(-2, z0 - 1.6, 2, z0, 3.0, 3.25, m(c(0x55585c), P.METAL, s), m(c(0x55585c), P.METAL, s));
-  g.ground(-1.4, 0, 1.4, z0 - 1.6, PAVE(s), 0.045);
-  if (rearPark > 0 && !lShape) parking(g, r, -w / 2 + 1, d - rearPark + 0.5, w / 2 - 1, d - 0.5, 0.65, s);
-  trees(g, r, r.int(2, 4), -w / 2 + 1.5, 1, w / 2 - 1.5, setback - 1.5, undefined, 0.8);
-  bushes(g, r, Math.floor(bw / 3), x0 + 1, x1 - 1, z0 - 0.7);
-}
-
-const lowrise: Gen = (g, b, r) => apartmentBlock(g, b, r, false);
-const midrise: Gen = (g, b, r) => apartmentBlock(g, b, r, true);
-
-/**
- * Residential tower over a retail podium. Massing varies (slab, setback,
- * stepped tiers or an L of two wings), as do materials (render, brick, glass,
- * two-tone) and crowns (plant room, pyramid cap, spire or a lit band), so a
- * skyline of towers never looks copy-pasted.
- */
-const tower: Gen = (g, b, r) => {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
-  const fh = 3.1;
-  const podiumH = 2 * 4.2;
-  const pw = w - 4, pd = Math.min(d - 6, 30);
-  const pz0 = 3;
-  const base = c(pick(r, RENDER));
-  g.box(-pw / 2, pz0, pw / 2, pz0 + pd, 0, podiumH, m(shade(base, 0.85), P.STORE, s, 4.2, 4), m(c(0x7f7c76), P.ROOF_FLAT, s));
-  const floors = Math.max(8, b.floors);
-  const tw = Math.min(pw - 4, r.range(17, 23));
-  const td = Math.min(pd - 4, r.range(16, 22));
-  const tz0 = pz0 + (pd - td) / 2 + r.range(-1, 1.5);
-  const tx0 = -tw / 2 + r.range(-1.5, 1.5);
-
-  // Materials: glass for grand towers, otherwise render, brick or two-tone.
-  const finish = b.level >= 3 && r.chance(0.6) ? 'glass' : r.pick(['render', 'render', 'brick', 'twoTone', 'glass']);
-  const glassMat = m(c(pick(r, GLASS)), P.GLASS, s, fh, 1.7);
-  const renderMat = m(base, P.RES, s, fh, 3.2);
-  const brickMat = m(c(pick(r, BRICKS)), P.BRICK, s, fh, 3.2);
-  const lower = finish === 'glass' ? glassMat : finish === 'brick' || finish === 'twoTone' ? brickMat : renderMat;
-  const upper = finish === 'twoTone' ? m(c(pick(r, [0xe9e4d8, 0xd8d2c6, 0xc9cfd4])), P.RES, s, fh, 3.2) : lower;
-  const roof = m(c(0x8a8780), P.ROOF_FLAT, s);
-  const glassy = finish === 'glass';
-
-  // Massing.
-  const form = floors < 12 ? 'slab' : r.pick(['slab', 'setback', 'stepped', 'wings']);
-  const tiers: [number, number, number, number, number][] = []; // x0, z0, x1, z1, floors
-  if (form === 'slab') tiers.push([tx0, tz0, tx0 + tw, tz0 + td, floors]);
-  else if (form === 'setback') {
-    const low = Math.round(floors * r.range(0.45, 0.65));
-    tiers.push([tx0, tz0, tx0 + tw, tz0 + td, low]);
-    const inset = r.range(2.2, 3.4);
-    tiers.push([tx0 + inset, tz0 + inset, tx0 + tw - inset, tz0 + td - inset, floors - low]);
-  } else if (form === 'stepped') {
-    const a = Math.round(floors * 0.5), bb = Math.round(floors * 0.3);
-    tiers.push([tx0, tz0, tx0 + tw, tz0 + td, a]);
-    tiers.push([tx0 + 1.6, tz0 + 1.6, tx0 + tw - 1.6, tz0 + td - 1.6, bb]);
-    tiers.push([tx0 + 3.4, tz0 + 3.4, tx0 + tw - 3.4, tz0 + td - 3.4, floors - a - bb]);
-  }
-  let y = podiumH;
-  let top: [number, number, number, number] = [tx0, tz0, tx0 + tw, tz0 + td];
-  if (form === 'wings') {
-    // An L of two wings at different heights.
-    const wa = tw * 0.55, db = td * 0.55;
-    const fa = floors, fb = Math.max(6, Math.round(floors * r.range(0.55, 0.8)));
-    const ya = podiumH + fa * fh, yb = podiumH + fb * fh;
-    g.box(tx0, tz0, tx0 + wa, tz0 + td, podiumH, ya, lower, roof);
-    g.box(tx0 + wa, tz0 + td - db, tx0 + tw, tz0 + td, podiumH, yb, upper, roof);
-    rooftop(g, r, tx0 + wa + 1, tz0 + td - db + 1, tx0 + tw - 1, tz0 + td - 1, yb, s, 0.9);
-    y = ya;
-    top = [tx0, tz0, tx0 + wa, tz0 + td];
-  } else {
-    tiers.forEach(([x0, z0, x1, z1, n], i) => {
-      const y1 = y + n * fh;
-      g.box(x0, z0, x1, z1, y, y1, i === 0 ? lower : upper, null);
-      g.flat(x0, z0, x1, z1, y1, roof);
-      y = y1;
-      top = [x0, z0, x1, z1];
-    });
-  }
-  const [cx0, cz0, cx1, cz1] = top;
-  const cw = cx1 - cx0, cd = cz1 - cz0;
-
-  // Facade rhythm: balcony bands on rendered towers, slim fins on glass ones.
-  if (!glassy && r.chance(0.65)) {
-    const slab = m(c(0xe2e0da), P.PLAIN, s);
-    const n = form === 'wings' ? floors : tiers[0][4];
-    for (let f = 1; f < n; f++) {
-      const yy = podiumH + f * fh;
-      g.box(tx0 - 0.9, tz0 - 0.9, (form === 'wings' ? tx0 + tw * 0.55 : tx0 + tw) + 0.9, tz0, yy - 0.18, yy, slab, slab);
-    }
-  } else if (glassy) {
-    const fin = m(c(0xc9ccd0), P.METAL, s);
-    const n = Math.max(2, Math.floor(cw / 4.5));
-    for (let i = 0; i <= n; i++) {
-      const x = cx0 + (cw * i) / n;
-      g.box(x - 0.12, cz0 - 0.35, x + 0.12, cz0, podiumH, y, fin, fin);
-    }
-  }
-
-  // Crown.
-  const crown = r.pick(['plant', 'plant', 'cap', 'spire', 'band']);
-  if (crown === 'cap') {
-    g.hip(cx0, cz0, cx1, cz1, y, Math.min(cw, cd) * 0.32, m(c(r.pick([0x5c6670, 0x3f4a52, 0x7a8288])), P.METAL, s), 0.05);
-  } else if (crown === 'spire') {
-    g.box(cx0 + cw * 0.3, cz0 + cd * 0.3, cx1 - cw * 0.3, cz1 - cd * 0.3, y, y + 5, m(shade(base, 0.8), P.PLAIN, s), roof);
-    g.cylinder((cx0 + cx1) / 2, (cz0 + cz1) / 2, 0.45, 0.06, y + 5, y + 5 + Math.min(28, floors * 0.9), 6, m(c(0xb8bcc0), P.METAL, s), null);
-    g.box((cx0 + cx1) / 2 - 0.25, (cz0 + cz1) / 2 - 0.25, (cx0 + cx1) / 2 + 0.25, (cz0 + cz1) / 2 + 0.25, y + 5 + Math.min(28, floors * 0.9), y + 5.6 + Math.min(28, floors * 0.9), m(c(0xff4433), P.SIGN, s, 1, 0.5), null);
-  } else if (crown === 'band') {
-    // A lit band around the top floor, glowing at night.
-    const glow = m(c(r.pick([0xfff3d6, 0x9fd8ff, 0xb8ffd8])), P.SIGN, s, 1, cw);
-    g.box(cx0 - 0.2, cz0 - 0.2, cx1 + 0.2, cz1 + 0.2, y - 0.9, y - 0.3, glow, null);
-    rooftop(g, r, cx0 + 1.5, cz0 + 1.5, cx1 - 1.5, cz1 - 1.5, y, s, 1.1);
-  } else {
-    rooftop(g, r, cx0 + 1.5, cz0 + 1.5, cx1 - 1.5, cz1 - 1.5, y, s, 1.1);
-    g.box(cx0 + cw * 0.3, cz0 + cd * 0.3, cx0 + cw * 0.62, cz0 + cd * 0.62, y, y + 4.5, m(shade(base, 0.85), P.PLAIN, s), m(c(0x6d6a65), P.ROOF_FLAT, s));
-    if (r.chance(0.4)) g.cylinder(cx0 + cw * 0.75, cz0 + cd * 0.7, 0.12, 0.05, y, y + 9, 4, m(c(0x999999), P.METAL, s), null);
-  }
-  for (let i = 0; i < 4; i++) {
-    const x = -w / 2 + 3 + ((w - 6) * i) / 3;
-    g.box(x - 1, 0.5, x + 1, 2.5, 0, 0.6, CONC(s), m(c(0x5a7040), P.GRASS, s));
-    g.prop({ kind: 'tree', x, y: 0.6, z: 1.5, rot: i, scale: 0.6, variant: 0 });
-  }
-};
 
 // ── Commercial ──────────────────────────────────────────────────────────────
 
@@ -391,186 +19,7 @@ function sign(g: GeoBuilder, x0: number, x1: number, z: number, y0: number, y1: 
   g.wall(x1, z - 0.06, x0, z - 0.06, y0, y1, { color: c(color), pattern: P.SIGN, seed, bay: x1 - x0 });
 }
 
-const shop: Gen = (g, b, r) => {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
-  const bw = Math.min(w - 1.5, r.range(10, 16));
-  const bd = Math.min(d - 4, r.range(11, 16));
-  const side = r.chance(0.5) ? 1 : -1;
-  const x0 = side > 0 ? -w / 2 + 0.6 : w / 2 - 0.6 - bw;
-  const x1 = x0 + bw;
-  const z0 = r.range(0.6, 2.5), z1 = z0 + bd;
-  const floors = Math.max(1, b.floors);
-  const col = c(pick(r, r.chance(0.5) ? BRICKS : RENDER));
-  const h = floors * 3.6 + 0.6;
-  g.box(x0, z0, x1, z1, 0, h, m(col, P.STORE, s, 3.6, 3.4), m(c(0x7d7a74), P.ROOF_FLAT, s));
-  rooftop(g, r, x0, z0, x1, z1, h, s, 0.6);
-  const accent = pick(r, ACCENTS);
-  sign(g, x0 + 0.6, x1 - 0.6, z0, 3.25, 3.95, accent, s);
-  g.box(x0 + 0.3, z0 - 1.6, x1 - 0.3, z0, 2.9, 3.05, m(c(accent), P.PLAIN, s), m(c(accent), P.PLAIN, s));
-  const free = w - bw - 1.2;
-  if (free > 6) parking(g, r, side > 0 ? x1 + 0.6 : -w / 2 + 0.6, 0.8, side > 0 ? w / 2 - 0.6 : x0 - 0.6, d - 1, 0.5, s);
-  g.box(side > 0 ? x0 + 1 : x1 - 3, z1 + 0.5, side > 0 ? x0 + 3 : x1 - 1, z1 + 2, 0, 1.4, m(c(0x2f5a3a), P.METAL, s), m(c(0x2f5a3a), P.METAL, s));
-};
-
-const stripmall: Gen = (g, b, r) => {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  const front = Math.min(d - 14, r.range(16, 20));
-  parking(g, r, -w / 2 + 1, 1, w / 2 - 1, front, 0.55, s);
-  g.ground(-w / 2, front, w / 2, d, PAVE(s), 0.04);
-  const z0 = front + 2, z1 = d - 1.5;
-  const x0 = -w / 2 + 1, x1 = w / 2 - 1;
-  const h = 5.2;
-  const col = c(pick(r, RENDER));
-  g.box(x0, z0, x1, z1, 0, h, m(col, P.STORE, s, 4.8, 4.5), m(c(0x86837c), P.ROOF_FLAT, s));
-  rooftop(g, r, x0, z0, x1, z1, h, s, 1.2);
-  const units = Math.max(3, Math.floor((x1 - x0) / 9));
-  const uw = (x1 - x0) / units;
-  for (let i = 0; i < units; i++) sign(g, x0 + i * uw + 0.8, x0 + (i + 1) * uw - 0.8, z0, 3.7, 4.6, pick(r, ACCENTS), s + i);
-  g.box(x0, z0 - 3, x1, z0, 3.3, 3.55, m(c(0x9a958c), P.PLAIN, s), m(c(0x9a958c), P.PLAIN, s));
-  for (let i = 0; i <= units; i++) {
-    const px = x0 + i * uw;
-    g.box(px - 0.15, z0 - 2.9, px + 0.15, z0 - 2.6, 0, 3.3, m(c(0x9a958c), P.PLAIN, s), null);
-  }
-  // Pylon sign by the road.
-  const accent = pick(r, ACCENTS);
-  g.box(x0 + 1, 0.5, x0 + 1.6, 1.1, 0, 6, m(c(0x55585c), P.METAL, s), null);
-  g.box(x0 + 0.3, 0.6, x0 + 2.3, 1.0, 4, 6.8, m(c(accent), P.SIGN, s, 3, 2), m(c(accent), P.PLAIN, s));
-  trees(g, r, 3, -w / 2 + 2, 0.5, w / 2 - 2, 1.2, undefined, 0.7);
-};
-
-const mixeduse: Gen = (g, b, r) => {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
-  const floors = Math.max(3, b.floors);
-  const bw = w - 1, bd = Math.min(d - 5, r.range(16, 22));
-  const x0 = -bw / 2, x1 = bw / 2, z0 = 0.8, z1 = z0 + bd;
-  const brick = r.chance(0.55);
-  const col = c(pick(r, brick ? BRICKS : RENDER));
-  const gh = 4.2;
-  g.box(x0, z0, x1, z1, 0, gh, m(shade(col, 0.75), P.STORE, s, gh, 4), null);
-  const h = gh + (floors - 1) * 3.1;
-  g.box(x0, z0, x1, z1, gh, h, m(col, brick ? P.BRICK : P.RES, s, 3.1, 3.1), null);
-  g.box(x0 - 0.2, z0 - 0.2, x1 + 0.2, z1 + 0.2, gh - 0.3, gh, m(c(0xd8d4cc), P.PLAIN, s), m(c(0xd8d4cc), P.PLAIN, s));
-  g.flat(x0, z0, x1, z1, h, m(c(0x7f7c76), P.ROOF_FLAT, s));
-  rooftop(g, r, x0, z0, x1, z1, h, s, 0.9);
-  const units = Math.max(2, Math.floor(bw / 7));
-  const uw = bw / units;
-  for (let i = 0; i < units; i++) {
-    const accent = pick(r, ACCENTS);
-    sign(g, x0 + i * uw + 0.6, x0 + (i + 1) * uw - 0.6, z0, 3.2, 3.85, accent, s + i);
-    if (r.chance(0.6)) g.box(x0 + i * uw + 0.4, z0 - 1.5, x0 + (i + 1) * uw - 0.4, z0, 2.8, 2.95, m(c(accent), P.PLAIN, s), m(shade(c(accent), 0.9), P.PLAIN, s));
-  }
-  if (d - z1 > 7) parking(g, r, -w / 2 + 1, z1 + 1, w / 2 - 1, d - 0.5, 0.6, s);
-};
-
-const bigbox: Gen = (g, b, r) => {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  const front = Math.min(d - 18, 16);
-  parking(g, r, -w / 2 + 1, 1, w / 2 - 1, front, 0.5, s);
-  const z0 = front + 1.5, z1 = d - 1.5, x0 = -w / 2 + 2, x1 = w / 2 - 2;
-  const h = r.range(8, 10);
-  const col = c(pick(r, [0xd8d4ca, 0xc9c6bf, 0xe2ddd0, 0xb8b4ab]));
-  g.box(x0, z0, x1, z1, 0, h, m(col, P.CONCRETE, s), m(c(0x9c9992), P.ROOF_FLAT, s));
-  rooftop(g, r, x0, z0, x1, z1, h, s, 1.2);
-  const accent = pick(r, ACCENTS);
-  const ex = r.range(x0 + 8, x1 - 16);
-  g.wall(ex + 10, z0 - 0.05, ex, z0 - 0.05, 0, 4.5, m(c(0x55636e), P.GLASS, s, 4.5, 2));
-  g.box(ex - 1, z0 - 3, ex + 11, z0, 4.5, 5, m(c(accent), P.PLAIN, s), m(c(accent), P.PLAIN, s));
-  sign(g, ex - 2, ex + 12, z0, h - 2.8, h - 0.5, accent, s);
-  g.box(x0, z0 - 0.05, x1, z0, h - 0.8, h, m(c(accent), P.PLAIN, s), null);
-  trees(g, r, 4, -w / 2 + 2, 0.5, w / 2 - 2, 1.2, undefined, 0.7);
-};
-
 // ── Office ──────────────────────────────────────────────────────────────────
-
-const office: Gen = (g, b, r) => {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
-  const floors = Math.max(3, b.floors);
-  const fh = 3.8;
-  const bw = w - r.range(4, 8);
-  const bd = Math.min(d - 10, r.range(16, 24));
-  const z0 = r.range(4, 6), z1 = z0 + bd, x0 = -bw / 2, x1 = bw / 2;
-  const glass = c(pick(r, GLASS));
-  const span = c(pick(r, SPANDREL));
-  const h = floors * fh;
-  g.box(x0, z0, x1, z1, 0, fh, m(glass, P.GLASS, s, fh, 2), null);
-  g.box(x0, z0, x1, z1, fh, h, m(mixRGB(span, glass, 0.15), P.OFFICE, s, fh, r.range(2.6, 3.4)), null);
-  g.flat(x0, z0, x1, z1, h, m(c(0x8c8982), P.ROOF_FLAT, s));
-  rooftop(g, r, x0, z0, x1, z1, h, s, 1.0);
-  g.box(x0 + bw * 0.25, z0 + bd * 0.3, x0 + bw * 0.55, z0 + bd * 0.65, h, h + 3.5, m(span, P.PLAIN, s), m(c(0x6d6a65), P.ROOF_FLAT, s));
-  g.box(-4, z0 - 3.5, 4, z0, 3.6, 3.9, m(c(0x55585c), P.METAL, s), m(c(0x55585c), P.METAL, s));
-  g.ground(-3, 0, 3, z0 - 3.5, PAVE(s), 0.045);
-  if (d - z1 > 7) parking(g, r, -w / 2 + 1, z1 + 1.5, w / 2 - 1, d - 0.5, 0.7, s);
-  trees(g, r, 3, -w / 2 + 1.5, 1, w / 2 - 1.5, z0 - 1.5, [-4, 0, 4, z0], 0.8);
-  bushes(g, r, Math.floor(bw / 3), x0 + 1, x1 - 1, z0 - 0.7);
-};
-
-const officeTower: Gen = (g, b, r) => {
-  const { w, d } = b;
-  const s = b.seed & 255;
-  g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
-  const floors = Math.max(12, b.floors);
-  const fh = 3.9;
-  const glass = c(pick(r, OFFICE_GLASS));
-  const tw = Math.min(w - 6, r.range(22, 28));
-  const td = Math.min(d - 8, r.range(20, 26));
-  const z0 = (d - td) / 2 + 1, x0 = -tw / 2;
-  g.box(x0 - 2, z0 - 2, x0 + tw + 2, z0 + td + 2, 0, 6, m(shade(glass, 1.15), P.GLASS, s, 6, 3), m(c(0x7c7a74), P.ROOF_FLAT, s));
-  const fins = r.chance(0.6);
-  const finMat = m(c(r.pick([0xc9ccd0, 0x8d9399, 0x3a3f45])), P.METAL, s);
-  const stages = floors > 24 ? 3 : 2;
-  let y = 6;
-  let inset = 0;
-  const per = Math.floor(floors / stages);
-  for (let k = 0; k < stages; k++) {
-    const fl = k === stages - 1 ? floors - per * (stages - 1) : per;
-    const y1 = y + fl * fh;
-    const mat = r.chance(0.5) ? m(glass, P.GLASS, s, fh, 1.6) : m(mixRGB(c(pick(r, SPANDREL)), glass, 0.4), P.OFFICE, s, fh, 2.2);
-    g.box(x0 + inset, z0 + inset, x0 + tw - inset, z0 + td - inset, y, y1, mat, m(c(0x77746e), P.ROOF_FLAT, s));
-    // Slim vertical fins on the long faces give the glass a rhythm.
-    if (fins) {
-      const n = Math.max(3, Math.floor((tw - 2 * inset) / 3.2));
-      for (let i = 0; i <= n; i++) {
-        const x = x0 + inset + ((tw - 2 * inset) * i) / n;
-        for (const [za, zb] of [[z0 + inset - 0.3, z0 + inset], [z0 + td - inset, z0 + td - inset + 0.3]] as [number, number][]) g.box(x - 0.1, za, x + 0.1, zb, y, y1, finMat, finMat);
-      }
-    }
-    y = y1;
-    inset += r.range(1.2, 2.5);
-  }
-  const cx0 = x0 + inset, cz0 = z0 + inset, cx1 = x0 + tw - inset, cz1 = z0 + td - inset;
-  const crown = r.pick(['plant', 'band', 'logo', 'spire']);
-  if (crown === 'band') {
-    const glow = m(c(r.pick([0xfff3d6, 0x9fd8ff, 0xd8c8ff])), P.SIGN, s, 1, cx1 - cx0);
-    g.box(cx0 - 0.25, cz0 - 0.25, cx1 + 0.25, cz1 + 0.25, y, y + 2.4, glow, m(c(0x77746e), P.ROOF_FLAT, s));
-    rooftop(g, r, cx0 + 1, cz0 + 1, cx1 - 1, cz1 - 1, y + 2.4, s, 0.6);
-  } else if (crown === 'logo') {
-    rooftop(g, r, cx0, cz0, cx1, cz1, y, s, 1.5);
-    // The company's lit panel near the top of the street face.
-    const pw = Math.min(10, (cx1 - cx0) * 0.5);
-    g.box(-pw / 2 + (cx0 + cx1) / 2, cz0 - 0.35, pw / 2 + (cx0 + cx1) / 2, cz0 - 0.1, y - 5.2, y - 1.4, m(c(r.pick([0xe8453c, 0x2f80ed, 0x27ae60, 0xf2c94c, 0xffffff])), P.SIGN, s, 1, pw), null);
-  } else if (crown === 'spire' && floors > 20) {
-    rooftop(g, r, cx0, cz0, cx1, cz1, y, s, 1.5);
-    g.cylinder((cx0 + cx1) / 2, (cz0 + cz1) / 2, 0.6, 0.08, y, y + 18 + floors * 0.3, 6, m(c(0xb8bcc0), P.METAL, s), null);
-  } else {
-    rooftop(g, r, cx0, cz0, cx1, cz1, y, s, 1.5);
-    if (floors > 26 && r.chance(0.6)) g.cylinder(x0 + tw / 2, z0 + td / 2, 0.5, 0.08, y, y + 22, 6, m(c(0xb0b0b0), P.METAL, s), null);
-  }
-  // Entrance canopy.
-  g.box(-6, z0 - 6, 6, z0 - 2, 4.6, 5.0, m(c(0xd8d8d4), P.METAL, s), m(c(0xc8c8c4), P.METAL, s));
-  for (let i = 0; i < 5; i++) {
-    const x = -w / 2 + 3 + ((w - 6) * i) / 4;
-    g.box(x - 1.2, 0.6, x + 1.2, 2.6, 0, 0.6, CONC(s), m(c(0x5a7040), P.GRASS, s));
-    g.prop({ kind: 'tree', x, y: 0.6, z: 1.6, rot: i, scale: 0.65, variant: 1 });
-  }
-};
 
 // ── Industrial ──────────────────────────────────────────────────────────────
 
@@ -578,7 +27,8 @@ function loadingDoors(g: GeoBuilder, x0: number, x1: number, z: number, n: numbe
   const step = (x1 - x0) / n;
   for (let i = 0; i < n; i++) {
     const a = x0 + i * step + step * 0.2;
-    g.wall(a + step * 0.6, z - 0.05, a, z - 0.05, 0.1, 4.2, { color: c(0x9aa0a4), pattern: P.DOOR, seed });
+    g.box(a - 0.2, z - 0.12, a + step * 0.6 + 0.2, z, 0, 4.5, m(c(0x3d4146), P.TRIM, seed), m(c(0x3d4146), P.TRIM, seed), { sides: [true, true, false, true] });
+    g.wall(a + step * 0.6, z - 0.13, a, z - 0.13, 0.1, 4.2, { color: c(seed % 3 === 0 ? 0x5d6a74 : seed % 3 === 1 ? 0x8a8f93 : 0x6e5a44), pattern: P.DOOR, seed });
   }
 }
 
@@ -613,7 +63,7 @@ const warehouse: Gen = (g, b, r) => {
   const z0 = d - bd - 1, z1 = d - 1, x0 = -bw / 2, x1 = bw / 2;
   const col = c(pick(r, INDUSTRY));
   const h = r.range(8, 11);
-  g.box(x0, z0, x1, z1, 0, h, m(col, P.INDUSTRIAL, s, 10, 1.2), m(c(0xa3a5a4), P.ROOF_FLAT, s));
+  g.box(x0, z0, x1, z1, 0, h, m(col, P.INDUSTRIAL, s, 10, 1.2), m(c(0x85827c), P.ROOF_FLAT, s));
   rooftop(g, r, x0, z0, x1, z1, h, s, 0.5);
   const doors = Math.max(2, Math.floor(bw / 6));
   loadingDoors(g, x0 + 6, x1 - 1, z0, doors, s);
@@ -683,23 +133,46 @@ const depot: Gen = (g, b, r) => {
 
 // ── Services ────────────────────────────────────────────────────────────────
 
-function civic(g: GeoBuilder, r: Rng, b: GenInput, wallHex: number, accent: number, floors: number, frontDepth: number): [number, number, number, number, number] {
+/**
+ * A civic building: a stone plinth, a body with punched windows, a cornice,
+ * and a central entrance bay that rises above the parapet, with a canopy and a
+ * name band in the service's colour. Returns the main block's footprint and height.
+ */
+function civic(g: GeoBuilder, r: Rng, b: GenInput, wallHex: number, accent: number, floors: number, frontDepth: number, pattern: number = P.STONE): [number, number, number, number, number] {
   const { w, d } = b;
   const s = b.seed & 255;
   const bw = w - 6, bd = Math.min(d - frontDepth - 4, 18);
   const x0 = -bw / 2, x1 = bw / 2, z0 = frontDepth, z1 = z0 + bd;
-  const h = floors * 3.6 + 0.4;
-  g.box(x0, z0, x1, z1, 0, h, m(c(wallHex), P.OFFICE, s, 3.6, 3), m(c(0x7d7a74), P.ROOF_FLAT, s));
-  rooftop(g, r, x0, z0, x1, z1, h, s, 0.8);
-  g.box(x0 - 0.05, z0 - 0.06, x1 + 0.05, z0, h - 1.4, h - 0.4, m(c(accent), P.SIGN, s, 1, bw), null);
+  const fh = 3.6;
+  const h = floors * fh + 0.4;
+  const wall = m(c(wallHex), pattern, s, fh, 3.2);
+  const trim = m(c(0xe8e3d8), P.TRIM, s);
+  g.box(x0, z0, x1, z1, 0, 1.0, m(c(0x9d968a), P.STONE, s, 30, 3), null);
+  g.box(x0, z0, x1, z1, 1.0, h, wall, null);
+  outline(g, x0, z0, x1, z1, 0.85, 1.05, 0.08, trim);
+  outline(g, x0, z0, x1, z1, fh + 0.2, fh + 0.45, 0.1, trim);
+  g.flat(x0, z0, x1, z1, h, m(c(r.pick(PAL.membrane)), P.ROOF_FLAT, s));
+  parapet(g, x0, z0, x1, z1, h, 0.9, wall, trim);
+  cornice(g, x0, z0, x1, z1, h + 1.0, 1.1, trim);
+  roofscape(g, r, x0, z0, x1, z1, h, s, { overrun: null, density: 0.7 });
+  // Entrance bay: tall glazing between stone piers, rising above the parapet.
+  const ew = Math.min(8, bw * 0.34);
+  const eh = h + 1.8;
+  g.box(-ew / 2, z0 - 1.0, ew / 2, z0, 0, eh, m(c(0xd7cfc0), P.TRIM, s), trim, { sides: [true, true, false, true] });
+  g.wall(ew / 2 - 0.9, z0 - 1.03, -ew / 2 + 0.9, z0 - 1.03, 0.6, eh - 2.4, m(c(0x4a5862), P.GLASS, s, fh, 1.4));
+  g.box(-ew / 2 - 0.08, z0 - 1.1, ew / 2 + 0.08, z0 - 0.9, eh - 1.7, eh - 0.6, m(c(accent), P.SIGN, s, 1, ew), null, { sides: [true, true, false, true] });
+  canopy(g, -ew / 2 - 0.5, ew / 2 + 0.5, z0 - 1.0, 3.2, 2.2, 0.25, m(c(accent), P.TRIM, s));
+  g.box(-ew / 2 - 1, z0 - 3.4, ew / 2 + 1, z0 - 1.0, 0, 0.3, m(c(0xa6a196), P.STONE, s), m(c(0xb8b2a6), P.PAVING, s), { sides: [true, true, false, true] });
+  // Flagpole.
+  g.box(x0 + 1.5, z0 - 3.2, x0 + 1.62, z0 - 3.08, 0, 11, m(c(0xc9ccd0), P.METAL, s), null);
+  g.box(x0 + 1.62, z0 - 3.17, x0 + 3.4, z0 - 3.13, 9.6, 10.8, m(c(accent), P.TRIM, s), null);
   return [x0, z0, x1, z1, h];
 }
 
 const police: Gen = (g, b, r) => {
   const s = b.seed & 255;
   g.ground(-b.w / 2, 0, b.w / 2, b.d, PAVE(s), 0.04);
-  const [x0, , x1, z1] = civic(g, r, b, 0xd6d3cc, 0x1f4fa8, 3, 7);
-  g.box(-3, 4.2, 3, 7, 3.4, 3.7, m(c(0x1f4fa8), P.PLAIN, s), m(c(0x1f4fa8), P.PLAIN, s));
+  const [x0, , x1, z1] = civic(g, r, b, r.pick([0xcfc6b5, 0xbcb3a2, 0xd9d2c3]), 0x1f4fa8, 3, 7);
   g.cylinder(x1 - 2, z1 - 2, 0.15, 0.08, 11, 22, 4, m(c(0x999999), P.METAL, s), null);
   for (let i = 0; i < 4; i++) g.prop({ kind: 'car', x: x0 + 2 + i * 3, y: 0.05, z: 2.4, rot: Math.PI / 2, variant: VM.police, color: 0x1d2a44 });
   if (b.d - z1 > 6) parking(g, r, -b.w / 2 + 1, z1 + 1, b.w / 2 - 1, b.d - 0.5, 0.6, s);
@@ -727,7 +200,7 @@ const fire: Gen = (g, b, r) => {
 const clinic: Gen = (g, b, r) => {
   const s = b.seed & 255;
   g.ground(-b.w / 2, 0, b.w / 2, b.d, GRASS(s), 0.03);
-  const [x0, z0, x1, z1, h] = civic(g, r, b, 0xeeeeea, 0xc8202a, 2, 7);
+  const [x0, z0, x1, z1, h] = civic(g, r, b, 0xeae6dc, 0xc8202a, 2, 7, P.RES);
   g.box(-1.6, z0 - 0.4, 1.6, z0, h + 0.2, h + 3.4, m(c(0xffffff), P.PLAIN, s), m(c(0xffffff), P.PLAIN, s));
   g.wall(0.45, z0 - 0.42, -0.45, z0 - 0.42, h + 0.6, h + 3.0, m(c(0xd81e2a), P.SIGN, s, 1, 1));
   g.wall(1.2, z0 - 0.42, -1.2, z0 - 0.42, h + 1.35, h + 2.25, m(c(0xd81e2a), P.SIGN, s, 1, 1));
@@ -1191,13 +664,24 @@ const solar: Gen = (g, b) => {
   fence(g, -w / 2 + 0.2, 0.2, w / 2 - 0.2, d - 0.2, 2.0, c(0x6f7478), [true, true, true, true]);
 };
 
+/** Water tower: a fluted concrete shaft, a painted steel bowl with a catwalk, a pump house. */
 const waterTower: Gen = (g, b) => {
   const s = b.seed & 255;
   g.ground(-b.w / 2, 0, b.w / 2, b.d, CONC(s), 0.04);
   const cz = b.d / 2;
-  g.cylinder(0, cz, 1.6, 1.3, 0, 19, 12, m(c(0xd8d6d0), P.CONCRETE, s), null);
-  g.lathe(0, cz, [[1.3, 18.5], [5.6, 21.5], [6.3, 24.5], [5.4, 27.6], [2.4, 29.2], [0.01, 29.6]], 18, m(c(0xe9e7e1), P.METAL, s, 3, 3));
-  g.box(-6, 1, -3, 3, 0, 2.6, m(c(0xc9c3b8), P.PLAIN, s), m(c(0x7d7a74), P.ROOF_FLAT, s));
+  const paint = c([0xdfe3e2, 0xb9cdd3, 0xd6d0c2, 0xa9c0c6][s % 4]);
+  const band = c([0x2f5e7a, 0x6e5338, 0x3b5a4a, 0x8c2f2a][(s >> 2) % 4]);
+  g.cylinder(0, cz, 1.7, 1.25, 0, 18.6, 12, m(c(0xc9c4b8), P.CONCRETE, s, 3, 0.9), null);
+  g.lathe(0, cz, [[1.25, 18.4], [3.8, 20.2], [5.7, 22.0], [6.2, 23.6]], 14, m(paint, P.METAL, s, 3, 3));
+  g.lathe(0, cz, [[6.2, 23.6], [6.25, 24.6]], 14, m(band, P.METAL, s, 3, 3));
+  g.lathe(0, cz, [[6.25, 24.6], [5.6, 26.6], [3.4, 28.4], [0.9, 29.3], [0.01, 29.5]], 14, m(paint, P.METAL, s, 3, 3));
+  // Catwalk with a railing around the bowl's waist.
+  g.lathe(0, cz, [[6.25, 23.55], [7.0, 23.55], [7.0, 23.7], [6.25, 23.7]], 14, m(c(0x55595c), P.METAL, s));
+  g.lathe(0, cz, [[7.0, 23.7], [7.0, 24.7]], 14, m(c(0x3a3d40), P.LOUVRE, s, 3, 1));
+  g.cylinder(0, cz, 0.12, 0.05, 29.4, 31.5, 4, m(c(0x8a8d90), P.METAL, s), null);
+  // Pump house.
+  g.box(-6, 1, -3, 3.4, 0, 2.8, m(c(0xb9b2a4), P.BRICK, s, 3, 3), m(c(0x6f6c66), P.ROOF_FLAT, s));
+  g.wall(-4.0, 0.95, -5.0, 0.95, 0.05, 2.1, m(c(0x3a4a55), P.DOOR, s));
 };
 
 const pump: Gen = (g, b) => {
@@ -1391,6 +875,11 @@ const airport: Gen = (g, b, r) => {
 };
 
 /** Hotel: a slab with balconies over a glass lobby, a lit entrance canopy, flags and (when grand) a rooftop pool. */
+/**
+ * Hotel: a double-height glazed lobby under a stone podium with a porte-cochère,
+ * a guest-room slab in render or panels with balcony bays, and a crown carrying
+ * the brand (lit at night) or, for grand hotels, a rooftop pool deck.
+ */
 const hotel: Gen = (g, b, r) => {
   const { w, d } = b;
   const s = b.seed & 255;
@@ -1400,35 +889,47 @@ const hotel: Gen = (g, b, r) => {
   g.ground(-w / 2 + 3, 1.5, w / 2 - 3, 8.5, m(c(0x4a4b4e), P.PLAIN, s), 0.05);
   const x0 = -w / 2 + 3, x1 = w / 2 - 3, z0 = 11, z1 = d - 5;
   const fh = 3.2;
-  const top = 4.6 + (b.floors - 1) * fh;
-  const facade = c(r.pick([0xe9e4d8, 0xd8d2c6, 0xc9c3b8, 0xeeeeea, 0xb9b2a4]));
-  // Lobby, then the guest-room slab.
-  g.box(x0 - 1, z0 - 1, x1 + 1, z1, 0, 4.6, m(c(0x55707e), P.GLASS, s, 4.6, 3), m(c(0x8a8780), P.ROOF_FLAT, s));
-  g.box(x0, z0 + 1, x1, z1, 4.6, top, m(facade, P.RES, s, fh, 3.6), m(c(0x7d7a74), P.ROOF_FLAT, s));
-  // Balconies on the street face, one slab per floor.
-  for (let k = 0; k < b.floors - 1; k++) {
-    const y = 4.6 + k * fh;
-    g.box(x0 + 0.6, z0 + 0.1, x1 - 0.6, z0 + 1, y, y + 0.16, m(c(0xd9d6cf), P.PLAIN, s), m(c(0xd9d6cf), P.PLAIN, s));
-    g.box(x0 + 0.6, z0 + 0.05, x1 - 0.6, z0 + 0.12, y + 0.16, y + 1.1, m(c(0x8fa9b5), P.GLASS_PLAIN, s), null);
+  const lobbyH = 6.2;
+  const top = lobbyH + (b.floors - 1) * fh;
+  const panel = r.chance(0.4);
+  const facadeCol = c(r.pick(panel ? PAL.panel : PAL.render));
+  const facade = m(facadeCol, panel ? P.PANEL : P.RES, s, fh, 3.4);
+  const stone = c(r.pick([0xb8ad9a, 0xa39b8e, 0xc9bda6]));
+  const trim = m(c(r.pick([0xeeeae0, 0xd8cfbd, 0x3b3c3e])), P.TRIM, s);
+  // Lobby: glass between stone piers, the podium above it.
+  g.box(x0 - 1, z0 - 1, x1 + 1, z1, 0, lobbyH, m(c(0x4a5862), P.GLASS, s, lobbyH, 3), null);
+  piers(g, x0 - 1, x1 + 1, z0 - 1, 0, lobbyH, Math.max(4, Math.round((x1 - x0) / 4.5)), 0.7, 0.25, m(stone, P.STONE, s, 3, 3));
+  outline(g, x0 - 1, z0 - 1, x1 + 1, z1, lobbyH - 0.5, lobbyH + 0.2, 0.3, trim);
+  g.flat(x0 - 1, z0 - 1, x1 + 1, z1, lobbyH, m(c(0x7f7b74), P.ROOF_FLAT, s));
+  // Guest-room slab, set back from the podium edge.
+  g.box(x0, z0 + 1, x1, z1, lobbyH, top, facade, null);
+  // Balcony bays in pairs, stacked up the street face.
+  const bays = Math.max(2, Math.round((x1 - x0) / 3.4));
+  const bw2 = (x1 - x0) / bays;
+  const slab = m(c(0xdedad2), P.TRIM, s);
+  const rail = panel ? m(c(0x4d5e66), P.GLASS_PLAIN, s) : m(c(0xe8e3d8), P.TRIM, s);
+  for (let y = Math.ceil((lobbyH + 0.3) / fh) * fh; y <= top - fh + 0.1; y += fh) {
+    for (let k = 1; k + 1 < bays; k += 3) balcony(g, x0 + k * bw2 + 0.2, x0 + (k + 2) * bw2 - 0.2, z0 + 1, y + 0.02, 1.2, slab, rail);
   }
-  // Name band on the crown, lit at night.
-  g.box(-w / 4, z0 + 0.9, w / 4, z0 + 1.05, top - 1.3, top - 0.3, m(c(brand), P.SIGN, s, 1, w / 2), null);
-  // Entrance canopy on columns, with flags.
-  g.box(-6, 3, 6, z0 - 1, 3.8, 4.2, m(c(brand), P.PLAIN, s), m(c(0xeeeeea), P.PLAIN, s));
-  for (const x of [-5.6, 5.6]) g.box(x - 0.15, 3.2, x + 0.15, 3.5, 0, 3.8, m(c(0xd8d8d4), P.METAL, s), null);
+  g.flat(x0, z0 + 1, x1, z1, top, m(c(0x7d7a74), P.ROOF_FLAT, s));
+  // Crown: brand name band on the parapet, lit at night.
+  parapet(g, x0, z0 + 1, x1, z1, top, 1.6, m(facadeCol, P.TRIM, s), trim);
+  g.box(-w / 4, z0 + 0.82, w / 4, z0 + 1, top + 0.2, top + 1.4, m(c(brand), P.SIGN, s, 1, w / 2), null, { sides: [true, true, false, true] });
+  // Porte-cochère on columns, with flags.
+  canopy(g, -6, 6, z0 - 1, 4.4, 7.6, 0.45, m(c(brand), P.TRIM, s));
+  for (const x of [-5.6, 5.6]) g.box(x - 0.2, 3.2, x + 0.2, 3.6, 0, 4.4, m(c(0xd8d8d4), P.METAL, s), null);
   for (let i = 0; i < 3; i++) {
     const x = w / 2 - 4 - i * 1.6;
     g.box(x - 0.05, 1.2, x + 0.05, 1.3, 0, 6.5, m(c(0xd8d8d4), P.METAL, s), null);
-    g.box(x + 0.05, 1.22, x + 1.3, 1.28, 5.6, 6.4, m(c(r.pick([0xc0392b, 0x2e86c1, 0x27ae60, 0xf1c40f, brand])), P.PLAIN, s), null);
+    g.box(x + 0.05, 1.22, x + 1.3, 1.28, 5.6, 6.4, m(c(r.pick([0xb23a30, 0x2e6f9e, 0x2f8a55, 0xd0902a, brand])), P.TRIM, s), null);
   }
   // Rooftop: plant, or a pool deck for grand hotels.
   if (b.level >= 3) {
-    g.box(x0 + 2, z0 + 3, x1 - 2, z1 - 2, top, top + 0.25, m(c(0xb9a888), P.PAVING, s), m(c(0xb9a888), P.PAVING, s));
+    g.box(x0 + 2, z0 + 3, x1 - 2, z1 - 2, top, top + 0.25, m(c(0xb9a888), P.WOOD, s, 3, 1), m(c(0xb9a888), P.WOOD, s, 3, 1));
     g.ground(x0 + 4, z0 + 5, (x0 + x1) / 2, z1 - 4, m(c(0x3aa0c8), P.WATER, s), top + 0.32);
-    for (let i = 0; i < 4; i++) g.box((x0 + x1) / 2 + 1.5 + i * 1.6, z0 + 5, (x0 + x1) / 2 + 2.3 + i * 1.6, z0 + 7, top + 0.25, top + 0.55, m(c(0xf4f4f0), P.PLAIN, s), m(c(0xf4f4f0), P.PLAIN, s));
-    for (const x of [x0 + 1.2, x1 - 1.2]) g.box(x - 0.05, z0 + 3, x + 0.05, z1 - 2, top, top + 1.1, m(c(0x8fa9b5), P.GLASS_PLAIN, s), null);
+    for (let i = 0; i < 4; i++) g.box((x0 + x1) / 2 + 1.5 + i * 1.6, z0 + 5, (x0 + x1) / 2 + 2.3 + i * 1.6, z0 + 7, top + 0.25, top + 0.55, m(c(0xf4f4f0), P.TRIM, s), m(c(0xf4f4f0), P.TRIM, s));
   } else {
-    rooftop(g, r, x0 + 1, z0 + 2, x1 - 1, z1 - 1, top, s, 0.7);
+    roofscape(g, r, x0, z0 + 1, x1, z1, top, s);
   }
   bushes(g, r, 4, -w / 2 + 1.5, -6.5, 9.5);
   bushes(g, r, 4, 6.5, w / 2 - 1.5, 9.5);
@@ -1451,9 +952,12 @@ const modernHouse: Gen = (g, b, r) => {
   // Ground floor with floor-to-ceiling glass, upper volume cantilevered in timber or render.
   g.box(x0, z0, x1, z1, 0.35, 3.4, m(c(0x55707e), P.GLASS, s, 3, 2.4), m(c(0x8a8780), P.ROOF_FLAT, s));
   const shift = r.range(-2, 2);
-  const upper = r.chance(0.5) ? m(c(0x9a6b45), P.INDUSTRIAL, s, 3, 0.4) : m(white, P.RES, s, 3, 3.6);
+  // Upper volume in timber boards or smooth render, cantilevered, under a thin dark fascia.
+  const upper = r.chance(0.5) ? m(c(r.pick([0x9a6b45, 0x7d5a3e, 0xb08a64])), P.WOOD, s, 3, 3) : m(white, P.PANEL, s, 3, 3.6);
   g.box(x0 + shift - 1, z0 - 1.5, x1 + shift - 2, z1 - 1, 3.4, 6.5, upper, m(dark, P.ROOF_FLAT, s));
-  g.box(x0 + shift - 1.2, z0 - 1.7, x1 + shift - 1.8, z1 - 0.8, 6.5, 6.75, m(dark, P.PLAIN, s), m(dark, P.PLAIN, s));
+  g.box(x0 + shift - 1.2, z0 - 1.7, x1 + shift - 1.8, z1 - 0.8, 6.5, 6.75, m(dark, P.TRIM, s), m(dark, P.TRIM, s));
+  // Soffit under the cantilever.
+  g.quad([x0 + shift - 1, 3.4, z0 - 1.5], [x1 + shift - 2, 3.4, z0 - 1.5], [x1 + shift - 2, 3.4, z0], [x0 + shift - 1, 3.4, z0], [0, -1, 0], m(c(0xb8a58a), P.WOOD, s, 3, 3), [[0, 0], [1, 0], [1, 1], [0, 1]]);
   // Carport and car.
   const side = r.chance(0.5) ? 1 : -1;
   const cx0 = side > 0 ? x1 + 0.4 : x0 - 4.4;
@@ -1537,7 +1041,7 @@ const supermarket: Gen = (g, b, r) => {
   g.ground(-w / 2, 0, w / 2, d, ASPH(s), 0.04);
   const brand = r.pick([0xc0392b, 0x27ae60, 0xe67e22, 0x1f4fa8]);
   const z0 = d - 26, z1 = d - 1.5, x0 = -w / 2 + 2, x1 = w / 2 - 2;
-  g.box(x0, z0, x1, z1, 0, 8, m(c(pick(r, INDUSTRY)), P.INDUSTRIAL, s, 8, 2), m(c(0xa3a5a4), P.ROOF_FLAT, s));
+  g.box(x0, z0, x1, z1, 0, 8, m(c(pick(r, INDUSTRY)), P.INDUSTRIAL, s, 8, 2), m(c(0x85827c), P.ROOF_FLAT, s));
   rooftop(g, r, x0, z0, x1, z1, 8, s, 0.6);
   const ex = r.range(x0 + 6, x1 - 16);
   g.wall(ex + 10, z0 - 0.05, ex, z0 - 0.05, 0, 5, m(c(0x2c3a44), P.GLASS_PLAIN, s));
@@ -1583,7 +1087,7 @@ const greenhouse: Gen = (g, b, r) => {
     g.box(x, z0, x + 8, z1, 0, 3, glassM, null);
     g.gable(x, z0, x + 8, z1, 3, 1.6, false, m(c(0xc8dce2), P.GLASS, s, 1.6, 1.6), glassM, 0.05);
   }
-  g.box(-w / 2 + 2, 2, -w / 2 + 14, 8, 0, 5, m(c(pick(r, INDUSTRY)), P.INDUSTRIAL, s, 5, 1.4), m(c(0xa3a5a4), P.ROOF_FLAT, s));
+  g.box(-w / 2 + 2, 2, -w / 2 + 14, 8, 0, 5, m(c(pick(r, INDUSTRY)), P.INDUSTRIAL, s, 5, 1.4), m(c(0x85827c), P.ROOF_FLAT, s));
   loadingDoors(g, -w / 2 + 3, -w / 2 + 13, 2, 2, s);
   trucks(g, r, 1, -w / 2 + 16, -w / 2 + 24, 4, 0);
   fence(g, -w / 2 + 0.2, 0.2, w / 2 - 0.2, d - 0.2, 1.8, c(0x6f7478), [false, true, true, true]);
@@ -1614,8 +1118,15 @@ const cityHall: Gen = (g, b, r) => {
   g.box(-13, 14.8, 13, 18, 0.6, 1.2, m(trim, P.CONCRETE, s), m(trim, P.PAVING, s));
   // Main block with a cornice.
   const z0 = 18, z1 = d - 4, h = 13;
-  g.box(-w / 2 + 4, z0, w / 2 - 4, z1, 0, h, m(stone, P.RES, s, 4.3, 3.6), m(c(0x8a8780), P.ROOF_FLAT, s));
-  g.box(-w / 2 + 3.6, z0 - 0.4, w / 2 - 3.6, z1 + 0.4, h, h + 0.8, m(trim, P.PLAIN, s), m(c(0x8a8780), P.ROOF_FLAT, s));
+  // Rusticated stone ground floor, smooth ashlar above, a cornice and balustraded parapet.
+  const bx0 = -w / 2 + 4, bx1 = w / 2 - 4;
+  g.box(bx0, z0, bx1, z1, 0, 4.6, m(c(0xd9d0bd), P.STONE, s, 4.6, 3.6), null);
+  g.box(bx0, z0, bx1, z1, 4.6, h, m(stone, P.STONE, s, 4.2, 3.6), null);
+  outline(g, bx0, z0, bx1, z1, 4.4, 4.75, 0.14, m(trim, P.TRIM, s));
+  g.flat(bx0, z0, bx1, z1, h, m(c(0x8a8780), P.ROOF_FLAT, s));
+  cornice(g, bx0, z0, bx1, z1, h + 0.1, 1.4, m(trim, P.TRIM, s));
+  parapet(g, bx0, z0, bx1, z1, h + 0.1, 1.1, m(stone, P.LOUVRE, s, 3, 1), m(trim, P.TRIM, s));
+  piers(g, bx0, bx1, z0, 4.75, h - 0.5, 8, 0.9, 0.18, m(trim, P.TRIM, s));
   // Portico: six columns, entablature and pediment facing the street.
   for (let i = 0; i < 6; i++) g.cylinder(-10 + i * 4, 15.8, 0.62, 0.52, 1.2, 11.4, 10, m(stone, P.PLAIN, s), null);
   g.box(-12, 14.6, 12, 18, 11.4, 12.6, m(trim, P.PLAIN, s), m(stone, P.PLAIN, s));

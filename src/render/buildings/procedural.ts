@@ -1,6 +1,7 @@
 import type { Rng } from '../../core/rng';
 import type { ArchMat, ArchSpec, Module, Section } from '../../sim/research/Architecture';
 import { type GeoBuilder, type Mat, P, type RGB, hex } from './BuildingKit';
+import { airHandler, outline, parapet as archParapet } from './architecture';
 
 /**
  * Geometry for procedurally composed buildings (research centres and designs
@@ -102,15 +103,11 @@ function drawRoof(g: GeoBuilder, sec: Section, roofColor: number, wall: Mat, r: 
   }
 }
 
+/** Parapet with a coping, flush with the section's walls (same finish, no windows). */
 function parapet(g: GeoBuilder, sec: Section, h: number, s: number): void {
   if (sec.shape !== 'block') return;
-  const pm = mat(0xb5b2aa, P.PLAIN, s);
-  const t = 0.3;
   const { x0, z0, x1, z1 } = sec;
-  g.box(x0, z0, x1, z0 + t, h, h + 0.8, pm, pm);
-  g.box(x0, z1 - t, x1, z1, h, h + 0.8, pm, pm);
-  g.box(x0, z0 + t, x0 + t, z1 - t, h, h + 0.8, pm, pm);
-  g.box(x1 - t, z0 + t, x1, z1 - t, h, h + 0.8, pm, pm);
+  archParapet(g, x0, z0, x1, z1, h, 0.85, mat(sec.wall.color, P.TRIM, s), mat(0xe4dfd4, P.TRIM, s));
 }
 
 function drawSection(g: GeoBuilder, spec: ArchSpec, sec: Section, r: Rng, s: number): void {
@@ -121,7 +118,18 @@ function drawSection(g: GeoBuilder, spec: ArchSpec, sec: Section, r: Rng, s: num
     const R = (sec.x1 - sec.x0) / 2;
     g.cylinder((sec.x0 + sec.x1) / 2, (sec.z0 + sec.z1) / 2, R, R, 0, h, 24, wall, sec.roof === 'flat' ? top : null);
   } else {
+    // A plinth line and a band at each floor slab give the block scale.
     g.box(sec.x0, sec.z0, sec.x1, sec.z1, 0, h, wall, top);
+    const trim = mat(0xd8d3c9, P.TRIM, s);
+    outline(g, sec.x0, sec.z0, sec.x1, sec.z1, 0, 0.5, 0.08, mat(0x8f897f, P.CONCRETE, s));
+    if (sec.floors > 1 && sec.role !== 'hall') outline(g, sec.x0, sec.z0, sec.x1, sec.z1, sec.floorH - 0.2, sec.floorH + 0.05, 0.1, trim);
+    // Roof plant on flat roofs that have room for it.
+    const idx = spec.sections.indexOf(sec);
+    const roofFree = !spec.modules.some((m) => m.onRoof === idx);
+    if (roofFree && (sec.roof === 'flat' || !sec.roof) && sec.x1 - sec.x0 > 10 && sec.z1 - sec.z0 > 8) {
+      const n = Math.min(3, Math.floor(((sec.x1 - sec.x0) * (sec.z1 - sec.z0)) / 160));
+      for (let i = 0; i < n; i++) airHandler(g, sec.x0 + 2 + i * 3.4, sec.z1 - 4, h, 2.6, 1.6, 1.2, s);
+    }
   }
   drawRoof(g, sec, spec.roofColor, wall, r, s);
 }
@@ -132,8 +140,9 @@ function drawEntrance(g: GeoBuilder, spec: ArchSpec, sec: Section, s: number): v
   const h = sectionHeight(sec);
   g.wall(cx + 2, z0 - 0.05, cx - 2, z0 - 0.05, 0.05, 3.2, mat(0x3a3f44, P.DOOR, s));
   // A canopy over the door on two slim columns, and a path to the street.
-  const acc = mat(spec.accent, P.PLAIN, s);
-  g.box(cx - 3.6, z0 - 3.4, cx + 3.6, z0, 3.5, 3.85, acc, mat(0x8a8780, P.ROOF_FLAT, s));
+  const acc = mat(spec.accent, P.TRIM, s);
+  g.box(cx - 3.6, z0 - 3.4, cx + 3.6, z0, 3.5, 3.85, acc, mat(0x8a8780, P.ROOF_FLAT, s), { sides: [true, true, false, true] });
+  g.box(cx - 2.4, z0 - 0.14, cx + 2.4, z0, 0, 3.5, mat(0x3a3d40, P.TRIM, s), null, { sides: [true, true, false, true] });
   for (const x of [cx - 3.2, cx + 3.2]) g.cylinder(x, z0 - 3, 0.15, 0.15, 0, 3.5, 6, mat(0x9aa0a4, P.METAL, s), null);
   g.ground(cx - 2.2, 0.4, cx + 2.2, z0, mat(0xc8c2b6, P.PAVING, s), 0.08);
   // The name band in the field's colour.
