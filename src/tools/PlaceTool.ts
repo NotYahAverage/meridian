@@ -106,7 +106,8 @@ export class PlaceTool extends Tool {
     const st = SERVICE_BY_ID.get(this.typeId);
     if (!st) return null;
     const pv = this.preview;
-    const lines = [`Cost ${formatMoney(st.cost)} · Upkeep ${formatMoney(st.upkeep)}/mo`];
+    const cost = this.game.city ? this.game.city.research.costOf(st) : st.cost;
+    const lines = [`Cost ${formatMoney(cost)} · Upkeep ${formatMoney(st.upkeep)}/mo`];
     if (pv?.conflicts.length) lines.push(`Replaces ${pv.conflicts.length} building${pv.conflicts.length > 1 ? 's' : ''}`);
     lines.push('R to flip side of street');
     return { title: st.name, lines, error: pv && !pv.valid ? pv.error : undefined, good: pv?.valid };

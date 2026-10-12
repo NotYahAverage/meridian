@@ -11,6 +11,7 @@ import { CursorLabelView, SaveStatus, MilestoneBanner, Toasts, Toolbar, Tooltip,
 import { icon } from './icons';
 import { Inspector } from './Inspector';
 import { ControlsDialog } from './ControlsDialog';
+import { DiscoveryDialog, ResearchDialog } from './ResearchDialog';
 import { LoadingScreen, MainMenu, Modal, NewCityDialog, PauseMenu, SaveLoadDialog, SettingsDialog } from './Menus';
 import { BudgetPanel, DistrictsPanel, GoalsPanel, LogPanel, OverlaysPanel, type Panel, type PanelId, PoliciesPanel, LandPanel, StatsPanel, TransitPanel } from './Panels';
 
@@ -87,6 +88,8 @@ export class UI {
   readonly saveLoad: SaveLoadDialog;
   readonly settings: SettingsDialog;
   readonly help: ControlsDialog;
+  readonly research: ResearchDialog;
+  readonly discovery: DiscoveryDialog;
   readonly pause: PauseMenu;
   readonly confirmDialog: ConfirmDialog;
   readonly choiceDialog: ChoiceDialog;
@@ -134,11 +137,13 @@ export class UI {
     this.saveLoad = new SaveLoadDialog(game);
     this.settings = new SettingsDialog(game);
     this.help = new ControlsDialog(game);
+    this.research = new ResearchDialog(game);
+    this.discovery = new DiscoveryDialog(game);
     this.pause = new PauseMenu(game);
     this.confirmDialog = new ConfirmDialog(game);
     this.choiceDialog = new ChoiceDialog(game);
     this.saveStatus = new SaveStatus(() => this.hud);
-    this.modals = [this.newCity, this.scenarios, this.scenarioResult, this.newspaper, this.saveLoad, this.settings, this.help, this.pause, this.confirmDialog, this.choiceDialog];
+    this.modals = [this.newCity, this.scenarios, this.scenarioResult, this.newspaper, this.saveLoad, this.settings, this.help, this.research, this.discovery, this.pause, this.confirmDialog, this.choiceDialog];
     this.topbar = new TopBar(game);
     this.toolbar = new Toolbar(game);
     this.toasts = new Toasts(game);
@@ -168,6 +173,7 @@ export class UI {
     const tb = this.toolbar;
     tb.addRailButton('analysis', 'layers', 'Analysis', 'Map layers: traffic, land value, pollution, coverage… (L) · Tab cycles layers', () => this.togglePanel('overlays'));
     tb.addRailButton('info', 'stats', 'City Info', 'Statistics, budget, policies, districts, goals (I)', () => this.toggleCityInfo());
+    tb.addRailButton('research', 'flask', 'Research', 'Research centres, experiments, discoveries and the buildings they designed', () => (this.research.isOpen ? this.research.close() : this.research.open()));
     tb.addRailGap('rail-spacer');
     tb.addRailButton('news', 'news', 'News', 'City newspaper (N)', () => this.newspaper.open());
     tb.addRailButton('photo', 'photo', 'Photo', 'Photo mode (P)', () => this.game.setPhotoMode(true));
@@ -421,6 +427,7 @@ export class UI {
     // The readout follows the pointer over the map only, never over panels.
     this.cursor.update(this.game.input.pointer.inside ? this.game.tool.label() : null);
     this.inspector.update(dt);
+    this.research.update();
     this.coach.update(dt);
     this.statTimer -= dt;
     if (this.statTimer <= 0) {

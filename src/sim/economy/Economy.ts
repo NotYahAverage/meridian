@@ -25,6 +25,7 @@ export type ExpenseKey =
   | 'Landmarks'
   | 'Administration'
   | 'Loan payments'
+  | 'Research'
   | 'Construction';
 
 export interface Ledger {
@@ -63,6 +64,7 @@ const SERVICE_EXPENSE: Record<string, ExpenseKey> = {
   sewage: 'Sewage',
   transit: 'Public transit',
   landmark: 'Landmarks',
+  research: 'Research',
 };
 
 /** Services whose funding the player can adjust. */
@@ -161,7 +163,7 @@ export class Economy {
     buildings: Buildings,
     net: RoadNetwork,
     lvAt: (x: number, z: number) => number,
-    extras?: { fares: number; upkeep: number; policyCost?: number; tourism?: number; admin?: number; taxScale?: Partial<Record<TaxCategory, number>> },
+    extras?: { fares: number; upkeep: number; policyCost?: number; tourism?: number; admin?: number; research?: number; taxScale?: Partial<Record<TaxCategory, number>> },
   ): Ledger {
     const income: Ledger['income'] = {};
     const expense: Ledger['expense'] = {};
@@ -197,6 +199,7 @@ export class Economy {
       if (extras.fares > 0) income['Transit fares'] = extras.fares;
       if (extras.upkeep > 0) expense['Public transit'] = (expense['Public transit'] ?? 0) + extras.upkeep;
       if (extras.policyCost && extras.policyCost > 0) expense.Policies = extras.policyCost;
+      if (extras.research && extras.research > 0) expense.Research = (expense.Research ?? 0) + extras.research;
       if (extras.tourism && extras.tourism > 0) income.Tourism = extras.tourism;
       if (extras.admin && extras.admin > 0) expense.Administration = extras.admin;
     }

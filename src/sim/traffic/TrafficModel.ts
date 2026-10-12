@@ -45,9 +45,12 @@ export class TrafficModel {
 
   constructor(private net: RoadNetwork, private paths: Pathfinder) {}
 
+  /** Research into roads and signals raises every road's capacity. */
+  capacityScale = 1;
+
   capacity(segId: number): number {
     const seg = this.net.segments.get(segId);
-    return seg ? segmentCapacity(ROAD_TYPES[seg.type]) : 1;
+    return seg ? segmentCapacity(ROAD_TYPES[seg.type]) * this.capacityScale : 1;
   }
 
   /** Volume/capacity ratio. */

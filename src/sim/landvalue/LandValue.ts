@@ -18,6 +18,8 @@ export interface LandValueMods {
   parks: (cell: number) => number;
   /** Living trees per grid cell: they filter air, damp noise and look nice. */
   trees?: Uint16Array;
+  /** City-wide land value change (research). */
+  bonus?: number;
 }
 const NO_MODS: LandValueMods = { pollution: () => 1, parks: () => 1 };
 /** How far beyond the city's streets anything here can reach (the widest pollution plume). */
@@ -231,11 +233,13 @@ export class LandValue {
       } else if (b.kind === 'service') {
         const st = SERVICE_BY_ID.get(b.typeId);
         if (st && st.pollution > 0) this.splat(tmp, b.cx, b.cz, 180 + st.pollution * 420, st.pollution * 1.2 * (st.kind === 'power' ? mods.pollution(b) : 1));
+        // Negative pollution: air-cleaning facilities scrub their surroundings.
+        else if (st && st.pollution < 0 && b.state === BuildingState.Active) this.splat(tmp, b.cx, b.cz, st.radius || 300, st.pollution * 1.6);
       }
     }
     const green = this.greenery(mods.trees, w);
     each((i) => {
-      const target = 1 - Math.exp(-tmp[i] * 1.4 * (1 - 0.3 * green[i]));
+      const target = 1 - Math.exp(-Math.max(0, tmp[i]) * 1.4 * (1 - 0.3 * green[i]));
       this.pollution[i] = lerp(this.pollution[i], target, blend);
     });
     yield;
@@ -289,7 +293,7 @@ export class LandValue {
     const g = coverage.grids;
     const scenic = this.scenicField();
     each((i) => {
-      let v = 0.24 + scenic[i];
+      let v = 0.24 + scenic[i] + (mods.bonus ?? 0);
       v += 0.24 * mods.parks(i) * g.park[i];
       v += 0.05 * green[i];
       v += 0.05 * g.police[i] + 0.05 * g.health[i] + 0.06 * g.education[i] + 0.03 * g.fire[i];

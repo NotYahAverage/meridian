@@ -2,6 +2,8 @@ import { Rng } from '../../core/rng';
 import type { StyleId } from '../../sim/buildings/Archetypes';
 import { VM } from '../../sim/traffic/Vehicles';
 import { type BuiltGeometry, GeoBuilder, type Mat, P, type RGB, hex, mixRGB, shade } from './BuildingKit';
+import { archForStyle } from '../../sim/research/Architecture';
+import { buildArch } from './procedural';
 
 export interface GenInput {
   style: StyleId;
@@ -1882,6 +1884,12 @@ const GENERATORS: Record<StyleId, Gen> = {
 export function generateBuilding(input: GenInput, cx: number, cz: number, angle: number, baseY: number): BuiltGeometry {
   const r = new Rng(input.seed);
   const g = new GeoBuilder(input.w, input.d, r);
-  (GENERATORS[input.style] ?? house)(g, input, r);
+  const style = input.style as string;
+  if (style.startsWith('arch:') || style.startsWith('lab:')) {
+    // Research centres and buildings designed by research are composed, not hand-made.
+    const spec = archForStyle(style, input.w, input.d, input.level, input.seed);
+    if (spec) buildArch(g, spec, input.seed, r);
+    else g.box(-input.w / 2 + 3, 8, input.w / 2 - 3, input.d - 3, 0, 8, m(c(0xcfccc4), P.OFFICE, input.seed & 255), m(c(0x7d7a74), P.ROOF_FLAT, input.seed & 255));
+  } else (GENERATORS[input.style as keyof typeof GENERATORS] ?? house)(g, input, r);
   return g.build(cx, cz, angle, input.d / 2, baseY);
 }

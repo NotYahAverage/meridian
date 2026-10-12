@@ -78,6 +78,7 @@ export function projectEconomy(city: City): void {
     policyCost: pol.monthlyCost(),
     tourism: tourismIncome(city),
     admin: administrationCost(city),
+    research: city.research.monthlyCost(),
     taxScale: { commercial: pol.has('smallBusiness') ? 0.8 : 1, industrial: pol.has('industryIncentives') ? 0.7 : 1 },
   });
 }
@@ -155,10 +156,15 @@ export function tickCity(city: City): void {
 export function landValueMods(city: City): LandValueMods {
   const pol = city.policies;
   const grid = city.districts.grid;
+  const rm = city.research.mods;
   return {
-    pollution: (b) => (pol.in('cleanAir', b.district) ? 0.6 : 1),
+    pollution: (b) => {
+      const research = b.kind === 'zoned' ? rm.industryPollution : SERVICE_BY_ID.get(b.typeId)?.kind === 'power' ? rm.powerPollution : 1;
+      return (pol.in('cleanAir', b.district) ? 0.6 : 1) * research;
+    },
     parks: (cell) => (pol.in('parkRangers', grid[cell]) ? 1.3 : 1),
     trees: city.nature.cells,
+    bonus: rm.landValue,
   };
 }
 
@@ -405,6 +411,7 @@ export function streetOf(city: City, b: Building): string {
 
 function daily(city: City): void {
   city.achievements.check();
+  city.research.daily();
   city.terrain.regrow(9);
   city.nature.grow(city.clock.day);
   dailyBuildings(city);
@@ -453,7 +460,8 @@ function dailyBuildings(city: City): void {
 
   const pol = city.policies;
   // Policy effects depend on the building's district (or apply city-wide).
-  const garbageScale = (b: Building) => (pol.in('recycling', b.district) ? 0.7 : 1);
+  const rm = city.research.mods;
+  const garbageScale = (b: Building) => (pol.in('recycling', b.district) ? 0.7 : 1) * rm.garbage;
   const crimeThreshold = (b: Building) => (pol.in('neighborhoodWatch', b.district) ? 0.04 : 0.12);
   const parkWeight = (b: Building) => (pol.in('parkRangers', b.district) ? 17 : 13);
   const transitMood = pol.has('freeTransit') ? 1.5 : 0;
@@ -553,6 +561,7 @@ function dailyBuildings(city: City): void {
     if (p & Problem.Crime) h -= 8 * crime;
     if (p & Problem.NoWorkers) h -= 12;
     if (p & Problem.NoGoods) h -= 10;
+    h += rm.happiness;
     b.happiness = lerp(b.happiness, clamp(h, 0, 100), 0.35);
 
     // Business efficiency.
@@ -560,7 +569,7 @@ function dailyBuildings(city: City): void {
       const staff = 0.35 + 0.65 * Math.min(1, b.workers / Math.max(1, b.jobs));
       let eff = staff;
       if (zoneBase(b.zone) === Zone.Commercial) eff *= outsideConnected ? 0.85 + 0.15 * goodsRatio : Math.max(0.3, goodsRatio);
-      if (zoneBase(b.zone) === Zone.Industrial) eff *= outsideConnected ? 1 : 0.6;
+      if (zoneBase(b.zone) === Zone.Industrial) eff *= (outsideConnected ? 1 : 0.6) * rm.industryEfficiency;
       if (ratio > 1.15) eff *= 0.85;
       b.efficiency = clamp(eff, 0.1, 1);
     }

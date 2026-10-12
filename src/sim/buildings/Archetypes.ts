@@ -65,7 +65,10 @@ export type ServiceStyle =
   | 'nuclear'
   | 'purification';
 
-export type StyleId = ZonedStyle | ServiceStyle;
+/** Styles composed procedurally: research centres ("lab:<field>") and discovered designs ("arch:<id>"). */
+export type ProceduralStyle = `lab:${string}` | `arch:${string}`;
+
+export type StyleId = ZonedStyle | ServiceStyle | ProceduralStyle;
 
 export interface Archetype {
   id: string;

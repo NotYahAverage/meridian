@@ -10,6 +10,7 @@ import { streetOf } from '../sim/CitySim';
 import { ROAD_TYPES, segmentCapacity } from '../sim/roads/RoadTypes';
 import { LANDFILL_CAPACITY } from '../sim/services/Coverage';
 import { COVERAGE_KINDS, COVERAGE_LABEL, SERVICE_BY_ID } from '../sim/services/ServiceTypes';
+import { FIELD_BY_ID } from '../sim/research/Knowledge';
 import { BuildingState, Problem, ZONE_INFO, isResidential } from '../sim/types';
 import type { Selection } from '../tools/InspectTool';
 import { humanize } from '../tools/BulldozeTool';
@@ -130,7 +131,8 @@ export class Inspector {
       }
       const st = b.kind === 'service' ? SERVICE_BY_ID.get(b.typeId) : undefined;
       const arch = ARCHETYPE_BY_ID.get(b.typeId);
-      const title = st ? st.name : arch ? humanize(arch.id) : 'Building';
+      const centre = city.research.centers.get(b.id);
+      const title = centre ? centre.name : st ? st.name : arch ? humanize(arch.id) : 'Building';
       const zone = b.kind === 'zoned' ? ZONE_INFO[b.zone] : null;
       const chip = zone
         ? h('span', { class: 'zone-chip', style: `--c:rgb(${zone.color.map((v) => Math.round(v * 255)).join(',')})` }, zone.short, h('span', { class: 'stars' }, '★'.repeat(b.level)))
@@ -172,8 +174,29 @@ export class Inspector {
           const need = b.level === 1 ? 'land value 45% and happiness 55%' : 'land value 64%, happiness 64% and good schools';
           body.appendChild(h('div', { class: 'hint small' }, `Upgrades to level ${b.level + 1} with ${need}.`));
         }
+      } else if (centre) {
+        const op = city.research.operational(centre);
+        const a = centre.active;
+        body.append(
+          kv('Specialization', FIELD_BY_ID.get(centre.field)!.name),
+          kv('Also works in', centre.secondary.map((f) => FIELD_BY_ID.get(f)!.name).join(', ')),
+          kv('Equipment', `Level ${centre.equipment} of 3`),
+          kv('Status', op.ok ? 'Operating' : op.reason ?? ''),
+          kv('Upkeep', `${formatMoney(st?.upkeep ?? 0)}/month`),
+        );
+        if (a) {
+          body.append(h('div', { class: 'section-title' }, 'Experiment'), h('div', { class: 'insp-exp' }, a.plan.title));
+          body.append(h('div', { class: 'kv' }, h('span', null, a.pending ? 'Waiting for a decision' : a.status), meter(a.progress, 'var(--accent)')));
+        } else body.append(h('div', { class: 'hint small' }, centre.offers.length ? `${centre.offers.length} experiments proposed. Open the research window to begin one.` : 'Proposals arrive once the centre is open and has spare power.'));
+        body.append(h('div', { class: 'btn-row' }, h('button', { class: `btn ${a?.pending ? 'primary' : ''}`, onclick: () => this.game.ui.research.open({ tab: 'centres', centreId: centre.id }) }, icon('flask', 14), a?.pending ? 'Decide…' : 'Research…')));
       } else if (st) {
         const status = city.coverage.status.get(b.id);
+        if (st.designId) {
+          const d = city.research.designs.get(st.designId);
+          if (d) body.append(h('div', { class: 'hint small' }, `Designed by your researchers. ${d.description}`), h('div', { class: 'btn-row' }, h('button', { class: 'btn small', onclick: () => this.game.ui.research.open({ discoveryId: d.discoveryId }) }, icon('flask', 13), 'The discovery behind it')));
+        }
+        if (st.storage) body.append(kv('Storage', `up to ${Math.round(st.storage * city.research.outputScale(st))} MW`), kv('Delivering', `${city.utilities.storage.delivered.toFixed(1)} MW across the city`));
+        if (st.pollution < 0) body.append(kv('Air cleaning', `${Math.round(-st.pollution * 100)}% within ${st.radius} m`));
         if (st.radius > 0 && st.kind !== 'park') body.append(kv('Coverage radius', `${st.radius} m`));
         if (status && st.capacity > 0 && st.kind !== 'garbage' && st.kind !== 'park') {
           body.append(kv('Residents in range', formatInt(status.load)), h('div', { class: 'kv' }, h('span', null, 'Effectiveness'), meter(status.effectiveness, status.effectiveness > 0.8 ? 'var(--good)' : 'var(--warn)')));
@@ -184,7 +207,7 @@ export class Inspector {
           if (b.stock > LANDFILL_CAPACITY * 0.85) body.appendChild(h('div', { class: 'hint small' }, 'A full landfill stops taking garbage. Build another, or a Recycling Center: spare recycling capacity also works through old landfill waste.'));
         }
         if (st.kind === 'garbage') body.append(kv('Processing', `${formatInt(st.capacity)} units/day`));
-        if (st.kind === 'power') body.append(kv('Output', `${st.output} MW`));
+        if (st.kind === 'power' && st.output) body.append(kv('Output', `${Math.round(st.output * city.research.outputScale(st) * 10) / 10} MW`));
         if (st.id === 'metro_station') {
           const metro = city.transit.metro;
           const lines = metro.linesAt(b.id);

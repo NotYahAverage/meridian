@@ -19,7 +19,8 @@ export type NoticeIcon =
   | 'factory'
   | 'build'
   | 'weather'
-  | 'metro';
+  | 'metro'
+  | 'research';
 
 export interface Notice {
   id: number;

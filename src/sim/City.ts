@@ -30,6 +30,7 @@ import { Nature } from './world/Nature';
 import { Weather } from './world/Weather';
 import { type MapPreset, type Rect, Terrain } from './world/Terrain';
 import { LAND_TILE, Land } from './world/Land';
+import { Research } from './research/Research';
 import { conformTerrain } from './world/TerrainConform';
 import { Disasters } from './world/Disasters';
 import { Achievements } from './progress/Achievements';
@@ -50,6 +51,7 @@ export type CityEvents = {
   achievement: { id: string; title: string };
   scenario: { id: string; result: 'won' | 'lost' };
   news: Edition;
+  research: { type: 'discovery' | 'decision' | 'failure'; centerId: number; discoveryId?: string; recordId?: string };
 };
 
 export interface CityOptions {
@@ -61,6 +63,8 @@ export interface CityOptions {
   flatTerrain?: number;
   /** The terrain's heightmap, when generated ahead of time (in parallel). */
   terrainBase?: Float32Array;
+  /** This civilization's identity for research (random for a new city when omitted). */
+  civSeed?: number;
   /** Skip creating the starting highway (used when loading). */
   empty?: boolean;
 }
@@ -91,6 +95,8 @@ export class City {
   readonly terrain: Terrain;
   /** Parcels of the map the city owns (all of it unless founded with limits). */
   readonly land = new Land();
+  /** This civilization's science: research centres, experiments, discoveries and designs. */
+  readonly research: Research;
   /** Traffic demand being added up over several ticks (see tickCity). */
   demandJob: Generator<void, TripDemand[], void> | null = null;
   /** Periodic coverage and land-value refreshes in progress (a slice per tick). */
@@ -166,6 +172,7 @@ export class City {
     this.seed = opts.seed;
     this.preset = opts.preset;
     this.rng = new Rng(opts.seed ^ 0xc17e);
+    this.research = new Research(this, (opts.civSeed ?? Math.floor(Math.random() * 0xffffffff)) >>> 0);
     this.terrain = new Terrain(opts.seed, opts.preset, { flat: opts.flatTerrain, base: opts.terrainBase });
     this.terrain.landCheck = (x, z) => this.land.ownsPoint(x, z);
     this.nature = new Nature(this.terrain, opts.seed);
@@ -393,6 +400,7 @@ export class City {
     const o = lotOBB(b);
     this.zones.clearOccupant(o, id);
     this.buildings.remove(id);
+    this.research.onBuildingRemoved(id);
     const [minX, minZ, maxX, maxZ] = obbBounds(o);
     conformTerrain(this.terrain, this.roads, this.buildings, { minX: minX - 10, minZ: minZ - 10, maxX: maxX + 10, maxZ: maxZ + 10 });
     if (b.kind === 'service') {
@@ -468,7 +476,17 @@ export class City {
 
   recomputeUtilities(): void {
     const w = this.weather;
-    this.utilities.recompute(this.buildings, this.roads, (id) => (id === 'wind_turbine' ? w.windPower() : id === 'solar_farm' ? w.solarPower() : 1));
+    const r = this.research;
+    this.utilities.recompute(
+      this.buildings,
+      this.roads,
+      (id) => {
+        const st = SERVICE_BY_ID.get(id);
+        const sky = id === 'wind_turbine' ? 'wind' : id === 'solar_farm' ? 'sun' : st ? r.weatherOf(st) : null;
+        return (sky === 'wind' ? w.windPower() : sky === 'sun' ? w.solarPower() : 1) * (st ? r.outputScale(st) : 1);
+      },
+      { power: r.mods.powerUse, water: r.mods.waterUse, sewage: r.mods.waterUse },
+    );
   }
 
   // ── World setup ───────────────────────────────────────────────────────────

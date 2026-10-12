@@ -342,7 +342,8 @@ export function placeService(city: City, typeId: string, x: number, z: number, f
   const pv = previewPlacement(city, typeId, x, z, flip);
   if (!pv.valid || !pv.frame) return err(pv.error ?? 'Cannot place here');
   const st = pv.type;
-  if (!city.economy.spend(st.cost)) return err('Not enough money');
+  const cost = city.research.costOf(st);
+  if (!city.economy.spend(cost)) return err('Not enough money');
   for (const c of pv.conflicts) city.removeBuilding(c.id, 'replace');
   const f = pv.frame;
   const b = newBuilding({
@@ -365,11 +366,13 @@ export function placeService(city: City, typeId: string, x: number, z: number, f
     jobs: st.jobs,
   });
   city.addBuilding(b);
+  // Its id exists now: the centre takes its identity from the site.
+  if (st.kind === 'research') city.research.onCenterPlaced(b);
   if (st.id === 'cargo_port') dredgeBerth(city, b);
   city.coverageDirty = true;
   city.recomputeUtilities();
   city.events.emit('built', { x: b.cx, z: b.cz, kind: 'service' });
-  return { ok: true, cost: st.cost, building: b };
+  return { ok: true, cost, building: b };
 }
 
 export function bulldozeBuilding(city: City, id: number): CommandResult {
@@ -378,7 +381,7 @@ export function bulldozeBuilding(city: City, id: number): CommandResult {
   let refund = 0;
   if (b.kind === 'service') {
     const st = SERVICE_BY_ID.get(b.typeId);
-    if (st) refund = Math.round(st.cost * (b.state === BuildingState.Construction ? 0.9 : 0.25));
+    if (st) refund = Math.round(city.research.costOf(st) * (b.state === BuildingState.Construction ? 0.9 : 0.25));
   }
   city.removeBuilding(id, 'bulldoze');
   if (refund) city.economy.refund(refund);

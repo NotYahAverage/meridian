@@ -17,6 +17,8 @@ import { type TerrainEdits, loadTerrainEdits, serializeTerrainEdits } from '../w
 import { conformTerrain } from '../world/TerrainConform';
 import type { LandData } from '../world/Land';
 import { migrateToBigWorld } from './WorldMigration';
+import type { ResearchSave } from '../research/Research';
+import { hashStr } from '../research/Generate';
 import type { AchievementSave } from '../progress/Achievements';
 import type { ScenarioState } from '../progress/Scenarios';
 
@@ -114,6 +116,8 @@ export interface SaveData {
   achievements?: AchievementSave;
   scenario?: ScenarioState | null;
   news?: NewsSave;
+  /** This civilization's research (absent in older saves). */
+  research?: ResearchSave;
 }
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -237,6 +241,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
     achievements: city.achievements.serialize(),
     scenario: city.scenario ? { ...city.scenario } : null,
     news: city.news.serialize(),
+    research: city.research.serialize(),
   };
 }
 
@@ -273,7 +278,11 @@ export function migrate(data: SaveData): SaveData {
 export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; terrainBase?: Float32Array } = {}): City {
   const data = migrate(raw);
   const c = data.city;
-  const city = new City({ name: c.name, seed: c.seed, preset: c.preset, unlimitedMoney: c.unlimited, empty: true, flatTerrain: opts.flatTerrain, terrainBase: opts.terrainBase });
+  // Older saves get a civilization seed derived from the map, so reloading them is stable.
+  const civSeed = data.research?.civSeed ?? hashStr(c.seed, c.name, 'civ');
+  const city = new City({ name: c.name, seed: c.seed, preset: c.preset, unlimitedMoney: c.unlimited, empty: true, flatTerrain: opts.flatTerrain, terrainBase: opts.terrainBase, civSeed });
+  // Research first: generated building types must exist before buildings of those types are loaded.
+  city.research.load(data.research);
   city.clock.tick = c.tick;
   city.peakPopulation = c.peak;
   city.milestoneIndex = c.milestone;

@@ -240,6 +240,16 @@ export class Game {
         this.ui.milestone(m.title, m.unlocks);
       }),
       city.events.on('goal', () => this.ui.refreshGoals()),
+      city.events.on('research', (e) => {
+        if (this.state !== 'playing') return;
+        if (e.type === 'discovery' && e.discoveryId) {
+          this.audio.play('milestone');
+          this.ui.discovery.show(e.discoveryId);
+        } else if (e.type === 'decision') {
+          this.play('notify');
+          this.ui.toasts.push({ severity: 'info', icon: 'flask', title: 'Your scientists need a decision', text: city.research.centers.get(e.centerId)?.active?.pending?.prompt ?? '', onClick: () => this.ui.research.open({ tab: 'centres', centreId: e.centerId }), tip: 'Click to decide' });
+        }
+      }),
       city.events.on('news', (ed) => {
         if (this.state === 'playing') this.ui.newsToast(ed);
       }),

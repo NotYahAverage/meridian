@@ -28,6 +28,7 @@ const SERVICE_ICON: Record<string, string> = {
   police: 'police', fire: 'fire', health: 'health', education: 'education', garbage: 'garbage', park: 'park', power: 'power', water: 'water', sewage: 'sewage',
   pocket_park: 'tree', community_garden: 'tree', sports_courts: 'grid', sports_field: 'flag', university: 'education',
   landmark: 'landmark', city_hall: 'landmark', museum: 'museum', cathedral: 'cathedral', stadium: 'stadium', tower: 'obstower',
+  research: 'flask', research_center: 'flask',
 };
 
 /** The building a zone card shows, and how tall to draw it. */
@@ -710,19 +711,22 @@ export class Toolbar {
     } else {
       const cat = this.open as ServiceCategory;
       this.tray.appendChild(header(cat === 'services' ? 'City Services' : cat === 'utilities' ? 'Utilities' : 'Parks & Landmarks', ...(cat === 'parks' || cat === 'services' ? this.serviceSwitch() : [])));
-      for (const st of SERVICE_TYPES.filter((s) => s.category === cat || (cat === 'parks' && s.category === 'landmarks'))) {
+      // Buildings your researchers designed join the catalogue (this city only).
+      const all = [...SERVICE_TYPES, ...city.research.serviceTypes()];
+      for (const st of all.filter((s) => s.category === cat || (cat === 'parks' && s.category === 'landmarks'))) {
         const built = st.unique && [...city.buildings.all.values()].some((b) => b.typeId === st.id);
         const locked = built ? 'Already built' : peak >= st.unlockPopulation ? undefined : `Unlocks at ${formatInt(st.unlockPopulation)}`;
         const active = g.tool.id === 'place' && g.tools.place.typeId === st.id;
+        const cost = city.research.costOf(st);
         items.appendChild(
           this.card({
             icon: SERVICE_ICON[st.id] ?? SERVICE_ICON[st.kind] ?? 'build',
             thumb: serviceThumb(st),
             title: st.name,
-            sub: `${formatMoney(st.cost)} · ${formatMoney(st.upkeep)}/mo`,
+            sub: `${st.designId ? 'Discovered · ' : ''}${formatMoney(cost)} · ${formatMoney(st.upkeep)}/mo`,
             active,
             locked,
-            tip: serviceTip(st),
+            tip: serviceTip(st, cost),
             onClick: () => {
               g.setTool('place', (t: import('../tools/PlaceTool').PlaceTool) => t.configure(st.id));
               this.renderTray();
@@ -740,15 +744,18 @@ export function tipBox(title: string, desc: string, rows: [string, string][]): H
   return h('div', null, h('div', { class: 'tip-title' }, title), h('div', { class: 'tip-desc' }, desc), rows.length ? h('div', { class: 'tip-grid' }, ...rows.flatMap(([k, v]) => [h('span', null, k), h('b', null, v)])) : null);
 }
 
-function serviceTip(st: ServiceType): HTMLElement {
-  const rows: [string, string][] = [['Cost', formatMoney(st.cost)], ['Upkeep', `${formatMoney(st.upkeep)}/month`]];
+function serviceTip(st: ServiceType, cost = st.cost): HTMLElement {
+  const rows: [string, string][] = [['Cost', formatMoney(cost)], ['Upkeep', `${formatMoney(st.upkeep)}/month`]];
+  if (st.storage) rows.push(['Storage', `up to ${st.storage} MW`]);
+  if (st.designId) rows.push(['Origin', 'Designed by your researchers']);
+  if (st.pollution < 0) rows.push(['Air cleaning', `${Math.round(-st.pollution * 100)}%`]);
   if (st.radius) rows.push(['Coverage', `${st.radius} m radius`]);
   if (st.capacity && st.kind !== 'garbage') rows.push(['Serves', `${formatInt(st.capacity)} residents`]);
   if (st.kind === 'garbage') rows.push(['Processes', `${formatInt(st.capacity)} units/day`]);
-  if (st.kind === 'power') rows.push(['Output', `${st.output} MW`]);
+  if (st.kind === 'power' && st.output) rows.push(['Output', `${st.output} MW`]);
   if (st.kind === 'water' || st.kind === 'sewage') rows.push(['Capacity', `${formatInt(st.output)} m³/day`]);
   if (st.jobs) rows.push(['Jobs', `${st.jobs}`]);
-  if (st.pollution) rows.push(['Pollution', st.pollution > 0.6 ? 'High' : st.pollution > 0.25 ? 'Moderate' : 'Low']);
+  if (st.pollution > 0) rows.push(['Pollution', st.pollution > 0.6 ? 'High' : st.pollution > 0.25 ? 'Moderate' : 'Low']);
   if (st.needsShore) rows.push(['Placement', 'On a shoreline']);
   if (st.tourism) rows.push(['Tourism', `up to ${formatMoney(st.tourism)}/month`]);
   if (st.kind === 'landmark') rows.push(['Leisure', `${st.radius} m radius`]);
@@ -759,7 +766,7 @@ function serviceTip(st: ServiceType): HTMLElement {
 // ── Toasts ──────────────────────────────────────────────────────────────────
 
 const NOTICE_ICON: Record<string, string> = {
-  power: 'power', water: 'water', sewage: 'sewage', fire: 'fire', garbage: 'garbage', money: 'money', traffic: 'traffic', milestone: 'milestone',
+  power: 'power', water: 'water', sewage: 'sewage', fire: 'fire', garbage: 'garbage', money: 'money', traffic: 'traffic', milestone: 'milestone', research: 'flask', flask: 'flask',
   people: 'people', road: 'road', health: 'health', police: 'police', education: 'education', happy: 'happy', factory: 'factory', build: 'build', info: 'info', weather: 'cloud',
 };
 
