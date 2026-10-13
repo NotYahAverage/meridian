@@ -1,4 +1,5 @@
 import type { City } from '../City';
+import type { FieldId } from '../research/Knowledge';
 import { SERVICE_BY_ID } from '../services/ServiceTypes';
 import { BuildingState, Zone, zoneBase } from '../types';
 
@@ -12,7 +13,12 @@ export type PolicyId =
   | 'adultEducation'
   | 'parkRangers'
   | 'freeTransit'
-  | 'highRiseBan';
+  | 'highRiseBan'
+  | 'congestionPricing'
+  | 'greenBuildingCode'
+  | 'waterMetering'
+  | 'healthDrive'
+  | 'urbanFarming';
 
 export interface PolicyDef {
   id: PolicyId;
@@ -22,6 +28,8 @@ export interface PolicyDef {
   effects: string[];
   unlockPopulation: number;
   icon: string;
+  /** Only possible once the city's scientists have made a discovery in this field. */
+  requiresField?: FieldId;
 }
 
 export const POLICIES: PolicyDef[] = [
@@ -75,9 +83,40 @@ export const POLICIES: PolicyDef[] = [
     description: 'Caps new buildings at six floors to keep the skyline low.',
     effects: ['Residents like the low skyline (+3 happiness)', 'New buildings are lower and house fewer people'],
   },
+  // Policies your scientists make possible.
+  {
+    id: 'congestionPricing', name: 'Congestion Pricing', icon: 'road', unlockPopulation: 1_000, requiresField: 'transport',
+    description: 'Drivers pay to enter busy streets at peak times, measured by your researchers’ traffic sensors.',
+    effects: ['Road capacity +10%', 'Income from charges', 'Residents grumble (−1 happiness)'],
+  },
+  {
+    id: 'greenBuildingCode', name: 'Green Building Code', icon: 'build', unlockPopulation: 1_000, requiresField: 'architecture',
+    description: 'New construction must meet efficiency standards your architects worked out.',
+    effects: ['Buildings use 8% less power', 'Construction costs 6% more'],
+  },
+  {
+    id: 'waterMetering', name: 'Water Metering', icon: 'water', unlockPopulation: 1_000, requiresField: 'water',
+    description: 'Every home and business is metered and billed for what it uses.',
+    effects: ['12% less water used', 'Residents are a little less happy'],
+  },
+  {
+    id: 'healthDrive', name: 'Public Health Drive', icon: 'health', unlockPopulation: 1_000, requiresField: 'medicine',
+    description: 'Screenings, vaccination days and health advice built on your medical research.',
+    effects: ['Residents are happier (+1)', 'Costs per household'],
+  },
+  {
+    id: 'urbanFarming', name: 'Urban Farming Scheme', icon: 'parks', unlockPopulation: 1_000, requiresField: 'agriculture',
+    description: 'Rooftop beds and allotments, using growing methods your scientists developed.',
+    effects: ['8% less garbage', 'Residents are a little happier', 'Costs per park'],
+  },
 ];
 
 export const POLICY_BY_ID = new Map(POLICIES.map((p) => [p.id, p]));
+
+const FIELD_NAMES: Record<FieldId, string> = {
+  materials: 'materials', energy: 'energy', agriculture: 'agriculture', manufacturing: 'manufacturing', transport: 'transport',
+  water: 'water', environment: 'the environment', architecture: 'architecture', medicine: 'medicine',
+};
 
 /** Maximum floors for new buildings under the high-rise ban. */
 export const HIGH_RISE_CAP = 6;
@@ -124,13 +163,24 @@ export class Policies {
     return n;
   }
 
+  /** Why a policy can't be enacted yet (undefined when it can). */
+  lockReason(id: PolicyId): string | undefined {
+    const def = POLICY_BY_ID.get(id);
+    if (!def) return 'Unknown policy';
+    if (def.requiresField && !this.city.research.discoveries.some((d) => d.field === def.requiresField)) return `Needs a discovery in ${FIELD_NAMES[def.requiresField]}`;
+    if (this.city.peakPopulation < def.unlockPopulation) return `Unlocks at ${def.unlockPopulation.toLocaleString('en-US')} population`;
+    return undefined;
+  }
+
   set(id: PolicyId, on: boolean): boolean {
     const def = POLICY_BY_ID.get(id);
     if (!def) return false;
-    if (on && this.city.peakPopulation < def.unlockPopulation) return false;
+    if (on && this.lockReason(id)) return false;
     if (on) this.active.add(id);
     else this.active.delete(id);
     this.city.coverageDirty = true;
+    // Research-led policies change the city through the research effects.
+    if (def.requiresField) this.city.research.recomputeMods();
     return true;
   }
 
@@ -170,7 +220,7 @@ export class Policies {
       households = this.city.stats.households;
       jobs = this.city.stats.jobs;
     }
-    if (district !== undefined || id === 'cleanAir' || id === 'parkRangers') {
+    if (district !== undefined || id === 'cleanAir' || id === 'parkRangers' || id === 'urbanFarming') {
       for (const b of this.city.buildings.all.values()) {
         if (district !== undefined && b.district !== district) continue;
         if (district !== undefined) {
@@ -194,6 +244,13 @@ export class Policies {
         return industrial * 2.5 + (district === undefined ? 400 : industrial > 0 ? 120 : 0);
       case 'parkRangers':
         return parks * 260;
+      case 'healthDrive':
+        return households * 0.7;
+      case 'urbanFarming':
+        return parks * 180 + 300;
+      case 'congestionPricing':
+        // Charges bring money in.
+        return -households * 0.5;
       default:
         // Tax breaks, free transit and the ban cost through lost income instead.
         return 0;

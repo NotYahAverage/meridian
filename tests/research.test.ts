@@ -156,9 +156,10 @@ describe('experiments', () => {
         city.research.decide(centre.id, centre.active.pending.options.at(-1)!.id);
       }
     }
-    expect(paused).toBe(2);
+    // The approach, a complication and the final stretch (no field trial: it wasn't a pilot).
+    expect(paused).toBe(3);
     const rec = city.research.records.at(-1)!;
-    expect(rec.decisions).toHaveLength(2);
+    expect(rec.decisions).toHaveLength(3);
     expect(['breakthrough', 'success', 'partial', 'unexpected', 'failure']).toContain(rec.outcome);
     expect(city.research.monthlyCost()).toBe(0);
     // A new set of proposals is ready.

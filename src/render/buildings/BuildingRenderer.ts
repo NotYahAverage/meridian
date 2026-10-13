@@ -353,6 +353,8 @@ export class BuildingRenderer {
       let flags = 0;
       if (b.state === BuildingState.Abandoned) flags |= 1;
       if (b.state === BuildingState.Burning) flags |= 2;
+      // Research centres with an experiment running work late (lit windows).
+      if (b.kind === 'service' && this.city.research.centers.get(b.id)?.active) flags |= 4;
       d[o + 2] = flags;
       d[o + 3] = ov ? ov(b) : 0;
       const wasDone = this.completed.has(b.id);

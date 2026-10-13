@@ -717,7 +717,8 @@ export class PoliciesPanel extends Panel {
     const total = pol.monthlyCost();
     b.append(row('Active policies', `${pol.count()} · ${formatMoney(total)}/mo`));
     for (const def of POLICIES) {
-      const locked = city.peakPopulation < def.unlockPopulation;
+      const lock = pol.lockReason(def.id);
+      const locked = !!lock;
       const on = pol.has(def.id);
       const cost = pol.costOf(def.id);
       const toggleBtn = h('button', {
@@ -741,7 +742,8 @@ export class PoliciesPanel extends Panel {
             !on && pol.districtsWith(def.id).length
               ? h('div', { class: 'small good-text' }, `In force in ${pol.districtsWith(def.id).map((d) => city.districts.list.get(d)!.name).join(', ')}`)
               : null,
-            h('div', { class: 'muted small' }, locked ? `Unlocks at ${formatInt(def.unlockPopulation)} population` : def.description),
+            def.requiresField && !locked ? h('div', { class: 'small good-text' }, 'Made possible by your research') : null,
+            h('div', { class: 'muted small' }, locked ? lock : def.description),
             locked ? null : h('ul', { class: 'policy-effects' }, ...def.effects.map((e, i) => h('li', { class: i === def.effects.length - 1 && def.effects.length > 1 ? 'con' : 'pro' }, e))),
             !locked && cost > 0 ? h('div', { class: 'small muted' }, `${on ? 'Costs' : 'Would cost'} ${formatMoney(cost)}/month`) : null,
           ),

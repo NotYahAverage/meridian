@@ -12,6 +12,7 @@ import { icon } from './icons';
 import { Inspector } from './Inspector';
 import { ControlsDialog } from './ControlsDialog';
 import { DiscoveryDialog, ResearchDialog } from './ResearchDialog';
+import { ResearchTracker } from './ResearchTracker';
 import { LoadingScreen, MainMenu, Modal, NewCityDialog, PauseMenu, SaveLoadDialog, SettingsDialog } from './Menus';
 import { BudgetPanel, DistrictsPanel, GoalsPanel, LogPanel, OverlaysPanel, type Panel, type PanelId, PoliciesPanel, LandPanel, StatsPanel, TransitPanel } from './Panels';
 
@@ -123,6 +124,7 @@ export class UI {
     this.chrome.style.zoom = z === 1 ? '' : String(z);
   }
   private legend: HTMLElement;
+  private tracker: ResearchTracker;
   private labels: HTMLElement;
   private labelTimer = 0;
   private statTimer = 0;
@@ -179,7 +181,8 @@ export class UI {
     tb.addRailButton('photo', 'photo', 'Photo', 'Photo mode (P)', () => this.game.setPhotoMode(true));
     this.legend = h('div', { class: 'legend-box hidden' });
     this.labels = h('div', { class: 'district-labels' });
-    this.leftStack = h('div', { class: 'left-stack' }, this.info, this.inspector.el);
+    this.tracker = new ResearchTracker(game);
+    this.leftStack = h('div', { class: 'left-stack' }, this.info, this.inspector.el, this.tracker.el);
     this.chrome = h('div', { class: 'hud-chrome' }, this.topbar.el, tb.rail, this.leftStack, this.layersHost, this.legend, this.toasts.el, this.saveStatus.el, tb.el, this.milestoneBanner.el);
     this.hud = h('div', { class: 'hud hidden' }, this.streets.el, this.labels, this.chrome, this.cursor.el);
     this.applyScale();
@@ -428,6 +431,7 @@ export class UI {
     this.cursor.update(this.game.input.pointer.inside ? this.game.tool.label() : null);
     this.inspector.update(dt);
     this.research.update();
+    this.tracker.update();
     this.coach.update(dt);
     this.statTimer -= dt;
     if (this.statTimer <= 0) {

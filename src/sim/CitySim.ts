@@ -159,7 +159,8 @@ export function landValueMods(city: City): LandValueMods {
   const rm = city.research.mods;
   return {
     pollution: (b) => {
-      const research = b.kind === 'zoned' ? rm.industryPollution : SERVICE_BY_ID.get(b.typeId)?.kind === 'power' ? rm.powerPollution : 1;
+      const kind = b.kind === 'service' ? SERVICE_BY_ID.get(b.typeId)?.kind : undefined;
+      const research = b.kind === 'zoned' ? rm.industryPollution : (kind === 'power' ? rm.powerPollution : 1) * (kind ? rm.retrofitPollution[kind] ?? 1 : 1);
       return (pol.in('cleanAir', b.district) ? 0.6 : 1) * research;
     },
     parks: (cell) => (pol.in('parkRangers', grid[cell]) ? 1.3 : 1),

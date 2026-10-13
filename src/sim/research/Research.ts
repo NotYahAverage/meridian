@@ -3,12 +3,21 @@ import type { City } from '../City';
 import { SERVICE_BY_ID, type ServiceType, registerServiceType } from '../services/ServiceTypes';
 import { BuildingState, Zone, isResidential, zoneBase } from '../types';
 import { type ArchSpec, registerArch } from './Architecture';
+import { type Brief, type TrialSite, cityBriefs, trialSites } from './Briefs';
 import {
-  type CenterInfo, type Choice, type Decision, type Design, type Discovery, type Effect, type Outcome, type Plan, type ProposalContext,
-  STAGES, decisionFor, generateProposals, hashStr, makeDiscovery, odds, resolve, centerName as makeCenterName,
+  type CenterInfo, type Choice, type Decision, type DecisionOption, type Design, type Discovery, type Effect, type Outcome, type Plan, type ProposalContext,
+  STAGE_PLAN, baseName, decisionFor, generateProposals, hashStr, makeDiscovery, odds, resolve, centerName as makeCenterName,
 } from './Generate';
-import { DEPOSITS, FIELDS, type FieldId, PRINCIPLE_BY_ID, RESOURCES, RESOURCE_BY_ID, fit, type ComponentKind } from './Knowledge';
+import { DEPOSITS, FIELD_BY_ID, FIELDS, type FieldId, PRINCIPLE_BY_ID, RESOURCES, RESOURCE_BY_ID, fit, type ComponentKind } from './Knowledge';
+import { MASTERY_NAMES, type Retrofit, type ScienceSummary, masteryLevel, newMilestones, retrofitFor } from './Progress';
 
+/** Days a decision may wait before the careful option is taken (when the player allows it). */
+export const AUTO_DECIDE_DAYS = 5;
+/** Days a design must be in service before its next version can be developed. */
+export const ITERATE_AFTER_DAYS = 30;
+/** Research budget range (1 = normal). */
+export const FUNDING_MIN = 0.5;
+export const FUNDING_MAX = 2;
 /** Distance within which a centre can use a local substance (m). */
 const LOCAL_RADIUS = 450;
 /** Money for equipment level 2 and 3. */
@@ -25,8 +34,13 @@ export interface SiteFactor {
 export interface ActiveExperiment {
   plan: Plan;
   progress: number;
-  choices: { stage: number; optionId: string; label: string }[];
+  /** Decisions taken; the option is kept as it was offered (field-trial sites depend on the city then). */
+  choices: { stage: number; optionId: string; label: string; option?: DecisionOption }[];
   pending: Decision | null;
+  /** Day the pending decision came up. */
+  pendingSince?: number;
+  /** A second centre working on it jointly. */
+  partnerId?: number;
   started: number;
   /** Money committed so far (start plus decisions). */
   spent: number;
@@ -46,6 +60,10 @@ export interface Center {
   lastRefresh: number;
   active: ActiveExperiment | null;
   completed: number;
+  /** Experience per field (a success counts 1, anything else ½). */
+  mastery?: Partial<Record<FieldId, number>>;
+  /** The centre this one is helping with a joint experiment. */
+  assisting?: number;
 }
 
 export interface ExperimentRecord {
@@ -57,6 +75,8 @@ export interface ExperimentRecord {
   day: number;
   decisions: string[];
   chance: number;
+  kind?: Plan['kind'];
+  partner?: string;
   discoveryId?: string;
   insight?: string;
 }
@@ -75,10 +95,21 @@ export interface ResearchMods {
   landValue: number;
   /** Output multipliers by service kind (and 'storage'). */
   boost: Record<string, number>;
+  /** Pollution multipliers by service kind (retrofit programmes). */
+  retrofitPollution: Record<string, number>;
+  /** Price multiplier for buildings designed by research. */
+  designCost: number;
 }
 
 export function neutralMods(): ResearchMods {
-  return { buildCost: 1, powerUse: 1, waterUse: 1, garbage: 1, roadCapacity: 1, industryEfficiency: 1, industryPollution: 1, powerPollution: 1, happiness: 0, landValue: 0, boost: {} };
+  return { buildCost: 1, powerUse: 1, waterUse: 1, garbage: 1, roadCapacity: 1, industryEfficiency: 1, industryPollution: 1, powerPollution: 1, happiness: 0, landValue: 0, boost: {}, retrofitPollution: {}, designCost: 1 };
+}
+
+/** A retrofit programme with what it would take now. */
+export interface RetrofitOffer extends Retrofit {
+  buildings: number;
+  cost: number;
+  applied: boolean;
 }
 
 export interface Requirement {
@@ -97,6 +128,12 @@ export interface ResearchSave {
   followups: ProposalContext['followups'];
   achieved: string[];
   counters: { plan: number; disc: number; design: number; rec: number };
+  funding?: number;
+  autoDecide?: boolean;
+  milestones?: string[];
+  milestoneDays?: [string, number][];
+  retrofits?: [string, { day: number; buildings: number; cost: number }][];
+  guideDone?: boolean;
 }
 
 /**
@@ -113,8 +150,21 @@ export class Research {
   followups: ProposalContext['followups'] = [];
   readonly achieved = new Set<string>();
   mods = neutralMods();
+  /** Research budget: 1 is normal; more is faster and dearer. */
+  funding = 1;
+  /** Take the careful option when a decision has waited too long. */
+  autoDecide = false;
+  /** Milestones reached. */
+  readonly milestones = new Set<string>();
+  /** Day each milestone was reached. */
+  readonly milestoneDays = new Map<string, number>();
+  /** Retrofit programmes carried out (by discovery id). */
+  readonly retrofits = new Map<string, { day: number; buildings: number; cost: number }>();
+  /** The first-experiment guide has been dismissed. */
+  guideDone = false;
   /** Bumped whenever something the interface shows changes. */
   version = 0;
+  private briefCache: { day: number; list: Brief[] } | null = null;
   private counters = { plan: 1, disc: 1, design: 1, rec: 1 };
   private types: ServiceType[] = [];
 
@@ -221,6 +271,71 @@ export class Research {
     };
   }
 
+  /** The city's pressing problems, put to its scientists (refreshed daily). */
+  briefs(): Brief[] {
+    const day = this.city.clock.day;
+    if (!this.briefCache || this.briefCache.day !== day) this.briefCache = { day, list: cityBriefs(this.city, this.needs()) };
+    return this.briefCache.list;
+  }
+
+  // ── Staff ──
+
+  /** Universities running in the city (graduates staff the centres). */
+  universities(): number {
+    let n = 0;
+    for (const b of this.city.buildings.all.values()) if (b.typeId === 'university' && b.state === BuildingState.Active) n++;
+    return n;
+  }
+
+  /** Mastery level (0–3) of a centre in a field. */
+  masteryOf(c: Center, f: FieldId): number {
+    return masteryLevel(c.mastery?.[f] ?? 0);
+  }
+
+  /** Factors beyond the plan itself: mastery, graduates, milestones, a joint team. */
+  extras(c: Center, plan: Plan): [string, number][] {
+    const out: [string, number][] = [];
+    const m = this.masteryOf(c, plan.field);
+    if (m) out.push([`${MASTERY_NAMES[m]} in ${FIELD_BY_ID.get(plan.field)!.name.toLowerCase()}`, 0.03 * m]);
+    const u = Math.min(3, this.universities());
+    if (u) out.push([`University graduates (${u})`, 0.04 * u]);
+    if (this.milestones.has(`field:${plan.field}`)) out.push(['Established field', 0.05]);
+    const partnerId = c.active?.plan.id === plan.id ? c.active.partnerId : undefined;
+    const partner = partnerId !== undefined ? this.centers.get(partnerId) : undefined;
+    if (partner) out.push([`Joint team with ${partner.name}`, 0.08]);
+    return out;
+  }
+
+  /** Extra result quality from experience and a joint team. */
+  private qualityBonus(c: Center, plan: Plan): number {
+    return 0.03 * this.masteryOf(c, plan.field) + (c.active?.partnerId !== undefined ? 0.06 : 0);
+  }
+
+  /** Progress per day for a running experiment (budget, equipment, graduates, partner). */
+  speedOf(c: Center): number {
+    const a = c.active;
+    if (!a) return 0;
+    const fund = 0.4 + 0.6 * this.funding;
+    const grads = 1 + 0.1 * Math.min(3, this.universities());
+    const joint = a.partnerId !== undefined ? 1.3 : 1;
+    const iter = a.plan.kind === 'iteration' && this.milestones.has('iterate') ? 1.25 : 1;
+    return (1 + 0.1 * (c.equipment - 1)) * fund * grads * joint * iter;
+  }
+
+  /** Roughly how many days a proposal would take here now (with an optional partner). */
+  estimateDays(c: Center, plan: Plan, partnerId?: number): number {
+    const fund = 0.4 + 0.6 * this.funding;
+    const grads = 1 + 0.1 * Math.min(3, this.universities());
+    const joint = partnerId !== undefined ? 1.3 : 1;
+    const iter = plan.kind === 'iteration' && this.milestones.has('iterate') ? 1.25 : 1;
+    return Math.max(4, Math.round(Math.max(4, plan.days) / ((1 + 0.1 * (c.equipment - 1)) * fund * grads * joint * iter)));
+  }
+
+  setFunding(v: number): void {
+    this.funding = Math.max(FUNDING_MIN, Math.min(FUNDING_MAX, Math.round(v * 20) / 20));
+    this.version++;
+  }
+
   // ── Centres ──
 
   /** What surrounds a site, as reasons for a specialization. */
@@ -294,9 +409,28 @@ export class Research {
     if (c.active) {
       // The work stops; money already committed is gone, nothing more is charged.
       this.record(c, c.active, 'interrupted', 0, undefined, 'The centre closed before the experiment finished.');
+      this.release(c);
+    }
+    // A partner that closes leaves the lead to carry on alone.
+    if (c.assisting !== undefined) {
+      const lead = this.centers.get(c.assisting);
+      if (lead?.active) lead.active.partnerId = undefined;
     }
     this.centers.delete(id);
     this.version++;
+  }
+
+  /** Frees the partner of a centre's experiment. */
+  private release(c: Center): void {
+    const pid = c.active?.partnerId;
+    if (pid === undefined) return;
+    const p = this.centers.get(pid);
+    if (p && p.assisting === c.id) p.assisting = undefined;
+  }
+
+  /** Idle, open centres that could join an experiment at `c`. */
+  partnersFor(c: Center): Center[] {
+    return [...this.centers.values()].filter((o) => o.id !== c.id && !o.active && o.assisting === undefined && this.operational(o).ok);
   }
 
   /** Whether a centre can run work now (and if not, why). */
@@ -322,10 +456,27 @@ export class Research {
     if (manual && this.city.clock.day - c.lastRefresh < REFRESH_DAYS) return false;
     c.round++;
     if (manual) c.lastRefresh = this.city.clock.day;
-    const ctx: ProposalContext = { resources: this.resourcesFor(c), needs: this.needs(), followups: this.followups };
+    const ctx: ProposalContext = {
+      resources: this.resourcesFor(c), needs: this.needs(), followups: this.followups, briefs: this.briefs(), iterations: this.iterationsReady(),
+      extraSlots: this.milestones.has('fields5') ? 1 : 0, synthDiscount: this.milestones.has('synth') ? 0.2 : 0,
+    };
     c.offers = generateProposals(this.civ(), this.info(c), ctx, c.round, this.nextPlan);
     this.version++;
     return true;
+  }
+
+  /** Designs in service long enough to develop their next version. */
+  iterationsReady(): { discovery: string; version: number }[] {
+    const day = this.city.clock.day;
+    const running = new Set([...this.centers.values()].map((c) => (c.active?.plan.kind === 'iteration' ? c.active.plan.basis[0] : '')));
+    const out: { discovery: string; version: number }[] = [];
+    for (const d of this.designs.values()) {
+      const v = d.version ?? 1;
+      if (d.builtDay === undefined || day - d.builtDay < ITERATE_AFTER_DAYS || v >= 4) continue;
+      if (this.achieved.has(`iter|${d.id}`) || running.has(d.discoveryId)) continue;
+      out.push({ discovery: d.discoveryId, version: v });
+    }
+    return out;
   }
 
   requirements(c: Center, plan: Plan): Requirement[] {
@@ -340,6 +491,7 @@ export class Research {
       { label: reach?.ok ? `${res.name} within reach` : `${res.name}: ${reach?.why ?? 'not available'}`, ok: !!reach?.ok },
       { label: 'No other experiment running here', ok: !c.active },
     ];
+    if (c.assisting !== undefined) reqs.push({ label: `Helping ${this.centers.get(c.assisting)?.name ?? 'another centre'} with its experiment`, ok: false });
     if (p.needs || plan.kind === 'synthesis') {
       const edu = b ? this.education(c) : 0;
       reqs.push({ label: `Educated staff: education coverage 25%+ at the centre (${Math.round(edu * 100)}%)`, ok: edu >= 0.25 });
@@ -348,26 +500,37 @@ export class Research {
   }
 
   /** Chance of success for a plan: the running one counts the decisions taken so far, plus `extra`. */
-  oddsFor(c: Center, plan: Plan, extra: Choice[] = []) {
+  oddsFor(c: Center, plan: Plan, extra: Choice[] = [], partnerId?: number) {
     const taken = c.active?.plan.id === plan.id ? this.choicesOf(c) : [];
-    return odds(plan, [...taken, ...extra], this.info(c), this.civ(), this.education(c));
+    const factors = this.extras(c, plan);
+    // Previewing a joint start: count the partner before it has joined.
+    if (partnerId !== undefined && !factors.some(([k]) => k.startsWith('Joint team'))) factors.push([`Joint team with ${this.centers.get(partnerId)?.name ?? 'a partner'}`, 0.08]);
+    return odds(plan, [...taken, ...extra], this.info(c), this.civ(), this.education(c), factors);
   }
 
   private choicesOf(c: Center): Choice[] {
     const a = c.active;
     if (!a) return [];
-    return a.choices.map((ch) => ({ stage: ch.stage, option: decisionFor(this.civSeed, a.plan, ch.stage).options.find((o) => o.id === ch.optionId)! })).filter((ch) => ch.option);
+    return a.choices
+      .map((ch) => ({ stage: ch.stage, option: ch.option ?? decisionFor(this.civSeed, a.plan, ch.stage).options.find((o) => o.id === ch.optionId)! }))
+      .filter((ch) => ch.option);
   }
 
-  start(centerId: number, planId: string): { ok: boolean; error?: string } {
+  start(centerId: number, planId: string, partnerId?: number): { ok: boolean; error?: string } {
     const c = this.centers.get(centerId);
     if (!c) return { ok: false, error: 'No such research centre' };
     const plan = c.offers.find((p) => p.id === planId);
     if (!plan) return { ok: false, error: 'That proposal is no longer on offer' };
     const unmet = this.requirements(c, plan).filter((r) => !r.ok);
     if (unmet.length) return { ok: false, error: unmet[0].label };
+    const partner = partnerId !== undefined ? this.centers.get(partnerId) : undefined;
+    if (partnerId !== undefined && (!partner || !this.partnersFor(c).includes(partner))) return { ok: false, error: 'That centre cannot help right now' };
     if (!this.city.economy.spend(plan.cost, 'Research')) return { ok: false, error: 'Not enough money' };
     c.active = { plan, progress: 0, choices: [], pending: null, started: this.city.clock.day, spent: plan.cost, status: 'Running' };
+    if (partner) {
+      c.active.partnerId = partner.id;
+      partner.assisting = c.id;
+    }
     c.offers = c.offers.filter((p) => p.id !== planId);
     this.version++;
     return { ok: true };
@@ -381,8 +544,11 @@ export class Research {
     if (!opt) return { ok: false, error: 'Unknown option' };
     if (opt.cost > 0 && !this.city.economy.spend(opt.cost, 'Research')) return { ok: false, error: `Needs ${formatMoney(opt.cost)}` };
     a.spent += Math.max(0, opt.cost);
-    a.choices.push({ stage: a.pending.stage, optionId: opt.id, label: opt.label });
+    a.choices.push({ stage: a.pending.stage, optionId: opt.id, label: opt.label, option: opt });
     a.pending = null;
+    a.pendingSince = undefined;
+    // Sharing the findings early ends the work now.
+    if (opt.publish) this.finish(c);
     this.version++;
     return { ok: true };
   }
@@ -392,8 +558,35 @@ export class Research {
     if (!c?.active) return;
     this.insights.set(c.active.plan.principle, (this.insights.get(c.active.plan.principle) ?? 0) + 0.5);
     this.record(c, c.active, 'abandoned', 0, undefined, 'Stopped early. What was learned makes the next attempt at this method a little safer.');
+    this.release(c);
     c.active = null;
     this.refresh(c);
+  }
+
+  /** The decision coming up next for a running experiment, if any. */
+  private nextStage(a: ActiveExperiment): { at: number; stage: number } | null {
+    const done = new Set(a.choices.map((ch) => ch.stage));
+    const apply = a.choices.some((ch) => ch.stage === 0 && (ch.option?.direction ?? ch.optionId) === 'apply');
+    for (const st of STAGE_PLAN) {
+      if (done.has(st.stage)) continue;
+      // Field trials are only for pilot facilities.
+      if (st.stage === 2 && !apply) continue;
+      return st;
+    }
+    return null;
+  }
+
+  /** Field-trial sites for a running experiment's pilot. */
+  sitesFor(c: Center, plan: Plan): TrialSite[] {
+    const b = this.city.buildings.get(c.id);
+    const fn = PRINCIPLE_BY_ID.get(plan.principle)?.build ?? 'powerGen';
+    return trialSites(this.city, fn, b ? { x: b.cx, z: b.cz } : this.city.startPoint);
+  }
+
+  /** The careful choice, for decisions left waiting too long. */
+  private carefulOption(d: Decision): DecisionOption {
+    const pick = d.options.find((o) => o.id === 'carry' || o.id === 'safe' || o.id === 'lab');
+    return pick ?? [...d.options].sort((x, y) => x.risk - y.risk || x.cost - y.cost)[0];
   }
 
   upgrade(centerId: number): { ok: boolean; error?: string } {
@@ -413,11 +606,30 @@ export class Research {
   // ── Daily work ──
 
   daily(): void {
+    const day = this.city.clock.day;
+    // A design's time in service counts from its first working building.
+    for (const d of this.designs.values()) {
+      if (d.builtDay !== undefined) continue;
+      for (const b of this.city.buildings.all.values()) {
+        if (b.typeId === d.serviceId && b.state === BuildingState.Active) {
+          d.builtDay = day;
+          this.version++;
+          break;
+        }
+      }
+    }
     for (const c of this.centers.values()) {
       const b = this.city.buildings.get(c.id);
       if (!b) continue;
       if (c.round === 0 && this.operational(c).ok) this.refresh(c);
       const a = c.active;
+      if (a?.pending && this.autoDecide && day - (a.pendingSince ?? day) >= AUTO_DECIDE_DAYS) {
+        const opt = this.carefulOption(a.pending);
+        const title = a.pending.title;
+        this.decide(c.id, opt.id);
+        this.city.emitNotice({ severity: 'info', icon: 'research', title: 'Decided for you', text: `${c.name}: “${title}” waited ${AUTO_DECIDE_DAYS} days, so the team chose: ${opt.label}.`, x: b.cx, z: b.cz });
+        continue;
+      }
       if (!a || a.pending) continue;
       const op = this.operational(c, a.plan.power);
       if (!op.ok) {
@@ -430,25 +642,26 @@ export class Research {
       }
       a.status = 'Running';
       const extraDays = this.choicesOf(c).reduce((s, ch) => s + ch.option.days, 0);
-      a.progress = Math.min(1, a.progress + (1 + 0.1 * (c.equipment - 1)) / Math.max(4, a.plan.days + extraDays));
-      const stage = a.choices.length;
-      if (stage < STAGES.length && a.progress >= STAGES[stage]) {
-        a.progress = STAGES[stage];
-        a.pending = decisionFor(this.civSeed, a.plan, stage);
+      a.progress = Math.min(1, a.progress + this.speedOf(c) / Math.max(4, a.plan.days + extraDays));
+      const next = this.nextStage(a);
+      if (next && a.progress >= next.at) {
+        a.progress = next.at;
+        a.pending = decisionFor(this.civSeed, a.plan, next.stage, next.stage === 2 ? this.sitesFor(c, a.plan) : []);
+        a.pendingSince = day;
         // The game shows a clickable notification that opens the decision.
         this.city.events.emit('research', { type: 'decision', centerId: c.id });
-      } else if (a.progress >= 1 && stage >= STAGES.length) {
+      } else if (a.progress >= 1 && !next) {
         this.finish(c);
       }
       this.version++;
     }
   }
 
-  /** Monthly running cost of experiments in progress. */
+  /** Monthly running cost of experiments in progress (scaled by the research budget). */
   monthlyCost(): number {
     let s = 0;
     for (const c of this.centers.values()) if (c.active) s += c.active.plan.monthly;
-    return s;
+    return Math.round(s * this.funding);
   }
 
   private finish(c: Center): void {
@@ -456,9 +669,19 @@ export class Research {
     const b = this.city.buildings.get(c.id);
     const civ = this.civ();
     const choices = this.choicesOf(c);
-    const res = resolve(civ, a.plan, choices, this.info(c), this.education(c));
+    const res = resolve(civ, a.plan, choices, this.info(c), this.education(c), this.extras(c, a.plan), this.qualityBonus(c, a.plan));
+    const partner = a.partnerId !== undefined ? this.centers.get(a.partnerId) : undefined;
+    this.release(c);
     c.active = null;
     c.completed++;
+    // Experience: the lead centre learns most, a partner a little.
+    const xp = res.outcome === 'failure' ? 0.5 : 1;
+    const before = this.masteryOf(c, a.plan.field);
+    c.mastery = { ...c.mastery, [a.plan.field]: (c.mastery?.[a.plan.field] ?? 0) + xp };
+    if (partner) partner.mastery = { ...partner.mastery, [a.plan.field]: (partner.mastery?.[a.plan.field] ?? 0) + xp / 2 };
+    if (this.masteryOf(c, a.plan.field) > before) {
+      this.city.emitNotice({ severity: 'good', icon: 'research', title: `${MASTERY_NAMES[this.masteryOf(c, a.plan.field)]} in ${FIELD_BY_ID.get(a.plan.field)!.name}`, text: `${c.name} has grown more experienced: better odds and results in this field.`, x: b?.cx, z: b?.cz });
+    }
     this.followups = this.followups.filter((f) => !(f.principle === a.plan.principle && f.resource === a.plan.resource));
     if (res.outcome === 'failure') {
       const p = PRINCIPLE_BY_ID.get(a.plan.principle)!;
@@ -484,11 +707,126 @@ export class Research {
       this.adopt(made);
       this.achieved.add(`${a.plan.principle}|${a.plan.resource}`);
       if (a.plan.kind === 'synthesis') this.achieved.add(`synth|${a.plan.basis[0]}|${a.plan.basis[1]}`);
-      this.record(c, a, res.outcome, res.chance, made.discovery.id);
+      if (a.plan.kind === 'iteration') {
+        const prev = this.discoveries.find((d) => d.id === a.plan.basis[0]);
+        if (prev?.designId) this.achieved.add(`iter|${prev.designId}`);
+      }
+      // Findings shared early leave open questions: the next-best substance becomes a follow-up.
+      let note: string | undefined;
+      if (choices.some((ch) => ch.option.publish)) {
+        const p = PRINCIPLE_BY_ID.get(a.plan.principle)!;
+        const reach = this.resourcesFor(c);
+        const alt = RESOURCES.filter((r) => r.id !== a.plan.resource && reach.get(r.id)?.ok && fit(p, r) >= 0.3 && !this.achieved.has(`${p.id}|${r.id}`)).sort((x, y) => fit(p, y) - fit(p, x))[0];
+        if (alt) {
+          this.followups.push({ principle: p.id, resource: alt.id, basis: made.discovery.id, note: `Shared early: the open questions point to ${alt.name.toLowerCase()}.` });
+          note = `Shared early. The open questions point to ${alt.name.toLowerCase()} — a follow-up is on offer.`;
+        }
+      }
+      this.record(c, a, res.outcome, res.chance, made.discovery.id, note);
       this.city.emitNotice({ severity: 'good', icon: 'research', title: `Discovery: ${made.discovery.name}`, text: `${c.name} — ${made.discovery.classification}.`, x: b?.cx, z: b?.cz });
-      this.city.events.emit('research', { type: 'discovery', centerId: c.id, discoveryId: made.discovery.id });
+      this.city.events.emit('research', { type: 'discovery', centerId: c.id, discoveryId: made.discovery.id, outcome: res.outcome });
     }
+    this.checkMilestones();
     this.refresh(c);
+    if (partner) this.refresh(partner);
+  }
+
+  // ── Milestones ──
+
+  summary(): ScienceSummary {
+    return {
+      discoveries: this.discoveries,
+      designs: [...this.designs.values()],
+      breakthroughs: this.records.filter((r) => r.outcome === 'breakthrough').length,
+      syntheses: this.records.filter((r) => r.kind === 'synthesis' && r.discoveryId).length,
+      iterations: [...this.designs.values()].filter((d) => (d.version ?? 1) >= 2).length,
+      retrofits: this.retrofits.size,
+    };
+  }
+
+  /** Records milestones newly reached and pays out their rewards. */
+  checkMilestones(): void {
+    const reached = newMilestones(this.summary(), this.milestones);
+    for (const m of reached) {
+      this.milestones.add(m.id);
+      this.milestoneDays.set(m.id, this.city.clock.day);
+      if (m.id === 'first') this.city.economy.grant(15_000);
+      this.city.emitNotice({ severity: 'good', icon: 'research', title: `Research milestone: ${m.title}`, text: `${m.goal}. Reward: ${m.reward}.` });
+      this.city.events.emit('research', { type: 'milestone', centerId: 0, milestoneId: m.id });
+    }
+    if (reached.length) this.recomputeMods();
+  }
+
+  // ── Retrofits ──
+
+  /** Retrofit programmes the civilization's discoveries make possible. */
+  retrofitOffers(): RetrofitOffer[] {
+    const out: RetrofitOffer[] = [];
+    const discount = this.milestones.has('retrofit') ? 0.85 : 1;
+    for (const d of this.discoveries) {
+      const design = d.designId ? this.designs.get(d.designId) : undefined;
+      const r = retrofitFor(d, design);
+      if (!r) continue;
+      const targets = this.retrofitTargets(r);
+      const applied = this.retrofits.get(r.id);
+      out.push({ ...r, buildings: applied ? applied.buildings : targets.length, cost: applied ? applied.cost : Math.round((r.perBuilding * targets.length * discount) / 100) * 100, applied: !!applied });
+    }
+    return out;
+  }
+
+  private retrofitTargets(r: Retrofit): Building[] {
+    const out: Building[] = [];
+    for (const b of this.city.buildings.all.values()) {
+      if (b.kind !== 'service' || b.state === BuildingState.Abandoned) continue;
+      const st = SERVICE_BY_ID.get(b.typeId);
+      if (!st || st.kind !== r.target) continue;
+      if (r.what === 'pollution' && !(st.pollution > 0)) continue;
+      if (r.what === 'output' && !(st.output > 0)) continue;
+      out.push(b);
+    }
+    return out;
+  }
+
+  /** Carries out a retrofit programme: every existing building of its kind, and every later one. */
+  applyRetrofit(id: string): { ok: boolean; error?: string } {
+    const offer = this.retrofitOffers().find((o) => o.id === id);
+    if (!offer) return { ok: false, error: 'No such retrofit' };
+    if (offer.applied) return { ok: false, error: 'Already carried out' };
+    if (!offer.buildings) return { ok: false, error: `No ${offer.targetLabel} to retrofit yet` };
+    if (!this.city.economy.spend(offer.cost, 'Research')) return { ok: false, error: `Needs ${formatMoney(offer.cost)}` };
+    this.retrofits.set(id, { day: this.city.clock.day, buildings: offer.buildings, cost: offer.cost });
+    this.recomputeMods();
+    this.city.recomputeUtilities();
+    this.city.emitNotice({ severity: 'good', icon: 'research', title: 'Retrofit complete', text: `${offer.title}: ${offer.buildings} building${offer.buildings === 1 ? '' : 's'} upgraded.` });
+    this.city.events.emit('research', { type: 'retrofit', centerId: 0, discoveryId: id });
+    this.checkMilestones();
+    return { ok: true };
+  }
+
+  /** Retrofits in effect for a kind of facility (for the inspector). */
+  retrofitsFor(kind: string): RetrofitOffer[] {
+    return this.retrofitOffers().filter((o) => o.applied && o.target === kind);
+  }
+
+  // ── Names ──
+
+  /** Renames a design (and its discovery); a version mark is kept. */
+  renameDesign(id: string, name: string): boolean {
+    const d = this.designs.get(id);
+    const clean = name.replace(/\s+/g, ' ').trim().slice(0, 40);
+    if (!d || !clean) return false;
+    const mark = /( Mk [IVX]+)$/.exec(d.name)?.[1] ?? '';
+    d.name = `${baseName(clean)}${mark}`;
+    const disc = this.discoveries.find((x) => x.id === d.discoveryId);
+    if (disc) disc.name = d.name;
+    this.register(d);
+    this.version++;
+    return true;
+  }
+
+  dismissGuide(): void {
+    this.guideDone = true;
+    this.version++;
   }
 
   /** Adds a finished discovery (and its design) to the civilization's science. */
@@ -501,6 +839,7 @@ export class Research {
     this.discoveries.push(made.discovery);
     this.achieved.add(`${made.discovery.principle}|${made.discovery.resource}`);
     this.recomputeMods();
+    this.checkMilestones();
   }
 
   /** Ids for the next discovery (and design) made. */
@@ -518,6 +857,8 @@ export class Research {
       day: this.city.clock.day,
       decisions: a.choices.map((ch) => ch.label),
       chance,
+      kind: a.plan.kind,
+      partner: a.partnerId !== undefined ? this.centers.get(a.partnerId)?.name : undefined,
       discoveryId,
       insight,
     });
@@ -531,6 +872,33 @@ export class Research {
     const all: Effect[] = [];
     for (const d of this.discoveries) all.push(...d.effects, ...d.drawbacks);
     const mul = (k: keyof ResearchMods, v: number) => ((m[k] as number) *= 1 + v);
+    // Retrofit programmes carried out.
+    for (const o of this.retrofitOffers()) {
+      if (!o.applied) continue;
+      if (o.what === 'pollution') m.retrofitPollution[o.target] = (m.retrofitPollution[o.target] ?? 1) * (1 + o.value);
+      else all.push({ kind: 'boost', value: o.value, target: o.target });
+    }
+    // Milestone rewards and the research-led policies in force.
+    if (this.milestones.has('breakthrough3')) m.happiness += 1;
+    if (this.milestones.has('designs3')) m.designCost = 0.9;
+    const pol = this.city.policies;
+    if (pol?.has('congestionPricing')) {
+      all.push({ kind: 'roadCapacity', value: 0.1 });
+      m.happiness -= 1;
+    }
+    if (pol?.has('greenBuildingCode')) {
+      all.push({ kind: 'powerUse', value: -0.08 });
+      all.push({ kind: 'buildCost', value: 0.06 });
+    }
+    if (pol?.has('waterMetering')) {
+      all.push({ kind: 'waterUse', value: -0.12 });
+      m.happiness -= 0.5;
+    }
+    if (pol?.has('healthDrive')) m.happiness += 1;
+    if (pol?.has('urbanFarming')) {
+      all.push({ kind: 'garbage', value: -0.08 });
+      m.happiness += 0.5;
+    }
     for (const e of all) {
       if (e.kind === 'happiness') m.happiness += e.value;
       else if (e.kind === 'landValue') m.landValue += e.value;
@@ -549,6 +917,7 @@ export class Research {
     m.happiness = Math.max(-5, Math.min(9, m.happiness));
     m.landValue = Math.max(-0.05, Math.min(0.09, m.landValue));
     for (const k of Object.keys(m.boost)) m.boost[k] = Math.max(0.7, Math.min(1.7, m.boost[k]));
+    for (const k of Object.keys(m.retrofitPollution)) m.retrofitPollution[k] = Math.max(0.25, m.retrofitPollution[k]);
     this.mods = m;
     this.city.traffic.capacityScale = m.roadCapacity;
     this.version++;
@@ -556,7 +925,8 @@ export class Research {
 
   /** Construction price of a service in this city after research. */
   costOf(st: ServiceType): number {
-    return st.kind === 'research' ? st.cost : Math.round((st.cost * this.mods.buildCost) / 100) * 100;
+    if (st.kind === 'research') return st.cost;
+    return Math.round((st.cost * this.mods.buildCost * (st.designId ? this.mods.designCost : 1)) / 100) * 100;
   }
 
   /** Generated producers that depend on the weather like turbines and solar panels. */
@@ -631,6 +1001,12 @@ export class Research {
       followups: this.followups,
       achieved: [...this.achieved],
       counters: this.counters,
+      funding: this.funding,
+      autoDecide: this.autoDecide,
+      milestones: [...this.milestones],
+      milestoneDays: [...this.milestoneDays.entries()],
+      retrofits: [...this.retrofits.entries()],
+      guideDone: this.guideDone,
     });
   }
 
@@ -655,6 +1031,15 @@ export class Research {
     this.achieved.clear();
     for (const k of d.achieved) this.achieved.add(k);
     this.counters = { ...d.counters };
+    this.funding = d.funding ?? 1;
+    this.autoDecide = d.autoDecide ?? false;
+    this.milestones.clear();
+    for (const k of d.milestones ?? []) this.milestones.add(k);
+    this.milestoneDays.clear();
+    for (const [k, v] of d.milestoneDays ?? []) this.milestoneDays.set(k, v);
+    this.retrofits.clear();
+    for (const [k, v] of d.retrofits ?? []) this.retrofits.set(k, v);
+    this.guideDone = d.guideDone ?? false;
     this.recomputeMods();
   }
 }

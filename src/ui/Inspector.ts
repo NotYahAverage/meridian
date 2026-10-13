@@ -195,6 +195,8 @@ export class Inspector {
           const d = city.research.designs.get(st.designId);
           if (d) body.append(h('div', { class: 'hint small' }, `Designed by your researchers. ${d.description}`), h('div', { class: 'btn-row' }, h('button', { class: 'btn small', onclick: () => this.game.ui.research.open({ discoveryId: d.discoveryId }) }, icon('flask', 13), 'The discovery behind it')));
         }
+        const retro = city.research.retrofitsFor(st.kind);
+        if (retro.length) body.append(kv('Retrofitted', retro.map((o) => o.what === 'pollution' ? `${Math.round(-o.value * 100)}% less pollution` : `${Math.round(o.value * 100)}% more output`).join(', ')));
         if (st.storage) body.append(kv('Storage', `up to ${Math.round(st.storage * city.research.outputScale(st))} MW`), kv('Delivering', `${city.utilities.storage.delivered.toFixed(1)} MW across the city`));
         if (st.pollution < 0) body.append(kv('Air cleaning', `${Math.round(-st.pollution * 100)}% within ${st.radius} m`));
         if (st.radius > 0 && st.kind !== 'park') body.append(kv('Coverage radius', `${st.radius} m`));

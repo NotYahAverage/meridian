@@ -245,6 +245,11 @@ export class Game {
         if (e.type === 'discovery' && e.discoveryId) {
           this.audio.play('milestone');
           this.ui.discovery.show(e.discoveryId);
+          // A breakthrough is celebrated over the centre that made it, once it's dark.
+          const b = city.buildings.get(e.centerId);
+          if (e.outcome === 'breakthrough' && b) this.celebrate(12, { x: b.cx, z: b.cz });
+        } else if (e.type === 'milestone' && e.milestoneId) {
+          this.audio.play('good');
         } else if (e.type === 'decision') {
           this.play('notify');
           this.ui.toasts.push({ severity: 'info', icon: 'flask', title: 'Your scientists need a decision', text: city.research.centers.get(e.centerId)?.active?.pending?.prompt ?? '', onClick: () => this.ui.research.open({ tab: 'centres', centreId: e.centerId }), tip: 'Click to decide' });

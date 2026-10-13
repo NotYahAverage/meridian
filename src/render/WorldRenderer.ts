@@ -142,7 +142,7 @@ export class WorldRenderer {
     city.vehicles.lodRadius = Math.max(600, camDist * 1.2);
     this.vehicles.update(city.vehicles, camera, focus);
     this.pedestrians.update(dt, simDt, focus, camDist, env.hour);
-    this.effects.update(dt, this.props.emitters, camera.position, viewportH, camera.fov, simRunning);
+    this.effects.update(dt, this.labActivity(), camera.position, viewportH, camera.fov, simRunning);
     this.icons.update(dt, camDist, globalUniforms.uTime.value);
     this.ghost.update();
     this.updateWeather(dt, camera, env, viewportH);
@@ -163,6 +163,25 @@ export class WorldRenderer {
     const k = Math.abs(f);
     seasonUniforms.uSeasonTint.value.setRGB(a[0] + (b[0] - a[0]) * k, a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k);
     seasonUniforms.uSeasonAmount.value = a[3] + (b[3] - a[3]) * k;
+  }
+
+  /** Prop emitters, plus steam from the vents of research centres with work under way. */
+  private labActivity(): PropRenderer['emitters'] {
+    const list = this.props.emitters;
+    const r = this.city.research;
+    if (!r.centers.size) return list;
+    const extra: PropRenderer['emitters'] = [];
+    for (const c of r.centers.values()) {
+      if (!c.active || c.active.pending) continue;
+      const b = this.city.buildings.get(c.id);
+      if (!b || b.progress < 1) continue;
+      const h = this.buildings.heightOf(b.id);
+      const ca = Math.cos(b.angle), sa = Math.sin(b.angle);
+      // A vent towards the back corner of the roof.
+      const lx = b.hw * 0.45, lz = b.hd * 0.35;
+      extra.push({ x: b.cx + lx * ca - lz * sa, y: b.y + h + 0.5, z: b.cz + lx * sa + lz * ca, kind: 'steam', scale: 0.45 + 0.15 * c.equipment });
+    }
+    return extra.length ? list.concat(extra) : list;
   }
 
   private updateWeather(dt: number, camera: THREE.PerspectiveCamera, env: Environment, viewportH: number): void {

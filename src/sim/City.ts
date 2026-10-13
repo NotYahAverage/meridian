@@ -51,7 +51,7 @@ export type CityEvents = {
   achievement: { id: string; title: string };
   scenario: { id: string; result: 'won' | 'lost' };
   news: Edition;
-  research: { type: 'discovery' | 'decision' | 'failure'; centerId: number; discoveryId?: string; recordId?: string };
+  research: { type: 'discovery' | 'decision' | 'failure' | 'milestone' | 'retrofit'; centerId: number; discoveryId?: string; recordId?: string; outcome?: string; milestoneId?: string };
 };
 
 export interface CityOptions {

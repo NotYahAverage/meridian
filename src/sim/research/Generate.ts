@@ -5,6 +5,7 @@ import {
   COMPONENT_LABEL, type ComponentKind, FIELD_BY_ID, FIELDS, FUNCTION_LABEL, type FieldId, type FunctionKind, MODIFIER_LABEL, type ModifierKind,
   PRINCIPLES, PRINCIPLE_BY_ID, type Principle, RESOURCE_BY_ID, type ResourceDef, TAG_NAMES, fit,
 } from './Knowledge';
+import type { Brief, TrialSite } from './Briefs';
 
 /**
  * Pure generation for the research system: names, experiment proposals,
@@ -59,6 +60,12 @@ export interface Design {
   arch: ArchSpec;
   /** Architectural features it was given (for the interface). */
   traits: string[];
+  /** 1 for an original design, 2 for its Mark II and so on. */
+  version?: number;
+  /** The design it was developed from. */
+  lineage?: string;
+  /** Day the first one was built (iterations need some time in service). */
+  builtDay?: number;
 }
 
 export interface Discovery {
@@ -98,7 +105,7 @@ export interface Plan {
   resource: string;
   /** Discoveries it combines or follows up. */
   basis: string[];
-  kind: 'study' | 'synthesis' | 'followup';
+  kind: 'study' | 'synthesis' | 'followup' | 'iteration';
   cost: number;
   monthly: number;
   days: number;
@@ -107,6 +114,10 @@ export interface Plan {
   risk: number;
   prospects: string[];
   clues: string[];
+  /** The city brief it answers, if any (the council pays part of the cost). */
+  brief?: { title: string; text: string; x?: number; z?: number };
+  /** Money the council paid toward the start. */
+  grant?: number;
 }
 
 export interface DecisionOption {
@@ -121,6 +132,10 @@ export interface DecisionOption {
   direction?: Direction;
   /** Follows an anomaly toward another field. */
   anomaly?: FieldId;
+  /** Ends the experiment now with a smaller result and a follow-up. */
+  publish?: boolean;
+  /** Field-tests the pilot at this site. */
+  site?: { x: number; z: number; fit: number };
 }
 
 export interface Decision {
@@ -236,10 +251,18 @@ export interface ProposalContext {
   needs: Partial<Record<FieldId, number>>;
   /** Follow-ups suggested by earlier failures. */
   followups: { principle: string; resource: string; basis: string; note: string }[];
+  /** The city's pressing problems. */
+  briefs?: Brief[];
+  /** Designs that have been in service long enough to develop further. */
+  iterations?: { discovery: string; version: number }[];
+  /** Proposals beyond the usual number (milestone rewards). */
+  extraSlots?: number;
+  /** Fraction off the start cost of syntheses (milestone reward). */
+  synthDiscount?: number;
 }
 
 function planNumbers(p: Principle, f: number, civ: CivState, kind: Plan['kind'], r: Rng): Pick<Plan, 'cost' | 'monthly' | 'days' | 'power' | 'risk'> {
-  const mult = kind === 'synthesis' ? 1.5 : kind === 'followup' ? 0.8 : 1;
+  const mult = kind === 'synthesis' ? 1.5 : kind === 'iteration' ? 1.2 : kind === 'followup' ? 0.8 : 1;
   const insight = Math.min(3, civ.insights.get(p.id) ?? 0);
   const round = (v: number, step: number) => Math.round(v / step) * step;
   return {
@@ -247,7 +270,7 @@ function planNumbers(p: Principle, f: number, civ: CivState, kind: Plan['kind'],
     monthly: round((600 + 2_400 * p.difficulty) * (kind === 'synthesis' ? 1.3 : 1), 50),
     days: Math.round((10 + 18 * p.difficulty) * (kind === 'synthesis' ? 1.2 : 1) + r.int(0, 4)),
     power: Math.round((0.5 + 3 * p.difficulty) * 10) / 10,
-    risk: Math.max(0.04, 0.12 + 0.4 * p.difficulty - 0.15 * f - 0.06 * insight - (kind === 'followup' ? 0.1 : 0) + (kind === 'synthesis' ? 0.05 : 0)),
+    risk: Math.max(0.04, 0.12 + 0.4 * p.difficulty - 0.15 * f - 0.06 * insight - (kind === 'followup' || kind === 'iteration' ? 0.1 : 0) + (kind === 'synthesis' ? 0.05 : 0)),
   };
 }
 
@@ -287,20 +310,26 @@ export function generateProposals(civ: CivState, center: CenterInfo, ctx: Propos
       if (civ.achieved.has(pairKey(p.id, rid))) continue;
       const follow = ctx.followups.find((q) => q.principle === p.id && q.resource === rid);
       const spec = p.field === center.field ? 0.45 : 0.15;
-      const need = (ctx.needs[p.field] ?? 0) * 0.6;
+      const brief = ctx.briefs?.find((b) => b.field === p.field);
+      const need = (ctx.needs[p.field] ?? 0) * 0.6 + (brief ? 0.4 * brief.severity : 0);
       const fresh = (civ.insights.get(p.id) ?? 0) === 0 ? 0.15 : 0;
       const jitter = unit(civ.civSeed, center.id, round, p.id, rid) * 0.45;
       cands.push({ p, r: res, f, follow, score: f + spec + need + fresh + jitter + (follow ? 0.6 : 0) + (p.needs ? 0.2 : 0) });
     }
   }
   cands.sort((a, b) => b.score - a.score);
-  const want = 2 + center.equipment;
+  const want = 2 + center.equipment + (ctx.extraSlots ?? 0);
   const picked: Cand[] = [];
   const perPrinciple = new Set<string>();
+  // At most two proposals answer the same brief, so the list stays varied.
+  const briefed = new Map<FieldId, number>();
+  const isBriefed = (c: Cand) => !!ctx.briefs?.some((b) => b.field === c.p.field);
   for (const c of cands) {
     if (picked.length >= want) break;
     if (perPrinciple.has(c.p.id)) continue;
+    if (isBriefed(c) && (briefed.get(c.p.field) ?? 0) >= 2) continue;
     perPrinciple.add(c.p.id);
+    if (isBriefed(c)) briefed.set(c.p.field, (briefed.get(c.p.field) ?? 0) + 1);
     picked.push(c);
   }
   const plans: Plan[] = picked.map((c) => {
@@ -313,6 +342,18 @@ export function generateProposals(civ: CivState, center: CenterInfo, ctx: Propos
     if (c.follow) clues.push(c.follow.note);
     if (c.p.needs) clues.push(`Builds on ${c.p.needs.map((t) => TAG_NAMES[t] ?? t).join(' and ')}.`);
     const verb = r.pick(['Test', 'Explore', 'Investigate', 'Trial']);
+    const brief = ctx.briefs?.find((b) => b.field === c.p.field);
+    if (brief) {
+      clues.unshift(`Answers a city brief: ${brief.text}`);
+      const grant = Math.round((nums.cost * brief.grant) / 500) * 500;
+      nums.cost -= grant;
+      return withBrief({
+        id: nextId(), centerId: center.id,
+        title: c.follow ? `Follow-up: ${c.p.name} with ${c.r.name.toLowerCase()}` : `${verb} ${c.p.name.toLowerCase()} with ${c.r.name.toLowerCase()}`,
+        summary: `${brief.title}: can ${c.r.name.toLowerCase()} and ${c.p.name.toLowerCase()} help? The council pays ${Math.round(brief.grant * 100)}% of the start.`,
+        field: c.p.field, principle: c.p.id, resource: c.r.id, basis: c.follow ? [c.follow.basis] : [], kind, ...nums, prospects: prospectsFor(c.p), clues, grant,
+      }, brief);
+    }
     return {
       id: nextId(),
       centerId: center.id,
@@ -339,6 +380,7 @@ export function generateProposals(civ: CivState, center: CenterInfo, ctx: Propos
       const b = r.pick(bs);
       const p = PRINCIPLE_BY_ID.get(a.principle)!;
       const nums = planNumbers(p, 0.6, civ, 'synthesis', r);
+      nums.cost = Math.round((nums.cost * (1 - (ctx.synthDiscount ?? 0))) / 500) * 500;
       plans.push({
         id: nextId(),
         centerId: center.id,
@@ -355,13 +397,60 @@ export function generateProposals(civ: CivState, center: CenterInfo, ctx: Propos
       });
     }
   }
+  // Iteration: a design that has been in service is developed into its next version.
+  for (const it of ctx.iterations ?? []) {
+    const d = civ.discoveries.find((x) => x.id === it.discovery);
+    if (!d || !fields.includes(d.field)) continue;
+    const p = PRINCIPLE_BY_ID.get(d.principle)!;
+    const r = rngFor(civ.civSeed, 'iter', center.id, round, d.id);
+    const nums = planNumbers(p, 0.7, civ, 'iteration', r);
+    const mark = MARKS[Math.min(MARKS.length - 1, it.version)];
+    plans.push({
+      id: nextId(),
+      centerId: center.id,
+      title: `Develop ${baseName(d.name)} ${mark}`,
+      summary: `${d.name} has been in service long enough to learn from. A second look at how it runs can make the next version better in every way.`,
+      field: d.field,
+      principle: d.principle,
+      resource: d.resource,
+      basis: [d.id],
+      kind: 'iteration',
+      ...nums,
+      prospects: [`${baseName(d.name)} ${mark}: higher output, lower running costs and a more refined building`],
+      clues: [`Built on ${d.name} (${Math.round(d.quality * 100)}% quality): the next version starts from there.`],
+    });
+    break;
+  }
   return plans;
+}
+
+const MARKS = ['', 'Mk I', 'Mk II', 'Mk III', 'Mk IV'];
+
+/** A design's name without its mark ("Brine Cell Bank Mk II" → "Brine Cell Bank"). */
+export function baseName(name: string): string {
+  return name.replace(/ (Mk [IVX]+|Mark II|II|Advanced)$/, '');
+}
+
+function withBrief(plan: Plan, b: Brief): Plan {
+  plan.brief = { title: b.title, text: b.text, ...(b.x !== undefined ? { x: b.x, z: b.z } : {}) };
+  return plan;
 }
 
 // ── Decisions ───────────────────────────────────────────────────────────────
 
+/**
+ * Decision points in the order they come up: the approach, a field trial
+ * (only for pilot facilities), a complication and the final stretch. `stage`
+ * is the decision's id (kept stable for saves and the dice).
+ */
+export const STAGE_PLAN: { at: number; stage: number }[] = [
+  { at: 0.25, stage: 0 },
+  { at: 0.42, stage: 2 },
+  { at: 0.6, stage: 1 },
+  { at: 0.85, stage: 3 },
+];
 /** Progress points where the centre needs a decision. */
-export const STAGES = [0.25, 0.6];
+export const STAGES = STAGE_PLAN.map((s) => s.at);
 
 const COMPLICATIONS: Record<FieldId, { prompt: string; push: string; safe: string }[]> = {
   materials: [
@@ -402,14 +491,43 @@ const COMPLICATIONS: Record<FieldId, { prompt: string; push: string; safe: strin
   ],
 };
 
-/** The decision a running experiment reaches at a stage. Deterministic per experiment. */
-export function decisionFor(civSeed: number, plan: Plan, stage: number): Decision {
+/** The decision a running experiment reaches at a stage. Deterministic per experiment (and per site list). */
+export function decisionFor(civSeed: number, plan: Plan, stage: number, sites: TrialSite[] = []): Decision {
   const p = PRINCIPLE_BY_ID.get(plan.principle)!;
   const res = RESOURCE_BY_ID.get(plan.resource)!;
   const r = rngFor(civSeed, 'decision', plan.id, stage);
+  if (stage === 2) {
+    const fn = FUNCTION_LABEL[p.build ?? 'powerGen'];
+    return {
+      stage,
+      title: 'A field trial',
+      prompt: `The pilot ${fn} works on the bench. Where should it be tested for real? A demanding site teaches more.`,
+      options: [
+        ...sites.map((st, i): DecisionOption => ({
+          id: `site${i}`, label: st.label, detail: st.detail,
+          quality: Math.round((0.03 + 0.14 * st.fit) * 100) / 100, risk: Math.round((0.02 + 0.04 * st.fit) * 100) / 100,
+          cost: Math.round((plan.cost * 0.15) / 500) * 500, days: 3, site: { x: st.x, z: st.z, fit: st.fit },
+        })),
+        { id: 'lab', label: 'Keep it in the lab', detail: 'Cheaper and safer, but nothing beats a real site.', quality: -0.03, risk: -0.04, cost: 0, days: 0 },
+      ],
+    };
+  }
+  if (stage === 3) {
+    return {
+      stage,
+      title: 'The final stretch',
+      prompt: 'The work is nearly done. How should the team finish it?',
+      options: [
+        { id: 'specialist', label: 'Recruit a specialist', detail: 'An outside expert sharpens the result and catches mistakes.', quality: 0.1, risk: -0.05, cost: Math.round((plan.cost * 0.3) / 500) * 500, days: 0 },
+        { id: 'rush', label: 'Rush to finish', detail: 'Cut the last checks to finish days sooner. Riskier.', quality: -0.03, risk: 0.08, cost: 0, days: -Math.max(2, Math.round(plan.days * 0.25)) },
+        { id: 'publish', label: 'Share the findings now', detail: 'Stop here: a smaller result today (never a breakthrough), and the open questions become a follow-up.', quality: -0.12, risk: -0.06, cost: 0, days: 0, publish: true },
+        { id: 'carry', label: 'Carry on as planned', detail: 'No change.', quality: 0, risk: 0, cost: 0, days: 0 },
+      ],
+    };
+  }
   if (stage === 0) {
     const options: DecisionOption[] = [];
-    if (p.build || plan.kind === 'synthesis') {
+    if (p.build || plan.kind === 'synthesis' || plan.kind === 'iteration') {
       const fn = p.build ?? 'powerGen';
       options.push({
         id: 'apply', direction: 'apply', label: `Build a pilot ${FUNCTION_LABEL[fn]}`,
@@ -417,7 +535,7 @@ export function decisionFor(civSeed: number, plan: Plan, stage: number): Decisio
         quality: 0.05, risk: 0.06, cost: Math.round(plan.cost * 0.25 / 500) * 500, days: 3,
       });
     }
-    if ((p.mod || p.comp) && plan.kind !== 'synthesis') {
+    if ((p.mod || p.comp) && plan.kind !== 'synthesis' && plan.kind !== 'iteration') {
       options.push({
         id: 'refine', direction: 'refine', label: p.mod ? 'Refine it into a working method' : 'Develop it into a building material',
         detail: p.mod ? `Aims to change ${MODIFIER_LABEL[p.mod]} across the city.` : `Aims for ${COMPONENT_LABEL[p.comp!]} that later buildings can use.`,
@@ -454,13 +572,14 @@ export interface Odds {
 }
 
 /** Chance of success and why, before the dice. */
-export function odds(plan: Plan, choices: Choice[], center: CenterInfo, civ: CivState, education: number): Odds {
+export function odds(plan: Plan, choices: Choice[], center: CenterInfo, civ: CivState, education: number, extra: [string, number][] = []): Odds {
   const factors: [string, number][] = [['Base', 0.62], ['Difficulty', -plan.risk]];
   factors.push([`Equipment level ${center.equipment}`, 0.06 * center.equipment]);
   if (plan.field === center.field) factors.push(['Specialization', 0.1]);
   const fieldWork = civ.discoveries.filter((d) => d.field === plan.field).length;
   if (fieldWork) factors.push([`${fieldWork} earlier discover${fieldWork === 1 ? 'y' : 'ies'} in the field`, Math.min(0.15, 0.04 * fieldWork)]);
   if (education > 0.05) factors.push(['Educated staff nearby', 0.1 * education]);
+  for (const [k, v] of extra) if (v) factors.push([k, v]);
   for (const c of choices) if (c.option.risk) factors.push([c.option.label, -c.option.risk]);
   const chance = Math.max(0.08, Math.min(0.94, factors.reduce((a, [, v]) => a + v, 0)));
   return { chance, factors };
@@ -477,13 +596,18 @@ export interface Resolution {
 }
 
 /** The result of a finished experiment: a deterministic function of its plan, decisions and context. */
-export function resolve(civ: CivState, plan: Plan, choices: Choice[], center: CenterInfo, education: number): Resolution {
-  const { chance } = odds(plan, choices, center, civ, education);
+export function resolve(civ: CivState, plan: Plan, choices: Choice[], center: CenterInfo, education: number, extra: [string, number][] = [], qualityBonus = 0): Resolution {
+  const { chance } = odds(plan, choices, center, civ, education, extra);
   const key = choices.map((c) => `${c.stage}:${c.option.id}`).join(',');
   const roll = unit(civ.civSeed, 'roll', plan.id, key);
-  const direction: Direction = choices.find((c) => c.option.direction)?.option.direction ?? (plan.kind === 'synthesis' ? 'apply' : 'refine');
-  const bonus = choices.reduce((a, c) => a + c.option.quality, 0);
+  const direction: Direction = choices.find((c) => c.option.direction)?.option.direction ?? (plan.kind === 'synthesis' || plan.kind === 'iteration' ? 'apply' : 'refine');
+  const bonus = choices.reduce((a, c) => a + c.option.quality, 0) + qualityBonus;
   let quality = 0.3 + 0.4 * chance + bonus + (plan.kind === 'synthesis' ? 0.1 : 0);
+  if (plan.kind === 'iteration') {
+    // A new version starts from the old one.
+    const base = civ.discoveries.find((d) => d.id === plan.basis[0]);
+    if (base) quality = Math.max(quality, base.quality + 0.1 + bonus * 0.5);
+  }
   let outcome: Outcome;
   if (roll < chance * 0.28) {
     outcome = 'breakthrough';
@@ -493,6 +617,11 @@ export function resolve(civ: CivState, plan: Plan, choices: Choice[], center: Ce
     outcome = 'partial';
     quality *= 0.65;
   } else outcome = 'failure';
+  // Findings shared early are never a breakthrough.
+  if (outcome === 'breakthrough' && choices.some((c) => c.option.publish)) {
+    outcome = 'success';
+    quality -= 0.18;
+  }
   let field = plan.field;
   let principle = plan.principle;
   const probe = choices.find((c) => c.option.anomaly);
@@ -588,7 +717,7 @@ export function makeDiscovery(civ: CivState, plan: Plan, res: Resolution, center
   const rng = rngFor(civ.civSeed, 'disc', ids.discovery);
   let kind: DiscoveryKind;
   if (res.direction === 'theory') kind = 'foundation';
-  else if (res.direction === 'apply' && (p.build || plan.kind === 'synthesis')) kind = 'design';
+  else if (res.direction === 'apply' && (p.build || plan.kind === 'synthesis' || plan.kind === 'iteration')) kind = 'design';
   else if (p.comp && (!p.mod || rng.chance(0.4))) kind = 'component';
   else if (p.mod) kind = 'modifier';
   else if (p.build) kind = 'design';
@@ -603,7 +732,11 @@ export function makeDiscovery(civ: CivState, plan: Plan, res: Resolution, center
   if (kind === 'foundation') name = `${who}'s ${p.theory}`;
   else if (kind === 'modifier') name = `${who} ${noun}`;
   else if (kind === 'component') name = `${r0.adj} ${COMPONENT_LABEL[p.comp!].replace(/s$/, '').replace(/^\w/, (c) => c.toUpperCase())}`;
-  else name = `${r0.adj} ${rng.pick(p.facilities ?? p.nouns)}${plan.kind === 'synthesis' ? ` ${rng.pick(['II', 'Mark II', 'Advanced'])}` : ''}`;
+  else if (plan.kind === 'iteration') {
+    const prev = civ.discoveries.find((d) => d.id === plan.basis[0]);
+    const v = (prevVersion(prev) ?? 1) + 1;
+    name = `${baseName(prev?.name ?? `${r0.adj} ${rng.pick(p.facilities ?? p.nouns)}`)} ${MARKS[Math.min(MARKS.length - 1, v)]}`;
+  } else name = `${r0.adj} ${rng.pick(p.facilities ?? p.nouns)}${plan.kind === 'synthesis' ? ` ${rng.pick(['II', 'Mark II', 'Advanced'])}` : ''}`;
 
   const effects: Effect[] = [];
   let component: ComponentKind | undefined;
@@ -643,14 +776,25 @@ export function makeDiscovery(civ: CivState, plan: Plan, res: Resolution, center
   };
   let design: Design | undefined;
   if (kind === 'design') {
-    const base = plan.kind === 'synthesis' ? civ.discoveries.find((d) => d.id === plan.basis[0]) : undefined;
+    const base = plan.kind === 'synthesis' || plan.kind === 'iteration' ? civ.discoveries.find((d) => d.id === plan.basis[0]) : undefined;
     const partner = plan.kind === 'synthesis' ? civ.discoveries.find((d) => d.id === plan.basis[1]) : undefined;
     design = makeDesign(civ, discovery, p, r0, q, ids, partner);
     discovery.designId = design.id;
     if (base) discovery.basis = [base.id, ...(partner ? [partner.id] : [])];
+    if (plan.kind === 'iteration' && base) {
+      design.version = (prevVersion(base) ?? 1) + 1;
+      design.lineage = base.designId;
+    }
   }
   discovery.description = describeDiscovery(discovery, p, r0, field.name, center.name, design, opened);
   return { discovery, design };
+}
+
+/** The version of the design a discovery produced (1 for originals). */
+function prevVersion(d: Discovery | undefined): number | undefined {
+  if (!d) return undefined;
+  const m = /Mk ([IVX]+)$/.exec(d.name);
+  return m ? Math.max(1, MARKS.indexOf(`Mk ${m[1]}`)) : 1;
 }
 
 function describeDiscovery(d: Discovery, p: Principle, r: ResourceDef, fieldName: string, where: string, design: Design | undefined, opened: string[]): string {

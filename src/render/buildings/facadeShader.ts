@@ -111,6 +111,8 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
   float night = smoothstep(0.15, 0.85, uNight);
   bool abandoned = mod(floor(vState.b * 255.0 + 0.5), 2.0) > 0.5;
   bool burning = mod(floor(vState.b * 255.0 / 2.0 + 0.01), 2.0) > 0.5;
+  // A research centre with work under way: the lights stay on late.
+  bool busy = mod(floor(vState.b * 255.0 / 4.0 + 0.01), 2.0) > 0.5;
   // Large-scale tonal drift so big walls aren't flat colour.
   col = base * (0.93 + 0.1 * n + 0.05 * (nl - 0.5));
   b_rough = 0.85;
@@ -472,6 +474,7 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
         col *= 1.0 - streak * 0.14 * m_hash12(cell + 0.5) * detail;
       }
     }
+    if (busy) litF = max(litF, 0.92);
     // Who's home: some buildings are livelier than others; offices light up in floor sections.
     float occ = 0.55 + 0.9 * m_hash12(vec2(seed, 21.0));
     float hl = curtainWall ? m_hash12(vec2(floor(cell.x / 5.0), cell.y) + seed * 0.73) : h;
