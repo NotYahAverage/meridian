@@ -61,8 +61,11 @@ export function outline(g: GeoBuilder, x0: number, z0: number, x1: number, z1: n
  * Parapet around a flat roof: an upstand flush with the facade (with its inner
  * face, seen from above) and a coping that oversails it slightly.
  */
-export function parapet(g: GeoBuilder, x0: number, z0: number, x1: number, z1: number, roofY: number, h: number, wall: Mat, coping: Mat, t = 0.3): void {
+export function parapet(g: GeoBuilder, x0: number, z0: number, x1: number, z1: number, roofY: number, h: number, wallIn: Mat, coping: Mat, t = 0.3): void {
   const top = roofY + h;
+  // A windowed finish would put windows on the upstand (inside and out): keep its colour, drop the windows.
+  const windowed: number[] = [P.RES, P.BRICK, P.STONE, P.PANEL, P.SIDING, P.OFFICE, P.GLASS, P.STORE, P.INDUSTRIAL];
+  const wall: Mat = windowed.includes(wallIn.pattern) ? { ...wallIn, pattern: P.TRIM, oy: 0 } : wallIn;
   // Outer faces (flush with the walls below).
   g.wall(x1, z0, x0, z0, roofY, top, wall);
   g.wall(x1, z1, x1, z0, roofY, top, wall);

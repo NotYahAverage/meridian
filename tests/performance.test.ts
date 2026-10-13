@@ -47,7 +47,8 @@ describe('big-city performance paths', () => {
   it('distant buildings become a box in their main facade', () => {
     const geo = generateBuilding({ style: 'tower', w: 30, d: 30, floors: 12, level: 2, seed: 5 }, 100, 100, 0.3, 10);
     const lod = lodGeometry({ cx: 100, cz: 100, angle: 0.3, hw: 15, hd: 15, y: 10 }, geo);
-    expect(lod.vertexCount).toBe(20);
+    // Four walls and a top, plus the foundation skirt under each wall.
+    expect(lod.vertexCount).toBe(36);
     // A windowed facade, not plain trim.
     expect(lod.pat[0]).not.toBe(0);
     let top = 0;

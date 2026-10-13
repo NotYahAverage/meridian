@@ -145,12 +145,12 @@ function civic(g: GeoBuilder, r: Rng, b: GenInput, wallHex: number, accent: numb
   const x0 = -bw / 2, x1 = bw / 2, z0 = frontDepth, z1 = z0 + bd;
   const fh = 3.6;
   const h = floors * fh + 0.4;
-  const wall = m(c(wallHex), pattern, s, fh, 3.2);
+  const wall: Mat = { ...m(c(wallHex), pattern, s, fh, 3.2), oy: 0.4 };
   const trim = m(c(0xe8e3d8), P.TRIM, s);
-  g.box(x0, z0, x1, z1, 0, 1.0, m(c(0x9d968a), P.STONE, s, 30, 3), null);
-  g.box(x0, z0, x1, z1, 1.0, h, wall, null);
-  outline(g, x0, z0, x1, z1, 0.85, 1.05, 0.08, trim);
-  outline(g, x0, z0, x1, z1, fh + 0.2, fh + 0.45, 0.1, trim);
+  g.box(x0, z0, x1, z1, 0, 0.4, m(c(0x9d968a), P.STONE, s, 30, 3), null);
+  g.box(x0, z0, x1, z1, 0.4, h, wall, null);
+  outline(g, x0, z0, x1, z1, 0.3, 0.5, 0.08, trim);
+  outline(g, x0, z0, x1, z1, fh + 0.3, fh + 0.5, 0.1, trim);
   g.flat(x0, z0, x1, z1, h, m(c(r.pick(PAL.membrane)), P.ROOF_FLAT, s));
   parapet(g, x0, z0, x1, z1, h, 0.9, wall, trim);
   cornice(g, x0, z0, x1, z1, h + 1.0, 1.1, trim);
@@ -893,7 +893,7 @@ const hotel: Gen = (g, b, r) => {
   const top = lobbyH + (b.floors - 1) * fh;
   const panel = r.chance(0.4);
   const facadeCol = c(r.pick(panel ? PAL.panel : PAL.render));
-  const facade = m(facadeCol, panel ? P.PANEL : P.RES, s, fh, 3.4);
+  const facade: Mat = { ...m(facadeCol, panel ? P.PANEL : P.RES, s, fh, 3.4), oy: lobbyH };
   const stone = c(r.pick([0xb8ad9a, 0xa39b8e, 0xc9bda6]));
   const trim = m(c(r.pick([0xeeeae0, 0xd8cfbd, 0x3b3c3e])), P.TRIM, s);
   // Lobby: glass between stone piers, the podium above it.
@@ -908,7 +908,7 @@ const hotel: Gen = (g, b, r) => {
   const bw2 = (x1 - x0) / bays;
   const slab = m(c(0xdedad2), P.TRIM, s);
   const rail = panel ? m(c(0x4d5e66), P.GLASS_PLAIN, s) : m(c(0xe8e3d8), P.TRIM, s);
-  for (let y = Math.ceil((lobbyH + 0.3) / fh) * fh; y <= top - fh + 0.1; y += fh) {
+  for (let y = lobbyH + fh; y <= top - fh + 0.1; y += fh) {
     for (let k = 1; k + 1 < bays; k += 3) balcony(g, x0 + k * bw2 + 0.2, x0 + (k + 2) * bw2 - 0.2, z0 + 1, y + 0.02, 1.2, slab, rail);
   }
   g.flat(x0, z0 + 1, x1, z1, top, m(c(0x7d7a74), P.ROOF_FLAT, s));

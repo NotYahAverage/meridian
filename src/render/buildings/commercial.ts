@@ -46,7 +46,7 @@ export const shop: Gen = (g, b, r) => {
   const col = rgb(r.pick(brick ? PAL.brick : PAL.render));
   const trim = mat(rgb(r.pick([0xeeeae0, 0xd8cfbd])), P.TRIM, s);
   const gh = 4.2;
-  const upper = mat(col, brick ? P.BRICK : P.RES, s, 3.2, 3.3);
+  const upper: Mat = { ...mat(col, brick ? P.BRICK : P.RES, s, 3.2, 3.3), oy: gh };
   g.box(x0, z0, x1, z1, 0, gh, mat(shade(col, 0.85), P.STORE, s, gh, bw / Math.max(1, Math.round(bw / 4.5))), null);
   outline(g, x0, z0, x1, z1, gh - 0.3, gh, 0.14, trim);
   let top = gh;
@@ -89,7 +89,7 @@ export const mixeduse: Gen = (g, b, r) => {
   const gh = 4.4;
   const fh = 3.15;
   const pat = brick ? P.BRICK : panel ? P.PANEL : P.RES;
-  const upper = mat(col, pat, s, fh, 3.2);
+  const upper: Mat = { ...mat(col, pat, s, fh, 3.2), oy: gh };
   g.box(x0, z0, x1, z1, 0, gh, mat(rgb(0x3e4246), P.STORE, s, gh, 4.4), null);
   const h = gh + (floors - 1) * fh;
   g.box(x0, z0, x1, z1, gh, h, upper, null);
@@ -103,7 +103,7 @@ export const mixeduse: Gen = (g, b, r) => {
   const slab = mat(rgb(0xdedad2), P.TRIM, s);
   const cells = Math.max(1, Math.round(bw / 3.2));
   const bayW = bw / cells;
-  for (let y = Math.ceil((gh + 0.4) / fh) * fh; y <= h - fh + 0.1; y += fh) {
+  for (let y = gh + fh; y <= h - fh + 0.1; y += fh) {
     for (let k = 0; k < cells; k++) {
       if (brick) {
         if (k % 2 !== 1) continue;
@@ -274,7 +274,7 @@ export const officeTower: Gen = (g, b, r) => {
     const fl = k === stages - 1 ? floors - per * (stages - 1) : per;
     const y1 = y + fl * fh;
     const a0 = x0 + inset, c0 = z0 + inset, a1 = x0 + tw - inset, c1 = z0 + td - inset;
-    const m2 = r.chance(0.65) ? mat(glass, P.GLASS, s, fh, 1.6) : mat(mixRGB(rgb(r.pick([0xcfd2d4, 0x9ea3a8, 0x6a6f74, 0xd8d1c4])), glass, 0.4), P.OFFICE, s, fh, 2.2);
+    const m2: Mat = { ...(r.chance(0.65) ? mat(glass, P.GLASS, s, fh, 1.6) : mat(mixRGB(rgb(r.pick([0xcfd2d4, 0x9ea3a8, 0x6a6f74, 0xd8d1c4])), glass, 0.4), P.OFFICE, s, fh, 2.2)), oy: ph };
     g.box(a0, c0, a1, c1, y, y1, m2, null);
     g.flat(a0, c0, a1, c1, y1, mat(rgb(0x77746e), P.ROOF_FLAT, s));
     if (fins) {

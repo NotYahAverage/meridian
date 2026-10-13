@@ -36,7 +36,7 @@ export const house: Gen = (g, b, r) => {
   const floors = Math.max(1, Math.min(2, b.floors));
   const fh = 2.95;
   const plinth = 0.5;
-  const facade: Mat = mat(wall, brick ? P.BRICK : rendered ? P.RES : P.SIDING, s, fh, 3.1);
+  const facade: Mat = { ...mat(wall, brick ? P.BRICK : rendered ? P.RES : P.SIDING, s, fh, 3.1), oy: plinth };
   const roofM: Mat = mat(roof, P.ROOF_TILE, s);
   g.box(x0 - 0.12, z0 - 0.12, x1 + 0.12, z1 + 0.12, 0, plinth, mat(rgb(0x9d988e), P.CONCRETE, s), null);
   g.box(x0, z0, x1, z1, plinth, plinth + floors * fh, facade, null);
@@ -147,21 +147,28 @@ export const townhouse: Gen = (g, b, r) => {
   const trim = mat(rgb(r.pick([0xeeeae0, 0xe4dccb, 0xd8cfbd])), P.TRIM, s);
   const stoopM = mat(rgb(0xa6a196), P.STONE, s, 3, 3);
   const zb = setback;
+  const base = 0.7;
+  // Heights first: where a house rises above its neighbour, its party wall shows.
+  const heights: number[] = [];
+  for (let i = 0; i < n; i++) heights.push(base + Math.max(2, b.floors + (r.chance(0.25) ? 1 : 0)) * 3.0);
   for (let i = 0; i < n; i++) {
     const x0 = -w / 2 + 0.5 + i * uw;
     const x1 = x0 + uw;
     const col = mixRGB(baseCol, rgb(r.pick(family)), 0.45);
-    const fl = Math.max(2, b.floors + (r.chance(0.25) ? 1 : 0));
-    const base = 0.7;
-    const h = base + fl * 3.0;
+    const h = heights[i];
     const pat = brick ? P.BRICK : family === PAL.siding ? P.SIDING : P.RES;
-    const facade = mat(col, pat, s + i * 7, 3.0, uw / 2);
+    const facade: Mat = { ...mat(col, pat, s + i * 7, 3.0, uw / 2), oy: base };
     g.box(x0, zb, x1, zb + bd, 0, base, mat(shade(col, 0.8), brick ? P.STONE : P.CONCRETE, s), null, { sides: [true, i === n - 1, true, i === 0] });
     g.box(x0, zb, x1, zb + bd, base, h, facade, null, { sides: [true, i === n - 1, true, i === 0] });
+    // Exposed party walls (plain, no windows), from the neighbour's eaves up; pitched roofs add the neighbour's ridge.
+    const party = mat(col, P.TRIM, s);
+    const nh = (k: number) => heights[k] + (flat ? 0.8 : 0);
+    if (i > 0 && nh(i - 1) < h + (flat ? 0.8 : 0)) g.wall(x0, zb, x0, zb + bd, nh(i - 1), h, party);
+    if (i < n - 1 && nh(i + 1) < h + (flat ? 0.8 : 0)) g.wall(x1, zb + bd, x1, zb, nh(i + 1), h, party);
     if (flat) {
       g.flat(x0, zb, x1, zb + bd, h, mat(rgb(0x7f7b74), P.ROOF_FLAT, s));
       // Front upstand with a cornice; party walls rise between neighbours.
-      g.box(x0, zb, x1, zb + 0.3, h, h + 0.8, facade, trim, { sides: [true, i === n - 1, true, i === 0] });
+      g.box(x0, zb, x1, zb + 0.3, h, h + 0.8, mat(col, P.TRIM, s), trim, { sides: [true, i === n - 1, true, i === 0] });
       cornice(g, x0, zb, x1, zb + bd, h + 0.8, 1.1, trim, [true, false, false, false]);
     } else {
       g.gable(x0, zb, x1, zb + bd, h, 2.6, true, mat(roof, P.ROOF_TILE, s), mat(col, pat, s, 25, bd), 0.0);
@@ -179,7 +186,7 @@ export const townhouse: Gen = (g, b, r) => {
     if (b.level >= 2 && r.chance(0.5)) {
       const bx0 = x0 + uw * 0.12, bx1 = bx0 + Math.min(2.6, uw * 0.42);
       const bh = base + 2 * 3.0;
-      g.box(bx0, zb - 0.75, bx1, zb, base, bh, mat(col, pat, s + i * 7, 3.0, bx1 - bx0), mat(roof, P.ROOF_METAL, s), { sides: [true, true, false, true] });
+      g.box(bx0, zb - 0.75, bx1, zb, base, bh, { ...mat(col, pat, s + i * 7, 3.0, bx1 - bx0), oy: base }, mat(roof, P.ROOF_METAL, s), { sides: [true, true, false, true] });
       outline(g, bx0, zb - 0.75, bx1, zb, bh - 0.2, bh, 0.08, trim, [true, true, false, true]);
     }
     // Stoop and front door.
@@ -224,10 +231,11 @@ function apartmentBlock(g: Parameters<Gen>[0], b: Parameters<Gen>[1], r: Paramet
   const bodyPat = fam === 'brick' ? P.BRICK : fam === 'panel' ? P.PANEL : fam === 'mixed' ? P.RES : P.RES;
   const bodyCol = fam === 'mixed' ? rgb(r.pick(PAL.render)) : col;
   const bay = r.range(3.1, 3.7);
-  const body = mat(bodyCol, bodyPat, s, fh, bay);
-  const trim = mat(rgb(fam === 'panel' ? r.pick([0x3b3c3e, 0xd8cfbd]) : r.pick([0xeeeae0, 0xe2d9c6])), P.TRIM, s);
   const shops = b.level >= 2 && r.chance(0.45);
   const gh = shops ? 4.2 : fh + 0.5;
+  // Floors above the base are counted from its top, so windows sit whole on every floor.
+  const body: Mat = { ...mat(bodyCol, bodyPat, s, fh, bay), oy: gh };
+  const trim = mat(rgb(fam === 'panel' ? r.pick([0x3b3c3e, 0xd8cfbd]) : r.pick([0xeeeae0, 0xe2d9c6])), P.TRIM, s);
   const baseMat = shops ? mat(shade(fam === 'panel' ? rgb(0x4a4c4f) : rgb(0x8f877a), 1), P.STORE, s, gh, 4.2) : fam === 'mixed' ? mat(col, P.BRICK, s, gh, bay) : mat(rgb(r.pick([0xb8ad9a, 0xa39b8e, 0xc9bda6])), P.STONE, s, gh, bay);
   const membrane = mat(rgb(r.pick(PAL.membrane)), P.ROOF_FLAT, s);
   const recessTop = fam === 'panel' && floors >= 4 && r.chance(0.7);
@@ -265,7 +273,7 @@ function apartmentBlock(g: Parameters<Gen>[0], b: Parameters<Gen>[1], r: Paramet
   if (recessTop) {
     const ins = 1.8;
     const tx0 = mx0 + ins, tz0 = mz0 + ins, tx1 = mx1 - ins, tz1 = mz1 - ins * 0.6;
-    const topM = mat(rgb(r.pick([0x3b3c3e, 0xe4e0d8, 0x8c7a66])), P.PANEL, s, fh, bay);
+    const topM: Mat = { ...mat(rgb(r.pick([0x3b3c3e, 0xe4e0d8, 0x8c7a66])), P.PANEL, s, fh, bay), oy: h };
     g.box(tx0, tz0, tx1, tz1, h, h + fh, topM, null);
     flatRoof(g, tx0, tz0, tx1, tz1, h + fh, membrane, topM, trim, { parapet: 0.35 });
     // Glass balustrade around the terrace.
@@ -288,7 +296,7 @@ function apartmentBlock(g: Parameters<Gen>[0], b: Parameters<Gen>[1], r: Paramet
     // Pairs of bays share a balcony; stacks alternate for a calmer rhythm.
     const pattern = r.pick(['pairs', 'alternate', 'centre']);
     // Balcony floors line up with the facade's floor lines (multiples of the floor height).
-    for (let y = Math.ceil((gh + 0.3) / fh) * fh; y <= h - fh + 0.1; y += fh) {
+    for (let y = gh + fh; y <= h - fh + 0.1; y += fh) {
       for (let k = 0; k < cells; k++) {
         const on = pattern === 'pairs' ? k % 3 === 0 && k + 1 < cells : pattern === 'alternate' ? k % 2 === 0 : k >= Math.floor(cells / 2) - 1 && k <= Math.floor(cells / 2);
         if (!on) continue;
@@ -356,13 +364,14 @@ export const tower: Gen = (g, b, r) => {
   }
 
   const finish = b.level >= 3 && r.chance(0.5) ? 'glass' : r.pick(['render', 'render', 'brick', 'panel', 'glass']);
-  const glassMat = mat(rgb(r.pick(PAL.glass)), P.GLASS, s, fh, 1.7);
+  const oy = podiumH;
+  const glassMat: Mat = { ...mat(rgb(r.pick(PAL.glass)), P.GLASS, s, fh, 1.7), oy };
   const renderCol = rgb(r.pick(PAL.render));
-  const renderMat = mat(renderCol, P.RES, s, fh, 3.2);
-  const brickMat = mat(rgb(r.pick(PAL.brick)), P.BRICK, s, fh, 3.2);
-  const panelMat = mat(rgb(r.pick(PAL.panel)), P.PANEL, s, fh, 3.2);
+  const renderMat: Mat = { ...mat(renderCol, P.RES, s, fh, 3.2), oy };
+  const brickMat: Mat = { ...mat(rgb(r.pick(PAL.brick)), P.BRICK, s, fh, 3.2), oy };
+  const panelMat: Mat = { ...mat(rgb(r.pick(PAL.panel)), P.PANEL, s, fh, 3.2), oy };
   const lower = finish === 'glass' ? glassMat : finish === 'brick' ? brickMat : finish === 'panel' ? panelMat : renderMat;
-  const upper = finish === 'brick' && r.chance(0.5) ? mat(rgb(r.pick(PAL.render)), P.RES, s, fh, 3.2) : lower;
+  const upper: Mat = finish === 'brick' && r.chance(0.5) ? { ...mat(rgb(r.pick(PAL.render)), P.RES, s, fh, 3.2), oy } : lower;
   const membrane = mat(rgb(r.pick(PAL.membrane)), P.ROOF_FLAT, s);
   const glassy = finish === 'glass';
 
@@ -420,7 +429,7 @@ export const tower: Gen = (g, b, r) => {
     const rail = finish === 'panel' ? mat(rgb(0x4d5e66), P.GLASS_PLAIN, s) : mat(rgb(r.pick([0xe8e3d8, 0xcfc6b4])), P.TRIM, s);
     const segs = r.pick([1, 2]);
     const segW = (shaftX1 - tx0 - 0.6) / segs;
-    for (let yy = Math.ceil((podiumH + 0.5) / fh) * fh; yy < podiumH + n0 * fh - 1; yy += fh) {
+    for (let yy = podiumH + fh; yy < podiumH + n0 * fh - 1; yy += fh) {
       for (let k = 0; k < segs; k++) {
         const a = tx0 + 0.3 + k * segW + (segs > 1 ? 0.5 : 0), bb2 = a + segW - (segs > 1 ? 1 : 0);
         balcony(g, a, bb2, tz0, yy, 1.4, slab, rail);

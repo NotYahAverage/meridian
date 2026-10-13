@@ -55,6 +55,8 @@ export interface Mat {
   bay?: number;
   /** 0–255 per-surface variation seed. */
   seed?: number;
+  /** Height the facade's floors are counted from (the wall's first floor), metres. */
+  oy?: number;
 }
 
 export interface BuildingProp {
@@ -151,7 +153,13 @@ export class GeoBuilder {
     const bay = m.bay ?? 3;
     const cells = Math.max(1, Math.round(len / bay));
     const mm = { ...m, bay: len / cells };
-    this.quad([x0, y0, z0], [x1, y0, z1], [x1, y1, z1], [x0, y1, z0], [nx, 0, nz], mm, [[0, y0], [cells, y0], [cells, y1], [0, y1]]);
+    const oy = m.oy ?? 0;
+    this.quad([x0, y0, z0], [x1, y0, z1], [x1, y1, z1], [x0, y1, z0], [nx, 0, nz], mm, [[0, y0 - oy], [cells, y0 - oy], [cells, y1 - oy], [0, y1 - oy]]);
+    // Walls standing on the lot continue into the ground as a foundation, so
+    // buildings sit into sloping terrain instead of floating above it.
+    if (y0 <= 0.01 && y1 - y0 >= 0.3 && len >= 1.5 && m.pattern !== P.WOOD && m.pattern !== P.GLASS_PLAIN) {
+      this.quad([x0, -4, z0], [x1, -4, z1], [x1, y0, z1], [x0, y0, z0], [nx, 0, nz], FOUNDATION, [[0, -4], [len, -4], [len, y0], [0, y0]]);
+    }
   }
 
   /** Axis-aligned box with walls on four sides and a top. */
@@ -252,9 +260,10 @@ export class GeoBuilder {
       const nl = Math.hypot(n[0], n[1], n[2]);
       n[0] /= nl; n[1] /= nl; n[2] /= nl;
       const u0 = (i / segs) * cells, u1 = ((i + 1) / segs) * cells;
+      const oy = side.oy ?? 0;
       this.quad(
         [cx + c0 * r0, y0, cz + s0 * r0], [cx + c0 * r1, y1, cz + s0 * r1], [cx + c1 * r1, y1, cz + s1 * r1], [cx + c1 * r0, y0, cz + s1 * r0],
-        n, { ...side, bay: circ / cells }, [[u0, y0], [u0, y1], [u1, y1], [u1, y0]],
+        n, { ...side, bay: circ / cells }, [[u0, y0 - oy], [u0, y1 - oy], [u1, y1 - oy], [u1, y0 - oy]],
       );
     }
     if (cap && r1 > 0.01) {
@@ -287,8 +296,13 @@ export class GeoBuilder {
     }
   }
 
-  /** Ground-level decal (yard, parking, paving) slightly above the lot base. */
+  /**
+   * Ground-level decal (yard, parking, paving) slightly above the lot base.
+   * A plain plate over the whole lot is skipped: the terrain itself shows there.
+   */
   ground(x0: number, z0: number, x1: number, z1: number, m: Mat, lift = 0.04): void {
+    const plate = m.pattern === P.GRASS || m.pattern === P.PAVING || m.pattern === P.CONCRETE || m.pattern === P.PARKING || m.pattern === P.DIRT;
+    if (plate && (x1 - x0) * (z1 - z0) >= this.w * this.d * 0.85) return;
     this.flat(x0, z0, x1, z1, lift, m);
   }
 
@@ -342,6 +356,8 @@ export class GeoBuilder {
     };
   }
 }
+
+const FOUNDATION: Mat = { color: hex(0x8a847a), pattern: P.CONCRETE, seed: 0, fh: 3, bay: 3 };
 
 function normalize(x: number, y: number, z: number): [number, number, number] {
   const l = Math.hypot(x, y, z) || 1;
