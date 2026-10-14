@@ -74,7 +74,7 @@ test('design studio: type a building, adjust it, preview it and save it', async 
 
   // Save it, rename it, and find it in the sketchbook.
   await page.locator('.ds-name').fill('Lakeside Rows');
-  await page.locator('.ds-actions .btn.primary').click();
+  await page.locator('.ds-actions .btn', { hasText: 'Save to sketchbook' }).click();
   await expect(page.locator('.ds-sketch', { hasText: 'Lakeside Rows' })).toBeVisible();
   const saved = await game<{ n: number; name: string; kind: string }>(page, `const s = g.city.design.sketches; return { n: s.length, name: s[0].name, kind: s[0].concept.kind };`);
   expect(saved).toEqual({ n: 1, name: 'Lakeside Rows', kind: 'townhouse' });

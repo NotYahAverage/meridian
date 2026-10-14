@@ -164,7 +164,7 @@ describe('learning ideas', () => {
     expect(city.design.learned.has('wind')).toBe(false);
     expect(city.design.learned.has('butterfly')).toBe(false);
     const seen: string[] = [];
-    city.events.on('design', (e) => seen.push(e.id));
+    city.events.on('design', (e) => e.type === 'idea' && seen.push(e.id));
     city.weather.kind = 'storm';
     city.design.daily();
     expect(city.design.learned.has('butterfly')).toBe(true);

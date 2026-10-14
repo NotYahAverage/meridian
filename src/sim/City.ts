@@ -33,6 +33,7 @@ import { LAND_TILE, Land } from './world/Land';
 import { Research } from './research/Research';
 import { CityStyle } from './style/CityStyle';
 import { DesignLab } from './design/DesignLab';
+import type { Reaction } from './design/Trials';
 import { conformTerrain } from './world/TerrainConform';
 import { Disasters } from './world/Disasters';
 import { Achievements } from './progress/Achievements';
@@ -53,7 +54,7 @@ export type CityEvents = {
   achievement: { id: string; title: string };
   scenario: { id: string; result: 'won' | 'lost' };
   news: Edition;
-  design: { type: 'idea'; id: string };
+  design: { type: 'idea'; id: string } | { type: 'reaction'; trial: number; reaction: Reaction } | { type: 'trial'; trial: number; what: 'placed' | 'opened' | 'month' | 'verdict' | 'gone' };
   research: { type: 'discovery' | 'decision' | 'failure' | 'milestone' | 'retrofit'; centerId: number; discoveryId?: string; recordId?: string; outcome?: string; milestoneId?: string };
 };
 
@@ -412,6 +413,7 @@ export class City {
     this.zones.clearOccupant(o, id);
     this.buildings.remove(id);
     this.research.onBuildingRemoved(id);
+    if (b.typeId === 'proto') this.design.onBuildingRemoved(b);
     const [minX, minZ, maxX, maxZ] = obbBounds(o);
     conformTerrain(this.terrain, this.roads, this.buildings, { minX: minX - 10, minZ: minZ - 10, maxX: maxX + 10, maxZ: maxZ + 10 });
     if (b.kind === 'service') {

@@ -564,6 +564,8 @@ function dailyBuildings(city: City): void {
     if (p & Problem.NoWorkers) h -= 12;
     if (p & Problem.NoGoods) h -= 10;
     h += rm.happiness;
+    // Living in a prototype: a good design makes people happier, a bad one less so.
+    if (b.typeId === 'proto') h += city.design.moodBonus(b);
     b.happiness = lerp(b.happiness, clamp(h, 0, 100), 0.35);
 
     // Business efficiency.
@@ -971,7 +973,7 @@ function upgradeBuildings(city: City): void {
   const rng = city.rng;
   let n = 0;
   for (const b of city.buildings.all.values()) {
-    if (b.kind !== 'zoned' || b.state !== BuildingState.Active || b.progress < 1 || b.level >= 3 || b.age < 25) continue;
+    if (b.kind !== 'zoned' || b.typeId === 'proto' || b.state !== BuildingState.Active || b.progress < 1 || b.level >= 3 || b.age < 25) continue;
     if (b.problems & (Problem.NoPower | Problem.NoWater | Problem.NoSewage | Problem.Garbage | Problem.NoRoad)) continue;
     const edu = city.coverage.at('education', b.cx, b.cz);
     const ok = b.level === 1 ? b.landValue >= 0.45 && b.happiness >= 55 : b.landValue >= 0.64 && b.happiness >= 64 && (zoneBase(b.zone) === Zone.Industrial || zoneBase(b.zone) === Zone.Commercial || edu >= 0.35);

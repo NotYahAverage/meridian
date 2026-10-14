@@ -58,6 +58,8 @@ interface Facts {
   milestone: string | null;
   achievements: string[];
   scenario: { id: string; won: boolean } | null;
+  /** Stories filed by other desks (prototype verdicts…). */
+  filed: Candidate[];
 }
 
 interface Candidate extends Story {
@@ -72,7 +74,7 @@ const pct = (v: number) => `${Math.round(v * 100)}%`;
 const plural = (n: number, word: string) => `${formatInt(n)} ${word}${n === 1 ? '' : 's'}`;
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
-const noFacts = (): Facts => ({ firesLost: [], firesSaved: 0, opened: [], weather: new Set(), tornado: null, milestone: null, achievements: [], scenario: null });
+const noFacts = (): Facts => ({ firesLost: [], firesSaved: 0, opened: [], weather: new Set(), tornado: null, milestone: null, achievements: [], scenario: null, filed: [] });
 
 /**
  * The city's newspaper. Systems report notable events during the month; at
@@ -105,6 +107,11 @@ export class NewsDesk {
 
   weather(kind: 'storm' | 'snow' | 'fog'): void {
     this.facts.weather.add(kind);
+  }
+
+  /** A story for this month's edition from elsewhere (the score ranks it against the rest). */
+  file(topic: string, score: number, tone: Tone, title: string, body: string, at?: { x: number; z: number }): void {
+    this.facts.filed.push({ topic, score, tone, title, body, ...(at ? { x: at.x, z: at.z } : {}) });
   }
 
   tornado(destroyed: number, damaged: number, x: number, z: number): void {
@@ -173,6 +180,7 @@ export class NewsDesk {
       cands.push({ topic, score, tone, title, body, ...(at ? { x: at.x, z: at.z } : {}) });
 
     // ── Reported events ──────────────────────────────────────────────────
+    for (const s of f.filed) cands.push({ ...s });
     if (f.scenario) {
       const def = SCENARIO_BY_ID.get(f.scenario.id);
       if (def) {

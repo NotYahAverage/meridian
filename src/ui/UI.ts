@@ -4,6 +4,7 @@ import type { Edition } from '../sim/news/News';
 import { ScenarioDialog, ScenarioResult } from './ScenarioDialogs';
 import { CoachMark } from './CoachMark';
 import { StreetLabels } from './StreetLabels';
+import { ReactionBubbles } from './ReactionBubbles';
 import { OVERLAYS, type OverlayId, Overlays } from '../render/overlays/Overlays';
 import type { Notice } from '../sim/Notifications';
 import { h, toggle } from './dom';
@@ -105,6 +106,7 @@ export class UI {
   readonly inspector: Inspector;
   readonly coach: CoachMark;
   readonly streets: StreetLabels;
+  readonly bubbles: ReactionBubbles;
   readonly milestoneBanner = new MilestoneBanner();
   readonly hud: HTMLElement;
   private panels: Panel[];
@@ -155,6 +157,7 @@ export class UI {
     this.inspector = new Inspector(game);
     this.coach = new CoachMark(game);
     this.streets = new StreetLabels(game);
+    this.bubbles = new ReactionBubbles(game);
     this.panels = [new StatsPanel(game), new BudgetPanel(game), new OverlaysPanel(game), new GoalsPanel(game), new DistrictsPanel(game), new LogPanel(game), new TransitPanel(game), new PoliciesPanel(game), new LandPanel(game)];
     const tabs: [PanelId, string][] = [
       ['stats', 'Overview'], ['budget', 'Budget'], ['policies', 'Policies'], ['districts', 'Districts'], ['transit', 'Transit'], ['land', 'Land'], ['goals', 'Goals'], ['log', 'Log'],
@@ -188,7 +191,7 @@ export class UI {
     this.tracker = new ResearchTracker(game);
     this.leftStack = h('div', { class: 'left-stack' }, this.info, this.inspector.el, this.tracker.el);
     this.chrome = h('div', { class: 'hud-chrome' }, this.topbar.el, tb.rail, this.leftStack, this.layersHost, this.legend, this.toasts.el, this.saveStatus.el, tb.el, this.milestoneBanner.el);
-    this.hud = h('div', { class: 'hud hidden' }, this.streets.el, this.labels, this.chrome, this.cursor.el);
+    this.hud = h('div', { class: 'hud hidden' }, this.streets.el, this.labels, this.bubbles.el, this.chrome, this.cursor.el);
     this.applyScale();
     window.addEventListener('resize', () => this.applyScale());
     root.append(this.hud, this.coach.ring, this.coach.bubble, this.menu.el, ...this.modals.map((m) => m.el), this.loading.el, this.tooltip.el);
@@ -247,6 +250,7 @@ export class UI {
     this.inspector.show(null);
     this.legend.classList.add('hidden');
     this.labels.innerHTML = '';
+    this.bubbles.reset();
   }
 
   onToolChanged(): void {
@@ -436,6 +440,7 @@ export class UI {
     this.inspector.update(dt);
     this.research.update();
     this.studio.update();
+    this.bubbles.update(dt);
     this.tracker.update();
     this.coach.update(dt);
     this.statTimer -= dt;

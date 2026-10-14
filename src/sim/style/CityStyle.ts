@@ -42,7 +42,9 @@ export class CityStyle {
   }
 
   /** The movement a building is drawn in (undefined for the classic look). */
-  movementOf(b: Pick<Building, 'movement' | 'style'>): Movement | undefined {
+  movementOf(b: Pick<Building, 'movement' | 'style' | 'id' | 'typeId'>): Movement | undefined {
+    // Prototypes are drawn exactly as they were designed.
+    if (b.typeId === 'proto') return this.city.design?.lookOf(b.id);
     const m = this.movements[b.movement ?? 0];
     return m && !m.local && STYLED_KINDS.has(b.style) ? m : undefined;
   }

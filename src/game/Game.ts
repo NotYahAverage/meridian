@@ -39,6 +39,7 @@ import { DistrictTool } from '../tools/DistrictTool';
 import { TerraformTool } from '../tools/TerraformTool';
 import { InspectTool, type Selection } from '../tools/InspectTool';
 import { PlaceTool } from '../tools/PlaceTool';
+import { PrototypeTool } from '../tools/PrototypeTool';
 import { RoadTool } from '../tools/RoadTool';
 import type { PointerInfo, Tool } from '../tools/Tool';
 import { ZoneTool } from '../tools/ZoneTool';
@@ -86,6 +87,7 @@ export class Game {
     zone: ZoneTool;
     bulldoze: BulldozeTool;
     place: PlaceTool;
+    prototype: PrototypeTool;
     district: DistrictTool;
     terraform: TerraformTool;
     busStop: BusStopTool;
@@ -123,6 +125,7 @@ export class Game {
       zone: new ZoneTool(this),
       bulldoze: new BulldozeTool(this),
       place: new PlaceTool(this),
+      prototype: new PrototypeTool(this),
       district: new DistrictTool(this),
       terraform: new TerraformTool(this),
       busStop: new BusStopTool(this),
@@ -253,6 +256,15 @@ export class Game {
         } else if (e.type === 'decision') {
           this.play('notify');
           this.ui.toasts.push({ severity: 'info', icon: 'flask', title: 'Your scientists need a decision', text: city.research.centers.get(e.centerId)?.active?.pending?.prompt ?? '', onClick: () => this.ui.research.open({ tab: 'centres', centreId: e.centerId }), tip: 'Click to decide' });
+        }
+      }),
+      city.events.on('design', (e) => {
+        if (this.state !== 'playing') return;
+        if (e.type === 'reaction') this.ui.bubbles.push(e.trial, e.reaction);
+        else if (e.type === 'trial' && e.what === 'verdict') {
+          const t = city.design.trial(e.trial);
+          this.audio.play('milestone');
+          if (t?.verdict) this.ui.toasts.push({ severity: t.verdict.approval >= 58 ? 'good' : t.verdict.approval >= 45 ? 'info' : 'warning', icon: 'milestone', title: `The verdict on ${t.name}`, text: t.verdict.summary, onClick: () => this.ui.studio.open({ tab: 'prototypes', trialId: t.id }), tip: 'Click to read the verdict' });
         }
       }),
       city.events.on('news', (ed) => {
@@ -540,7 +552,7 @@ export class Game {
   }
 
   private onNotice(n: Notice): void {
-    if (this.state !== 'playing') return;
+    if (this.state !== 'playing' || n.quiet) return;
     this.ui.toast(n);
     if (n.severity === 'critical' || n.severity === 'warning') this.audio.play('warning');
     else if (n.severity === 'good') this.audio.play('good');

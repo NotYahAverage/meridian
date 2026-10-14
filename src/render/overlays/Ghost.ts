@@ -4,6 +4,7 @@ import type { City } from '../../sim/City';
 import type { LotFrame } from '../../sim/buildings/Spawner';
 import type { RoadPlan } from '../../sim/roads/RoadPlanner';
 import { SERVICE_BY_ID } from '../../sim/services/ServiceTypes';
+import type { Movement } from '../../sim/style/Movements';
 import { canBeOneWay } from '../../sim/roads/RoadTypes';
 import { sampleBezier } from '../../core/geom2d';
 import { type BuildingUniforms, createBuildingMaterial } from '../buildings/BuildingMaterial';
@@ -184,16 +185,18 @@ export class Ghost {
     if (this.markers.instanceColor) this.markers.instanceColor.needsUpdate = true;
   }
 
-  showBuilding(typeId: string, frame: LotFrame, valid: boolean): void {
+  /** A translucent building on the lot: a service by type id, or a design (style, storeys and look). */
+  showBuilding(typeId: string, frame: LotFrame, valid: boolean, design?: { style: string; floors: number; level: number; look: Movement }): void {
     const st = SERVICE_BY_ID.get(typeId);
-    if (!st) return;
+    if (!st && !design) return;
     const o = frame.obb;
     const key = `${typeId}|${o.cx.toFixed(1)}|${o.cz.toFixed(1)}|${o.angle.toFixed(3)}`;
     this.bldU.uGhostColor.value.copy(valid ? OK : BAD);
     if (key === this.bldKey) return;
     this.clearBuilding();
     this.bldKey = key;
-    const geo = generateBuilding({ style: st.style, w: o.hw * 2, d: o.hd * 2, floors: 2, level: 1, seed: 4242 }, o.cx, o.cz, o.angle, frame.y + 0.05);
+    const spec = design ?? { style: st!.style, floors: 2, level: 1, look: undefined };
+    const geo = generateBuilding({ style: spec.style as never, w: o.hw * 2, d: o.hd * 2, floors: spec.floors, level: spec.level, seed: 4242, look: spec.look }, o.cx, o.cz, o.angle, frame.y + 0.05);
     this.bldMesh = new THREE.Mesh(mergeBuilt([{ geo, slot: -1, baseY: frame.y }]), this.bldMat);
     this.bldMesh.renderOrder = 4;
     this.group.add(this.bldMesh);

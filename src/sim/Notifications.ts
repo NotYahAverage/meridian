@@ -31,6 +31,8 @@ export interface Notice {
   text: string;
   x?: number;
   z?: number;
+  /** Logged without a toast (something richer is shown instead). */
+  quiet?: boolean;
 }
 
 /** Sim-side message feed with per-topic cooldowns so the player isn't spammed. */

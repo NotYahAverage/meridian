@@ -12,6 +12,7 @@ import { SERVICE_BY_ID, type ServiceType } from './services/ServiceTypes';
 import { BUS, type BusStop, type TransitLine } from './transit/Transit';
 import { METRO_UNLOCK, type MetroLine } from './transit/Metro';
 import { BuildingState, Zone } from './types';
+import { MAX_ACTIVE_TRIALS, type ProtoSpec, protoSpec } from './design/Trials';
 import { WATER_LEVEL } from './constants';
 import { TreeKind } from './world/Nature';
 
@@ -197,7 +198,8 @@ export function zoneUnlocked(city: City, zone: Zone): boolean {
 
 function flagRezoned(city: City, minX: number, minZ: number, maxX: number, maxZ: number): void {
   for (const b of city.buildings.queryRect(minX, minZ, maxX, maxZ)) {
-    if (b.kind !== 'zoned') continue;
+    // Prototypes were placed by hand, not grown from the zone.
+    if (b.kind !== 'zoned' || b.typeId === 'proto') continue;
     let mismatch = 0;
     let total = 0;
     for (const i of city.zones.cellsInOBB(lotOBB(b), -1)) {
@@ -273,34 +275,12 @@ export function previewPlacement(city: City, typeId: string, x: number, z: numbe
     return res;
   }
   const o = f.obb;
-  const [minX, minZ, maxX, maxZ] = obbBounds(o);
-  if (!city.terrain.inBounds(minX, minZ, 2) || !city.terrain.inBounds(maxX, maxZ, 2)) {
-    res.error = 'Outside the city limits';
-    return res;
-  }
-  if (!city.land.ownsRect(minX, minZ, maxX, maxZ)) {
-    res.error = 'You don\'t own this land yet. Buy it in City Info → Land';
+  const ground = groundProblem(city, o);
+  if (ground) {
+    res.error = ground;
     return res;
   }
   const ca = Math.cos(o.angle), sa = Math.sin(o.angle);
-  let lo = Infinity, hi = -Infinity;
-  for (let u = -1; u <= 1.001; u += 0.5) {
-    for (let v = -1; v <= 1.001; v += 0.5) {
-      const px = o.cx + u * o.hw * ca - v * o.hd * sa;
-      const pz = o.cz + u * o.hw * sa + v * o.hd * ca;
-      if (city.terrain.isWater(px, pz, 0.3)) {
-        res.error = 'Cannot build on water';
-        return res;
-      }
-      const h = city.terrain.sampleBase(px, pz);
-      lo = Math.min(lo, h);
-      hi = Math.max(hi, h);
-    }
-  }
-  if (hi - lo > 8) {
-    res.error = 'Terrain is too steep';
-    return res;
-  }
   if (st.needsShore && city.terrain.shoreDistanceAt(o.cx, o.cz) > Math.max(o.hw, o.hd) + 50) {
     res.error = 'Must be placed on a shoreline';
     return res;
@@ -318,17 +298,10 @@ export function previewPlacement(city: City, typeId: string, x: number, z: numbe
       return res;
     }
   }
-  if (!city.spawner.clearOfRoads(o, 0.4)) {
-    res.error = 'Overlaps a road';
+  const clash = overlapProblem(city, o, res.conflicts);
+  if (clash) {
+    res.error = clash;
     return res;
-  }
-  for (const b of city.buildings.queryRect(minX, minZ, maxX, maxZ)) {
-    if (!obbIntersects(o, lotOBB(b), -0.3)) continue;
-    if (b.kind === 'service') {
-      res.error = 'Overlaps another building';
-      return res;
-    }
-    res.conflicts.push(b);
   }
   if (!city.economy.canAfford(st.cost)) {
     res.error = 'Not enough money';
@@ -336,6 +309,39 @@ export function previewPlacement(city: City, typeId: string, x: number, z: numbe
   }
   res.valid = true;
   return res;
+}
+
+/** Limits, land ownership, water and slope under a lot placed by hand. */
+function groundProblem(city: City, o: OBB): string | undefined {
+  const [minX, minZ, maxX, maxZ] = obbBounds(o);
+  if (!city.terrain.inBounds(minX, minZ, 2) || !city.terrain.inBounds(maxX, maxZ, 2)) return 'Outside the city limits';
+  if (!city.land.ownsRect(minX, minZ, maxX, maxZ)) return 'You don\'t own this land yet. Buy it in City Info → Land';
+  const ca = Math.cos(o.angle), sa = Math.sin(o.angle);
+  let lo = Infinity, hi = -Infinity;
+  for (let u = -1; u <= 1.001; u += 0.5) {
+    for (let v = -1; v <= 1.001; v += 0.5) {
+      const px = o.cx + u * o.hw * ca - v * o.hd * sa;
+      const pz = o.cz + u * o.hw * sa + v * o.hd * ca;
+      if (city.terrain.isWater(px, pz, 0.3)) return 'Cannot build on water';
+      const h = city.terrain.sampleBase(px, pz);
+      lo = Math.min(lo, h);
+      hi = Math.max(hi, h);
+    }
+  }
+  if (hi - lo > 8) return 'Terrain is too steep';
+  return undefined;
+}
+
+/** Roads and service buildings block a lot; zoned buildings in the way are listed to be replaced. */
+function overlapProblem(city: City, o: OBB, conflicts: Building[]): string | undefined {
+  if (!city.spawner.clearOfRoads(o, 0.4)) return 'Overlaps a road';
+  const [minX, minZ, maxX, maxZ] = obbBounds(o);
+  for (const b of city.buildings.queryRect(minX, minZ, maxX, maxZ)) {
+    if (!obbIntersects(o, lotOBB(b), -0.3)) continue;
+    if (b.kind === 'service' || b.typeId === 'proto') return 'Overlaps another building';
+    conflicts.push(b);
+  }
+  return undefined;
 }
 
 export function placeService(city: City, typeId: string, x: number, z: number, flip = false): CommandResult & { building?: Building } {
@@ -373,6 +379,97 @@ export function placeService(city: City, typeId: string, x: number, z: number, f
   city.recomputeUtilities();
   city.events.emit('built', { x: b.cx, z: b.cz, kind: 'service' });
   return { ok: true, cost, building: b };
+}
+
+// -- Prototypes ----------------------------------------------------------------
+
+export interface PrototypePreview {
+  valid: boolean;
+  error?: string;
+  frame: LotFrame | null;
+  conflicts: Building[];
+  spec: ProtoSpec;
+}
+
+/** Where a design from the sketchbook would go, facing the nearest road. */
+export function previewPrototype(city: City, sketchId: string, x: number, z: number, flip = false): PrototypePreview {
+  const sk = city.design.sketches.find((k) => k.id === sketchId);
+  if (!sk) throw new Error(`Unknown sketch ${sketchId}`);
+  const c = sk.concept;
+  const spec = protoSpec(c);
+  const res: PrototypePreview = { valid: false, frame: null, conflicts: [], spec };
+  const hit = city.roads.nearestSegment(x, z, Math.max(c.w, c.d) + 30, (s) => !isFreeway(s.type) && !s.elevated && !s.ring);
+  if (!hit) {
+    res.error = 'Must be placed next to a road';
+    return res;
+  }
+  const seg = hit.seg;
+  const half = c.w / 2;
+  const s = Math.min(Math.max(hit.proj.s, seg.trimA + half + 0.5), seg.length - seg.trimB - half - 0.5);
+  const side = flip ? -hit.proj.side : hit.proj.side;
+  const f = lotFrame(city.terrain, seg, Number.isFinite(s) ? s : seg.length / 2, side, c.w, c.d, 0.6);
+  res.frame = f;
+  if (seg.length - seg.trimA - seg.trimB < c.w * 0.6) {
+    res.error = 'Road segment is too short';
+    return res;
+  }
+  if (!city.design.canStartTrial()) {
+    res.error = `Your architects can test ${MAX_ACTIVE_TRIALS} prototypes at a time`;
+    return res;
+  }
+  if (c.floors > city.spawner.maxFloorsAt(f.obb.cx, f.obb.cz)) {
+    res.error = 'The high-rise ban doesn\'t allow a building this tall here';
+    return res;
+  }
+  const problem = groundProblem(city, f.obb) ?? overlapProblem(city, f.obb, res.conflicts);
+  if (problem) {
+    res.error = problem;
+    return res;
+  }
+  if (!city.economy.canAfford(spec.cost)) {
+    res.error = 'Not enough money';
+    return res;
+  }
+  res.valid = true;
+  return res;
+}
+
+/** Builds a design from the sketchbook as a prototype; its trial starts when it opens. */
+export function placePrototype(city: City, sketchId: string, x: number, z: number, flip = false): CommandResult & { building?: Building } {
+  const pv = previewPrototype(city, sketchId, x, z, flip);
+  if (!pv.valid || !pv.frame) return err(pv.error ?? 'Cannot place here');
+  const sk = city.design.sketches.find((k) => k.id === sketchId)!;
+  const { spec } = pv;
+  if (!city.economy.spend(spec.cost)) return err('Not enough money');
+  for (const c of pv.conflicts) city.removeBuilding(c.id, 'replace');
+  const f = pv.frame;
+  const c = sk.concept;
+  const b = newBuilding({
+    kind: 'zoned',
+    typeId: 'proto',
+    style: spec.style,
+    zone: spec.zone,
+    cx: f.obb.cx,
+    cz: f.obb.cz,
+    angle: f.obb.angle,
+    hw: f.obb.hw,
+    hd: f.obb.hd,
+    y: f.y,
+    seed: Math.floor(city.rng.next() * 0x7fffffff),
+    floors: c.floors,
+    level: c.level,
+    buildDays: spec.buildDays,
+    segId: f.seg.id,
+    segS: f.s,
+    side: f.side,
+    hhCap: spec.households,
+    jobs: spec.jobs,
+    landValue: city.landValue.at(f.obb.cx, f.obb.cz),
+  });
+  city.addBuilding(b);
+  city.design.startTrial(sk, b, spec.cost);
+  city.events.emit('built', { x: b.cx, z: b.cz, kind: 'service' });
+  return { ok: true, cost: spec.cost, building: b };
 }
 
 export function bulldozeBuilding(city: City, id: number): CommandResult {

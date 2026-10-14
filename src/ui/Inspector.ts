@@ -1,6 +1,7 @@
 import { formatInt, formatMoney, formatPct } from '../core/math';
 import type { Game } from '../game/Game';
 import { ARCHETYPE_BY_ID } from '../sim/buildings/Archetypes';
+import { GRADE_LABEL } from '../sim/design/Trials';
 import { bulldozeBuilding, bulldozeRoad, removeStop } from '../sim/CityCommands';
 import { Purpose, VEHICLE_MODELS } from '../sim/traffic/Vehicles';
 import { POLICY_BY_ID } from '../sim/policies/Policies';
@@ -132,7 +133,8 @@ export class Inspector {
       const st = b.kind === 'service' ? SERVICE_BY_ID.get(b.typeId) : undefined;
       const arch = ARCHETYPE_BY_ID.get(b.typeId);
       const centre = city.research.centers.get(b.id);
-      const title = centre ? centre.name : st ? st.name : arch ? humanize(arch.id) : 'Building';
+      const trial = b.typeId === 'proto' ? city.design.trialOf(b.id) : undefined;
+      const title = trial ? trial.name : centre ? centre.name : st ? st.name : arch ? humanize(arch.id) : 'Building';
       const zone = b.kind === 'zoned' ? ZONE_INFO[b.zone] : null;
       const chip = zone
         ? h('span', { class: 'zone-chip', style: `--c:rgb(${zone.color.map((v) => Math.round(v * 255)).join(',')})` }, zone.short, h('span', { class: 'stars' }, '★'.repeat(b.level)))
@@ -142,6 +144,19 @@ export class Inspector {
       const stateCls = b.state === BuildingState.Burning ? 'bad' : b.state === BuildingState.Abandoned ? 'warn' : b.state === BuildingState.Construction ? 'info' : 'good';
       body.appendChild(h('div', { class: `state-pill ${stateCls}` }, STATE_LABEL[b.state], b.progress < 1 && b.state !== BuildingState.Abandoned ? ` · ${Math.round(b.progress * 100)}%` : ''));
       if (b.progress < 1) body.appendChild(meter(b.progress, 'var(--accent)'));
+      if (trial) {
+        const open = trial.openDay >= 0;
+        const last = trial.reactions[trial.reactions.length - 1];
+        const col = trial.approval >= 58 ? 'var(--good)' : trial.approval >= 45 ? 'var(--warn)' : 'var(--bad)';
+        body.append(
+          h('div', { class: 'insp-trial' },
+            h('div', { class: 'insp-trial-head' }, icon('flask', 13), h('b', null, 'Prototype'), h('span', { class: 'muted' }, trial.verdict ? `Verdict: ${GRADE_LABEL[trial.verdict.grade]}` : city.design.stageOf(trial))),
+            open ? h('div', { class: 'kv' }, h('span', null, `${trial.approval}% approve`), meter(trial.approval / 100, col)) : null,
+            last ? h('div', { class: 'insp-trial-quote' }, `“${last.text}”`, h('span', { class: 'muted' }, ` — ${last.who}`)) : null,
+            h('div', { class: 'btn-row' }, h('button', { class: 'btn small primary', onclick: () => this.game.ui.studio.open({ tab: 'prototypes', trialId: trial.id }) }, icon('brush', 13), trial.verdict ? 'Read the verdict' : 'Follow the trial')),
+          ),
+        );
+      }
       if (b.kind === 'zoned') {
         const occ = isResidential(b.zone) ? [b.households, b.hhCap] : [b.workers, b.jobs];
         if (occ[1] > 0) {
@@ -170,7 +185,7 @@ export class Inspector {
         body.append(kv('Pollution', formatPct(city.landValue.pollutionAt(b.cx, b.cz))), kv('Floors', `${b.floors}`), kv('Age', `${b.age} days`));
         const local = b.district ? city.policies.localTo(b.district).filter((id) => !city.policies.has(id)) : [];
         if (local.length) body.append(kv('District policies', local.map((id) => POLICY_BY_ID.get(id)!.name).join(', ')));
-        if (b.level < 3 && b.state === BuildingState.Active) {
+        if (b.level < 3 && b.state === BuildingState.Active && !trial) {
           const need = b.level === 1 ? 'land value 45% and happiness 55%' : 'land value 64%, happiness 64% and good schools';
           body.appendChild(h('div', { class: 'hint small' }, `Upgrades to level ${b.level + 1} with ${need}.`));
         }
