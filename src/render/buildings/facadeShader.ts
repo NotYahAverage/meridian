@@ -55,22 +55,62 @@ float band(float a, float b, float x) {
  * lintel masks and the position inside the opening (metres) come back
  * through the out parameters.
  */
-float punchedWindow(vec2 lc, vec2 size, float seed, float style, out float frame, out float sill, out float lintel, out vec2 wpos, out vec2 wsize) {
+/**
+ * Window families a movement can use (the type comes from the facade seed):
+ * width as a share of the bay, sill and head heights (share of the storey),
+ * mullions (0, 1 central, 2 at thirds), a transom, an arched head and the
+ * depth of the reveal.
+ */
+void windowSpec(float t, out float wf, out float sill, out float head, out float mulls, out float trans, out float arch, out float depth) {
+  wf = 0.5; sill = 0.3; head = 0.83; mulls = 0.0; trans = 1.0; arch = 0.0; depth = 0.15;
+  if (t < 0.5) {
+  } else if (t < 1.5) { wf = 0.56; mulls = 1.0; trans = 0.0; }
+  else if (t < 2.5) { wf = 0.42; sill = 0.06; head = 0.88; mulls = 1.0; }
+  else if (t < 3.5) { wf = 0.84; sill = 0.36; head = 0.8; mulls = 2.0; trans = 0.0; depth = 0.1; }
+  else if (t < 4.5) { wf = 0.4; sill = 0.34; head = 0.76; trans = 0.0; depth = 0.42; }
+  else if (t < 5.5) { wf = 0.44; sill = 0.22; head = 0.88; mulls = 1.0; trans = 0.0; arch = 1.0; depth = 0.22; }
+  else if (t < 6.5) { wf = 0.9; sill = 0.03; head = 0.97; mulls = 1.0; trans = 0.0; depth = 0.06; }
+  else { wf = 0.2; sill = 0.1; head = 0.9; trans = 0.0; depth = 0.36; }
+}
+
+float punchedWindow(vec2 lc, vec2 size, float seed, float style, float wtype, out float frame, out float sill, out float lintel, out vec2 wpos, out vec2 wsize, out float rdepth) {
   float k1 = m_hash12(vec2(seed, 1.7));
   float k2 = m_hash12(vec2(seed, 3.1));
   // Window proportions vary by building, not by window.
   float ww = clamp(size.x * mix(0.38, 0.6, k1), 0.85, max(0.85, size.x - 0.7));
   float sillY = style > 1.5 ? 0.12 : mix(0.27, 0.33, k2);
   float headY = mix(0.8, 0.86, k2);
+  float mulls = style > 0.5 && style < 1.5 ? 1.0 : 0.0;
+  float trans = k2 > 0.4 ? 1.0 : 0.0;
+  float arch = 0.0;
+  rdepth = -1.0;
+  if (wtype >= 0.0) {
+    // A movement's window: the same family on every building it shapes.
+    float wf;
+    windowSpec(wtype, wf, sillY, headY, mulls, trans, arch, rdepth);
+    ww = clamp(size.x * wf, 0.5, max(0.5, size.x - 0.24));
+  }
   float x0 = 0.5 - 0.5 * ww / size.x, x1 = 0.5 + 0.5 * ww / size.x;
   float y0 = sillY, y1 = headY;
   float ft = 0.07 / size.x, fty = 0.07 / size.y;
   float open = band(x0, x1, lc.x) * band(y0, y1, lc.y);
   float inner = band(x0 + ft, x1 - ft, lc.x) * band(y0 + fty, y1 - fty, lc.y);
-  // Two-pane windows get a central mullion; many get a transom near the head.
-  float mull = style > 0.5 && style < 1.5 ? band(0.5 - ft * 0.5, 0.5 + ft * 0.5, lc.x) : 0.0;
+  if (arch > 0.5) {
+    // A round head: the top of the opening is a half circle.
+    float rr = ww * 0.5;
+    float xM = (lc.x - 0.5) * size.x, yM = lc.y * size.y;
+    float spring = y1 * size.y - rr;
+    if (yM > spring) {
+      float dd = length(vec2(xM, yM - spring));
+      open *= 1.0 - aastep(rr, dd);
+      inner *= 1.0 - aastep(rr - 0.07, dd);
+    }
+  }
+  // Mullions (central or at thirds) and a transom near the head.
+  float mull = mulls > 1.5 ? max(band(1.0 / 3.0 - ft * 0.4, 1.0 / 3.0 + ft * 0.4, (lc.x - x0) / (x1 - x0)), band(2.0 / 3.0 - ft * 0.4, 2.0 / 3.0 + ft * 0.4, (lc.x - x0) / (x1 - x0)))
+    : mulls > 0.5 ? band(0.5 - ft * 0.5, 0.5 + ft * 0.5, lc.x) : 0.0;
   float tr = mix(y0, y1, 0.74);
-  float transom = k2 > 0.4 ? band(tr - fty * 0.4, tr + fty * 0.4, lc.y) : 0.0;
+  float transom = trans > 0.5 ? band(tr - fty * 0.4, tr + fty * 0.4, lc.y) : 0.0;
   float glass = inner * (1.0 - max(mull, transom));
   frame = open - glass;
   sill = band(x0 - 0.08 / size.x, x1 + 0.08 / size.x, lc.x) * band(y0 - 0.07 / size.y, y0, lc.y);
@@ -129,15 +169,43 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
   float sill = 0.0, lintel = 0.0;
   bool punchedKind = false;
   float bstyle = floor(m_hash12(vec2(seed, 9.3)) * 3.0);
+  // Facades drawn in a movement carry its window family and frame tone in the seed.
+  bool styled = seed > 127.5;
+  float wtype = styled ? floor((seed - 128.0) / 16.0) : -1.0;
+  float ftone = styled ? mod(floor((seed - 128.0) / 4.0), 4.0) : -1.0;
+  // Per-building variety for lights and curtains (styled buildings share a seed).
+  float bseed = styled ? seed + mod(vSlot, 97.0) * 1.37 : seed;
+  float rdepth = -1.0;
   // Per-building trim: white, warm stone or dark bronze.
   float tk = m_hash12(vec2(seed, 5.9));
   vec3 trimCol = tk < 0.5 ? m_srgb(vec3(0.86, 0.85, 0.82)) : tk < 0.8 ? m_srgb(vec3(0.78, 0.74, 0.66)) : m_srgb(vec3(0.24, 0.23, 0.22));
   vec3 frameCol = tk < 0.65 ? m_srgb(vec3(0.88, 0.88, 0.86)) : m_srgb(vec3(0.2, 0.2, 0.21));
+  if (styled) {
+    frameCol = ftone < 0.5 ? m_srgb(vec3(0.9, 0.9, 0.88)) : ftone < 1.5 ? m_srgb(vec3(0.78, 0.74, 0.66)) : ftone < 2.5 ? m_srgb(vec3(0.15, 0.15, 0.16)) : m_srgb(vec3(0.32, 0.23, 0.15));
+    trimCol = ftone < 0.5 ? m_srgb(vec3(0.86, 0.85, 0.82)) : ftone < 1.5 ? m_srgb(vec3(0.78, 0.74, 0.66)) : ftone < 2.5 ? m_srgb(vec3(0.56, 0.56, 0.54)) : m_srgb(vec3(0.6, 0.53, 0.44));
+  }
 
   float shutters = 0.0;
-  if (pid == ${p('RES')} || pid == ${p('BRICK')} || pid == ${p('STONE')} || pid == ${p('PANEL')} || pid == ${p('SIDING')}) {
+  if (pid == ${p('RES')} || pid == ${p('BRICK')} || pid == ${p('STONE')} || pid == ${p('PANEL')} || pid == ${p('SIDING')} || pid == ${p('BETON')} || pid == ${p('TIMBERW')}) {
     punchedKind = true;
-    if (pid == ${p('SIDING')}) {
+    if (pid == ${p('BETON')}) {
+      // Board-marked concrete: the grain of the formwork, panel joints, weathering streaks.
+      float um = f.x * bay;
+      float boards = fract(f.y / 0.16);
+      float bl = 1.0 - band(0.04, 1.0, boards);
+      float pnl = m_hash12(vec2(floor(um / 2.4), floor(f.y / 1.2)) + seed * 0.1);
+      col = base * (0.9 + 0.12 * pnl + 0.06 * nf) * (1.0 - bl * 0.08 * detail) * (0.97 + 0.04 * m_vnoise(vec2(um * 6.0, f.y * 0.5)));
+      col *= 1.0 - 0.06 * (1.0 - band(0.006, 1.0, fract(um / 2.4))) * detail;
+      col *= 1.0 - 0.12 * smoothstep(0.55, 0.95, m_vnoise(vec2(um * 0.9, f.y * 0.07) + seed));
+      b_rough = 0.93;
+    } else if (pid == ${p('TIMBERW')}) {
+      float um = f.x * bay;
+      float board = floor(um / 0.14);
+      float g = m_hash12(vec2(board, seed));
+      col = base * (0.82 + 0.3 * g) * (0.95 + 0.08 * m_vnoise(vec2(um * 40.0, f.y * 1.5)));
+      col *= 1.0 - (1.0 - band(0.06, 1.0, fract(um / 0.14))) * 0.3 * detail;
+      b_rough = 0.8;
+    } else if (pid == ${p('SIDING')}) {
       // Lap boards, each casting a thin shadow line on the one below.
       float t = fract(f.y / 0.2);
       col *= mix(0.97, 0.84 + 0.16 * smoothstep(0.0, 0.25, t), detail) * (0.97 + 0.04 * nf);
@@ -177,7 +245,7 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
       float slab = band(0.0, 0.025, lc.y) * isWall;
       col *= 1.0 - slab * 0.12;
     }
-    glass = punchedWindow(lc, vec2(bay, fh), seed, bstyle, frame, sill, lintel, wpos, wsize);
+    glass = punchedWindow(lc, vec2(bay, fh), seed, bstyle, wtype, frame, sill, lintel, wpos, wsize, rdepth);
   } else if (pid == ${p('OFFICE')}) {
     // Ribbon windows between spandrel panels, mullions every 1.5 m.
     float um = f.x * bay;
@@ -243,7 +311,7 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
       float uf = 3.1;
       vec2 lc2 = vec2(fract(f.x), fract((f.y - fh) / uf));
       cell = vec2(floor(f.x), floor((f.y - fh) / uf) + 1.0);
-      glass = punchedWindow(lc2, vec2(bay, uf), seed, bstyle, frame, sill, lintel, wpos, wsize);
+      glass = punchedWindow(lc2, vec2(bay, uf), seed, bstyle, wtype, frame, sill, lintel, wpos, wsize, rdepth);
     }
   } else if (pid == ${p('INDUSTRIAL')}) {
     // Profiled metal cladding with panel joints and rain streaks.
@@ -283,8 +351,8 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
     float seamU = fract(f.x / 0.5);
     float seamLine = 1.0 - band(0.03, 0.97, seamU);
     col = base * (0.94 + 0.06 * nf) * (1.0 + seamLine * 0.18 * detail);
-    b_rough = 0.5;
-    b_metal = 0.3;
+    b_rough = 0.62;
+    b_metal = 0.2;
   } else if (pid == ${p('LOUVRE')}) {
     float t = fract(f.y / 0.18);
     col = base * mix(0.85, mix(0.62, 1.05, smoothstep(0.0, 0.7, t)), detail);
@@ -298,6 +366,15 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
     col *= 1.0 - (1.0 - band(0.06, 1.0, fract(um / 0.14))) * 0.3 * detail;
     col *= 0.85 + 0.15 * smoothstep(0.0, 2.5, vRelY);
     b_rough = 0.8;
+  } else if (pid == ${p('PLANTED')}) {
+    // Sedum, grasses and shrubs: patchy greens with rusty and flowering spots.
+    vec2 wp = vWPos.xz + vWPos.y * 0.7;
+    float a = m_vnoise(wp * 1.1), c2 = m_vnoise(wp * 3.7 + 3.0), c3 = m_vnoise(wp * 9.0 - 1.0);
+    col = mix(m_srgb(vec3(0.29, 0.39, 0.17)), m_srgb(vec3(0.46, 0.49, 0.23)), a);
+    col = mix(col, m_srgb(vec3(0.55, 0.34, 0.27)), smoothstep(0.72, 0.9, c2) * 0.45);
+    col = mix(col, m_srgb(vec3(0.85, 0.78, 0.5)), smoothstep(0.86, 0.95, c3) * 0.35 * detail);
+    col *= 0.78 + 0.3 * c3;
+    b_rough = 0.97;
   } else if (pid == ${p('TRIM')}) {
     col = base * (0.97 + 0.04 * nf);
     b_rough = 0.55;
@@ -412,8 +489,8 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
   }
 
   if (glass > 0.0 || frame > 0.0 || sill > 0.0 || lintel > 0.0) {
-    float h = m_hash12(cell + vec2(seed * 0.37, seed * 1.31));
-    float h2 = m_hash12(cell.yx * 1.7 + seed * 0.11);
+    float h = m_hash12(cell + vec2(bseed * 0.37, bseed * 1.31));
+    float h2 = m_hash12(cell.yx * 1.7 + bseed * 0.11);
     bool curtainWall = pid == ${p('GLASS')} || pid == ${p('OFFICE')};
     // Glass: very dark behind, the sky does the rest (reflection is boosted below).
     vec3 interior = m_srgb(vec3(0.07, 0.08, 0.09)) * (0.75 + 0.5 * h);
@@ -460,7 +537,7 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
     b_refl = mix(b_refl, (curtainWall ? 5.0 : pid == ${p('STORE')} ? 3.5 : 6.0) * paneRefl, gl);
     // The recess: the reveal shades glass and frame from the sun, and sky light inside is dimmer.
     if (punchedKind || pid == ${p('STORE')} || pid == ${p('OFFICE')}) {
-      float depth = pid == ${p('STONE')} || pid == ${p('BRICK')} ? 0.22 : pid == ${p('OFFICE')} ? 0.1 : 0.15;
+      float depth = rdepth > 0.0 ? rdepth : pid == ${p('STONE')} || pid == ${p('BRICK')} ? 0.22 : pid == ${p('OFFICE')} ? 0.1 : 0.15;
       float inOpen = clamp(glass + frame, 0.0, 1.0) * detail;
       b_dirShade = mix(1.0, revealShadow(wpos, wsize, depth), inOpen);
       b_cavity = mix(1.0, 0.72, inOpen);
@@ -476,11 +553,11 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
     }
     if (busy) litF = max(litF, 0.92);
     // Who's home: some buildings are livelier than others; offices light up in floor sections.
-    float occ = 0.55 + 0.9 * m_hash12(vec2(seed, 21.0));
-    float hl = curtainWall ? m_hash12(vec2(floor(cell.x / 5.0), cell.y) + seed * 0.73) : h;
+    float occ = 0.55 + 0.9 * m_hash12(vec2(bseed, 21.0));
+    float hl = curtainWall ? m_hash12(vec2(floor(cell.x / 5.0), cell.y) + bseed * 0.73) : h;
     float on = step(hl, litF * occ) * (abandoned ? 0.0 : 1.0);
     // Warm or cool bulbs, brighter near the ceiling; curtains glow softly.
-    float temp = m_hash12(cell.yx + seed);
+    float temp = m_hash12(cell.yx + bseed);
     vec3 bulb = mix(lightCol, vec3(1.0, 0.86, 0.66), step(0.7, temp) * 0.6) * (0.6 + 0.7 * temp);
     float ceiling = 0.75 + 0.45 * smoothstep(0.2, 1.0, wy);
     float glow = curtainWall ? 0.42 : mix(1.15, 0.7, drape);

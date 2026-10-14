@@ -53,6 +53,8 @@ export interface Building {
   efficiency: number;
   /** Generic accumulator (landfill fill level, etc.). */
   stock: number;
+  /** Architectural movement it was built in (index into the city's movements; 0 = the local vernacular). */
+  movement: number;
 }
 
 export function lotOBB(b: Pick<Building, 'cx' | 'cz' | 'angle' | 'hw' | 'hd'>): OBB {
@@ -93,6 +95,7 @@ export function newBuilding(init: Partial<Building> & Pick<Building, 'kind' | 't
     slot: -1,
     efficiency: 1,
     stock: 0,
+    movement: 0,
     ...init,
   };
 }

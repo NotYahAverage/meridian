@@ -8,6 +8,7 @@ import { Rng } from '../../core/rng';
 import { beyondDetail } from '../shared';
 import { type BuildingUniforms, createBuildingDepthMaterial, createBuildingMaterial } from './BuildingMaterial';
 import { generateBuilding } from './generators';
+import type { Movement } from '../../sim/style/Movements';
 
 const STATE_SIZE = 256;
 
@@ -95,11 +96,11 @@ export function buildingChunk(b: { cx: number; cz: number }): number {
 }
 
 export function buildingSignature(b: Building): string {
-  return `${b.style}|${b.seed}|${b.floors}|${b.level}|${b.hw.toFixed(2)}|${b.hd.toFixed(2)}|${b.cx.toFixed(2)}|${b.cz.toFixed(2)}|${b.y.toFixed(2)}`;
+  return `${b.style}|${b.movement}|${b.seed}|${b.floors}|${b.level}|${b.hw.toFixed(2)}|${b.hd.toFixed(2)}|${b.cx.toFixed(2)}|${b.cz.toFixed(2)}|${b.y.toFixed(2)}`;
 }
 
-export function generateFor(b: Building): BuiltGeometry {
-  return generateBuilding({ style: b.style, w: b.hw * 2, d: b.hd * 2, floors: b.floors, level: b.level, seed: b.seed }, b.cx, b.cz, b.angle, b.y);
+export function generateFor(b: Building, look?: Movement): BuiltGeometry {
+  return generateBuilding({ style: b.style, w: b.hw * 2, d: b.hd * 2, floors: b.floors, level: b.level, seed: b.seed, look }, b.cx, b.cz, b.angle, b.y);
 }
 
 /** Merges per-building geometry into one mesh per chunk. */
@@ -255,7 +256,7 @@ export class BuildingRenderer {
     const sig = buildingSignature(b);
     const c = this.cache.get(b.id);
     if (c && c.sig === sig) return c.geo;
-    const geo = generateFor(b);
+    const geo = generateFor(b, this.city.style.movementOf(b));
     this.cache.set(b.id, { sig, geo, chunk: ch });
     return geo;
   }

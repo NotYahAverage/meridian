@@ -42,6 +42,12 @@ export const P = {
   AWNING: 29,
   /** Fan grilles on top of air handlers (one fan per cell). */
   FAN: 30,
+  /** Board-marked concrete with punched windows (brutalist facades). */
+  BETON: 31,
+  /** Vertical timber cladding with punched windows. */
+  TIMBERW: 32,
+  /** Planted surface: sedum roofs, planter tops, green terraces. */
+  PLANTED: 33,
 } as const;
 
 export type RGB = [number, number, number];

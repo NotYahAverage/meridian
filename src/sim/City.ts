@@ -31,6 +31,7 @@ import { Weather } from './world/Weather';
 import { type MapPreset, type Rect, Terrain } from './world/Terrain';
 import { LAND_TILE, Land } from './world/Land';
 import { Research } from './research/Research';
+import { CityStyle } from './style/CityStyle';
 import { conformTerrain } from './world/TerrainConform';
 import { Disasters } from './world/Disasters';
 import { Achievements } from './progress/Achievements';
@@ -97,6 +98,8 @@ export class City {
   readonly land = new Land();
   /** This civilization's science: research centres, experiments, discoveries and designs. */
   readonly research: Research;
+  /** The city's architecture: its movements and which one each building follows. */
+  readonly style: CityStyle;
   /** Traffic demand being added up over several ticks (see tickCity). */
   demandJob: Generator<void, TripDemand[], void> | null = null;
   /** Periodic coverage and land-value refreshes in progress (a slice per tick). */
@@ -173,6 +176,7 @@ export class City {
     this.preset = opts.preset;
     this.rng = new Rng(opts.seed ^ 0xc17e);
     this.research = new Research(this, (opts.civSeed ?? Math.floor(Math.random() * 0xffffffff)) >>> 0);
+    this.style = new CityStyle(this, this.research.civSeed);
     this.terrain = new Terrain(opts.seed, opts.preset, { flat: opts.flatTerrain, base: opts.terrainBase });
     this.terrain.landCheck = (x, z) => this.land.ownsPoint(x, z);
     this.nature = new Nature(this.terrain, opts.seed);
@@ -379,6 +383,8 @@ export class City {
 
   addBuilding(b: Building): Building {
     this.buildings.add(b);
+    // New homes, shops and offices follow the city's current blend of movements.
+    if (b.kind === 'zoned' && !b.movement) b.movement = this.style.pick(b);
     const o = lotOBB(b);
     this.zones.setOccupant(o, b.id);
     this.nature.clearOBB(o, 1.5);

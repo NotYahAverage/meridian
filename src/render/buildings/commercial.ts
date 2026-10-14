@@ -33,7 +33,7 @@ function shopUnits(g: GeoBuilder, r: Rng, x0: number, x1: number, z: number, gh:
 /** Corner shop: a shopfront with fascia and awning, flats or a false front above, side parking. */
 export const shop: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
   const bw = Math.min(w - 1.5, r.range(10, 16));
   const bd = Math.min(d - 4, r.range(11, 16));
@@ -77,7 +77,7 @@ export const shop: Gen = (g, b, r) => {
 /** Mixed use: shops under three to seven floors of flats, with balconies or bays and a cornice. */
 export const mixeduse: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
   const floors = Math.max(3, b.floors);
   const bw = w - 1, bd = Math.min(d - 5, r.range(16, 22));
@@ -121,7 +121,7 @@ export const mixeduse: Gen = (g, b, r) => {
 /** Strip mall: parking in front, a row of units with stepped false fronts behind a covered walk. */
 export const stripmall: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const front = Math.min(d - 14, r.range(16, 20));
   parking(g, r, -w / 2 + 1, 1, w / 2 - 1, front, 0.55, s);
   g.ground(-w / 2, front, w / 2, d, PAVE(s), 0.04);
@@ -159,7 +159,7 @@ export const stripmall: Gen = (g, b, r) => {
 /** Big-box retail: a long box behind its car park, with a tall glazed entrance portal and a parapet band. */
 export const bigbox: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const front = Math.min(d - 18, 16);
   parking(g, r, -w / 2 + 1, 1, w / 2 - 1, front, 0.5, s);
   const z0 = front + 1.5, z1 = d - 1.5, x0 = -w / 2 + 2, x1 = w / 2 - 2;
@@ -189,7 +189,7 @@ export const bigbox: Gen = (g, b, r) => {
  */
 export const office: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
   const floors = Math.max(3, b.floors);
   const fh = 3.8;
@@ -248,7 +248,7 @@ export const office: Gen = (g, b, r) => {
  */
 export const officeTower: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
   const floors = Math.max(12, b.floors);
   const fh = 3.9;

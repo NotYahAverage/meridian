@@ -11,6 +11,8 @@ export interface GenInput {
   floors: number;
   level: number;
   seed: number;
+  /** Architectural movement to draw it in (classic look when absent). */
+  look?: import('../../sim/style/Movements').Movement;
 }
 
 export type Gen = (g: GeoBuilder, b: GenInput, r: Rng) => void;

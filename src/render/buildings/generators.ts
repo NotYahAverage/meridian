@@ -6,6 +6,7 @@ import type { StyleId } from '../../sim/buildings/Archetypes';
 import { ACCENTS, ASPH, CAR_COLORS, CONC, GLASS, type Gen, type GenInput, GRASS, INDUSTRY, PAVE, RENDER, bushes, c, fence, m, parking, pick, rooftop, trees } from './lot';
 import { archForStyle } from '../../sim/research/Architecture';
 import { buildArch } from './procedural';
+import { generateStyled } from './styled';
 import { house, lowrise, midrise, tower, townhouse } from './residential';
 import { bigbox, mixeduse, office, officeTower, shop, stripmall } from './commercial';
 import { PAL, balcony, canopy, cornice, outline, parapet, piers, roofscape } from './architecture';
@@ -41,7 +42,7 @@ function trucks(g: GeoBuilder, r: Rng, n: number, x0: number, x1: number, z: num
 
 const workshop: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   const bw = w - 3, bd = Math.min(d - 9, r.range(13, 18));
   const z0 = d - bd - 1.5, z1 = d - 1.5, x0 = -bw / 2, x1 = bw / 2;
@@ -57,7 +58,7 @@ const workshop: Gen = (g, b, r) => {
 
 const warehouse: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, ASPH(s), 0.04);
   const bw = w - 3, bd = Math.min(d - 12, r.range(20, 26));
   const z0 = d - bd - 1, z1 = d - 1, x0 = -bw / 2, x1 = bw / 2;
@@ -75,7 +76,7 @@ const warehouse: Gen = (g, b, r) => {
 
 const factory: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   const bw = w * 0.62, bd = d - 10;
   const x0 = -w / 2 + 2, x1 = x0 + bw, z0 = 6, z1 = z0 + bd;
@@ -112,7 +113,7 @@ const factory: Gen = (g, b, r) => {
 
 const depot: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0x8f8a80), P.DIRT, s), 0.04);
   const cols = Math.max(2, Math.floor((w - 6) / 11));
   const rows = Math.max(1, Math.floor((d - 12) / 11));
@@ -140,7 +141,7 @@ const depot: Gen = (g, b, r) => {
  */
 function civic(g: GeoBuilder, r: Rng, b: GenInput, wallHex: number, accent: number, floors: number, frontDepth: number, pattern: number = P.STONE): [number, number, number, number, number] {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const bw = w - 6, bd = Math.min(d - frontDepth - 4, 18);
   const x0 = -bw / 2, x1 = bw / 2, z0 = frontDepth, z1 = z0 + bd;
   const fh = 3.6;
@@ -170,7 +171,7 @@ function civic(g: GeoBuilder, r: Rng, b: GenInput, wallHex: number, accent: numb
 }
 
 const police: Gen = (g, b, r) => {
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-b.w / 2, 0, b.w / 2, b.d, PAVE(s), 0.04);
   const [x0, , x1, z1] = civic(g, r, b, r.pick([0xcfc6b5, 0xbcb3a2, 0xd9d2c3]), 0x1f4fa8, 3, 7);
   g.cylinder(x1 - 2, z1 - 2, 0.15, 0.08, 11, 22, 4, m(c(0x999999), P.METAL, s), null);
@@ -180,7 +181,7 @@ const police: Gen = (g, b, r) => {
 
 const fire: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   const bw = w - 4, bd = Math.min(d - 12, 18);
   const x0 = -bw / 2, x1 = bw / 2, z0 = 11, z1 = z0 + bd;
@@ -198,7 +199,7 @@ const fire: Gen = (g, b, r) => {
 };
 
 const clinic: Gen = (g, b, r) => {
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-b.w / 2, 0, b.w / 2, b.d, GRASS(s), 0.03);
   const [x0, z0, x1, z1, h] = civic(g, r, b, 0xeae6dc, 0xc8202a, 2, 7, P.RES);
   g.box(-1.6, z0 - 0.4, 1.6, z0, h + 0.2, h + 3.4, m(c(0xffffff), P.PLAIN, s), m(c(0xffffff), P.PLAIN, s));
@@ -212,7 +213,7 @@ const clinic: Gen = (g, b, r) => {
 
 const hospital: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
   const white = c(0xeceae4);
   const main = m(white, P.OFFICE, s, 3.8, 2.8);
@@ -235,7 +236,7 @@ const hospital: Gen = (g, b, r) => {
 
 function schoolCampus(g: GeoBuilder, b: GenInput, r: Rng, big: boolean): void {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
   const brick = c(r.pick([0x9a5b45, 0xa8735a, 0xb48a6c]));
   const fl = big ? 3 : 2;
@@ -266,7 +267,7 @@ function schoolCampus(g: GeoBuilder, b: GenInput, r: Rng, big: boolean): void {
  */
 const cargoPort: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const hw = w / 2;
   g.ground(-hw, 0, hw, d, m(c(0x8e8b85), P.CONCRETE, s), 0.04);
   // Quay coping with bollards, and the crane rails.
@@ -339,7 +340,7 @@ const highschool: Gen = (g, b, r) => schoolCampus(g, b, r, true);
  */
 const university: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const stone = c(0xe3dccb), trim = c(0xcdc3ad), slate = c(0x4a5058), copper = c(0x6f9c8a);
   const brick = c(r.pick([0x9a5b45, 0x8e4f3c, 0xa4664c]));
   const flat = m(c(0x8a8780), P.ROOF_FLAT, s);
@@ -403,7 +404,7 @@ const university: Gen = (g, b, r) => {
 
 const landfill: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0x6e604c), P.DIRT, s), 0.04);
   for (let i = 0; i < 5; i++) {
     const x = r.range(-w / 2 + 8, w / 2 - 8);
@@ -419,7 +420,7 @@ const landfill: Gen = (g, b, r) => {
 
 const recycling: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   const x0 = -w / 2 + 2, x1 = w / 2 - 12, z0 = 8, z1 = d - 2;
   g.box(x0, z0, x1, z1, 0, 10, m(c(0xd5ddd2), P.INDUSTRIAL, s, 10, 1.2), m(c(0x9ea7a0), P.ROOF_FLAT, s));
@@ -432,7 +433,7 @@ const recycling: Gen = (g, b, r) => {
 
 function park(g: GeoBuilder, b: GenInput, r: Rng, kind: 'small' | 'plaza' | 'town' | 'large'): void {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   if (kind === 'plaza') {
     g.ground(-w / 2, 0, w / 2, d, m(c(0xc8c2b6), P.PAVING, s), 0.06);
     g.cylinder(0, d / 2, 4.5, 4.5, 0, 0.7, 20, m(c(0xb8b2a6), P.CONCRETE, s), m(c(0x3f8fb0), P.WATER, s));
@@ -494,7 +495,7 @@ function ringLine(g: GeoBuilder, cx: number, cz: number, rad: number, wdt: numbe
 /** Football pitch with mown stripes, goals, a small stand and floodlights. */
 const sportsField: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0x5f8a3e), P.GRASS, s), 0.04);
   const px0 = -w / 2 + 3, px1 = w / 2 - 3, pz0 = 3, pz1 = d - 9;
   for (let i = 0, x = px0; x < px1; i++, x += 4) g.ground(x, pz0, Math.min(px1, x + 4), pz1, m(c(i % 2 ? 0x4f8a36 : 0x5c9a40), P.PLAIN, s), 0.06);
@@ -534,7 +535,7 @@ const sportsField: Gen = (g, b, r) => {
 /** Allotments: raised beds in rows, a potting shed, water butts and fruit trees. */
 const communityGarden: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0x6f8a45), P.GRASS, s), 0.04);
   g.ground(-1, 0, 1, d - 1, m(c(0xb9a888), P.PAVING, s), 0.06);
   const crops = [0x4f8a2e, 0x6aa84f, 0x8bbf4a, 0x3f7a3a, 0xc0553a, 0xe0b040, 0x7a4f8f];
@@ -561,7 +562,7 @@ const communityGarden: Gen = (g, b, r) => {
 /** Fenced basketball and tennis courts. */
 const sportsCourts: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0x6a6c70), P.CONCRETE, s), 0.04);
   const chalk = m(c(0xf4f4f0), P.PLAIN, s);
   // Basketball court (left).
@@ -592,7 +593,7 @@ const sportsCourts: Gen = (g, b, r) => {
 /** Botanical garden: a glass palm house, flower beds, a lily pond and specimen trees. */
 const botanicalGarden: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0x5f8a3e), P.GRASS, s), 0.04);
   const path = m(c(0xd2c6a8), P.PAVING, s);
   g.ground(-1.5, 0, 1.5, d - 2, path, 0.07);
@@ -623,7 +624,7 @@ const botanicalGarden: Gen = (g, b, r) => {
 // ── Utilities ───────────────────────────────────────────────────────────────
 
 const wind: Gen = (g, b) => {
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-b.w / 2, 0, b.w / 2, b.d, m(c(0x8f8a80), P.DIRT, s), 0.04);
   g.box(-3.5, 2, -1.5, 4, 0, 2.2, m(c(0xb9bcbc), P.METAL, s), m(c(0xa0a3a3), P.METAL, s));
   g.prop({ kind: 'rotor', x: 0, y: 48.8, z: b.d / 2, rot: -Math.PI / 2 + (s / 255) * 0.4, variant: s });
@@ -631,7 +632,7 @@ const wind: Gen = (g, b) => {
 
 const coal: Gen = (g, b) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   const hall = m(c(0xb9b6ae), P.INDUSTRIAL, s, 12, 1.4);
   g.box(-w / 2 + 2, 4, -2, 18, 0, 16, hall, m(c(0x8f8c86), P.ROOF_FLAT, s));
@@ -651,7 +652,7 @@ const coal: Gen = (g, b) => {
 
 const solar: Gen = (g, b) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0xa59e8e), P.DIRT, s), 0.04);
   const rows = Math.floor((d - 6) / 4.2);
   for (let i = 0; i < rows; i++) {
@@ -666,7 +667,7 @@ const solar: Gen = (g, b) => {
 
 /** Water tower: a fluted concrete shaft, a painted steel bowl with a catwalk, a pump house. */
 const waterTower: Gen = (g, b) => {
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-b.w / 2, 0, b.w / 2, b.d, CONC(s), 0.04);
   const cz = b.d / 2;
   const paint = c([0xdfe3e2, 0xb9cdd3, 0xd6d0c2, 0xa9c0c6][s % 4]);
@@ -686,7 +687,7 @@ const waterTower: Gen = (g, b) => {
 
 const pump: Gen = (g, b) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   g.box(-w / 2 + 2, 2, 2, 10, 0, 6, m(c(0xa8735a), P.BRICK, s, 3, 3), null);
   g.gable(-w / 2 + 2, 2, 2, 10, 6, 2, true, m(c(0x3f4a4f), P.ROOF_TILE, s), m(c(0xa8735a), P.PLAIN, s));
@@ -697,7 +698,7 @@ const pump: Gen = (g, b) => {
 
 const outfall: Gen = (g, b) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   g.box(-w / 2 + 2, 2, 2, 9, 0, 4.5, m(c(0xbfb8aa), P.CONCRETE, s), m(c(0x7d7a74), P.ROOF_FLAT, s));
   g.box(4, 2, 5.6, d + 6, 0.2, 1.8, m(c(0x6d6a62), P.METAL, s), m(c(0x6d6a62), P.METAL, s));
@@ -706,7 +707,7 @@ const outfall: Gen = (g, b) => {
 
 const treatment: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   for (let i = 0; i < 3; i++) {
     const x = -w / 2 + 8 + i * 12;
@@ -721,7 +722,7 @@ const treatment: Gen = (g, b, r) => {
 
 const busDepot: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, ASPH(s), 0.04);
   // Garage hall at the back with tall bay doors facing the yard.
   const x0 = -w / 2 + 2, x1 = w / 2 - 2;
@@ -753,7 +754,7 @@ const busDepot: Gen = (g, b, r) => {
 /** Metro entrance: glass pavilion over the stairs, a lit "M" totem, a lift and vent grilles on a paved plaza. */
 const metroStation: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const brand = 0x1565c0;
   g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
   const steel = m(c(0x5c6369), P.METAL, s);
@@ -804,7 +805,7 @@ const metroStation: Gen = (g, b, r) => {
 /** Regional airport: runway with markings and lights, taxiway, apron, terminal, tower and hangar. */
 const airport: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0x6a8a44), P.GRASS, s), 0.04);
   const tarmac = m(c(0x3d3f42), P.PLAIN, s);
   const white = m(c(0xeeeeea), P.PLAIN, s);
@@ -882,7 +883,7 @@ const airport: Gen = (g, b, r) => {
  */
 const hotel: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const brand = r.pick([0x1f4fa8, 0x8e1b1b, 0x0e7c66, 0x2c3e50, 0xb07d2b]);
   g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
   // Drop-off loop in front.
@@ -940,7 +941,7 @@ const hotel: Gen = (g, b, r) => {
 /** Contemporary house: two offset flat-roofed volumes, big glazing, often a pool. */
 const modernHouse: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
   const white = c(r.pick([0xf1efe9, 0xe8e4dc, 0xdedad2]));
   const dark = c(r.pick([0x3b3d40, 0x4a4038, 0x5b4b3d]));
@@ -980,7 +981,7 @@ const modernHouse: Gen = (g, b, r) => {
 /** Fuel station: canopy over pumps, small shop and a tall price sign. */
 const gasStation: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const brand = r.pick([0x0e7c66, 0xc0392b, 0x1f4fa8, 0xe67e22]);
   g.ground(-w / 2, 0, w / 2, d, m(c(0x55575a), P.PAVING, s), 0.04);
   // Canopy on four columns.
@@ -1008,7 +1009,7 @@ const gasStation: Gen = (g, b, r) => {
 /** Diner with a striped awning and a patio of umbrellas. */
 const diner: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
   const accent = pick(r, ACCENTS);
   const bw = Math.min(w - 6, 13), bd = Math.min(d - 9, 11);
@@ -1037,7 +1038,7 @@ const diner: Gen = (g, b, r) => {
 /** Supermarket: long box with a glazed entrance, big sign and a car park. */
 const supermarket: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, ASPH(s), 0.04);
   const brand = r.pick([0xc0392b, 0x27ae60, 0xe67e22, 0x1f4fa8]);
   const z0 = d - 26, z1 = d - 1.5, x0 = -w / 2 + 2, x1 = w / 2 - 2;
@@ -1055,7 +1056,7 @@ const supermarket: Gen = (g, b, r) => {
 /** Office campus: low glass pavilions around a landscaped court. */
 const officeCampus: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
   const glass = m(c(pick(r, GLASS)), P.GLASS, s, 3.8, 2.4);
   const roof = m(c(0x9a9c9c), P.ROOF_FLAT, s);
@@ -1077,7 +1078,7 @@ const officeCampus: Gen = (g, b, r) => {
 /** Agricultural greenhouses: rows of glass houses with a packing shed. */
 const greenhouse: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0x8f8a80), P.DIRT, s), 0.04);
   const glassM = m(c(0xb8cfd6), P.GLASS, s, 2.4, 1.6);
   const rows = Math.max(2, Math.floor((w - 4) / 8.5));
@@ -1104,7 +1105,7 @@ function planters(g: GeoBuilder, s: number, pts: [number, number][]): void {
 
 const cityHall: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const stone = c(0xe6dfcf), trim = c(0xcfc6b2), copper = c(0x6f9c8a);
   g.ground(-w / 2, 0, w / 2, d, m(c(0xc8c2b6), P.PAVING, s), 0.05);
   g.ground(-w / 2 + 2, 2, -9, 13, GRASS(s), 0.07);
@@ -1150,7 +1151,7 @@ const cityHall: Gen = (g, b, r) => {
 
 const museum: Gen = (g, b) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, m(c(0xd0cbc0), P.PAVING, s), 0.05);
   // Stone base, a second solid volume, and a glass gallery cantilevered over the plaza.
   g.box(-27, 16, 27, 48, 0, 9, m(c(0xdcd6ca), P.OFFICE, s, 9, 7), m(c(0x8a8780), P.ROOF_FLAT, s));
@@ -1170,7 +1171,7 @@ const museum: Gen = (g, b) => {
 
 const cathedral: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const stone = c(0xc4b79c), slate = c(0x4a5058);
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.04);
   g.ground(-9, 0, 9, 16, m(c(0xbcb4a4), P.PAVING, s), 0.06);
@@ -1201,7 +1202,7 @@ const cathedral: Gen = (g, b, r) => {
 
 const stadium: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const cz = d / 2 + 4;
   g.ground(-w / 2, 0, w / 2, d, ASPH(s), 0.04);
   g.cylinder(0, cz, 58, 58, 0, 0.08, 40, GRASS(s), GRASS(s));
@@ -1231,7 +1232,7 @@ const stadium: Gen = (g, b, r) => {
 
 const obsTower: Gen = (g, b) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   const cz = d / 2;
   const conc = c(0xdcd8d0);
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.04);
@@ -1256,7 +1257,7 @@ const obsTower: Gen = (g, b) => {
 /** Police headquarters: a six-storey block with a rooftop helipad and a motor pool. */
 const policeHQ: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
   const x0 = -w / 2 + 3, x1 = w / 2 - 3, z0 = 8, z1 = Math.min(d - 12, z0 + 24);
   const h = 6 * 3.6 + 0.4;
@@ -1277,7 +1278,7 @@ const policeHQ: Gen = (g, b, r) => {
 /** Public library: a stone hall with a colonnade, broad steps and a reading garden. */
 const library: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
   g.ground(-w / 2 + 2, 0, w / 2 - 2, 9, m(c(0xc9c2b4), P.PAVING, s), 0.06);
   const x0 = -w / 2 + 3, x1 = w / 2 - 3, z0 = 11, z1 = Math.min(d - 4, z0 + 15);
@@ -1298,7 +1299,7 @@ const library: Gen = (g, b, r) => {
 /** Waste incinerator: a tall boiler hall, a slender stack and a tipping hall for garbage trucks. */
 const incinerator: Gen = (g, b) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   const metal = m(c(0x7f8a8e), P.INDUSTRIAL, s, 10, 1.6);
   g.box(-w / 2 + 3, 10, 4, d - 4, 0, 24, metal, m(c(0x6a6f72), P.ROOF_FLAT, s));
@@ -1316,7 +1317,7 @@ const incinerator: Gen = (g, b) => {
 /** Combined-cycle gas plant: turbine halls, twin exhaust stacks and gas holders. */
 const gasPlant: Gen = (g, b) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   const hall = m(c(0xc8c4ba), P.INDUSTRIAL, s, 14, 1.5);
   g.box(-w / 2 + 3, 6, 8, 26, 0, 17, hall, m(c(0x8f8c86), P.ROOF_FLAT, s));
@@ -1339,7 +1340,7 @@ const gasPlant: Gen = (g, b) => {
 /** Nuclear plant: two huge hyperbolic cooling towers, a domed containment building and the turbine hall. */
 const nuclear: Gen = (g, b) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   const prof: [number, number][] = [[24, 0], [21, 14], [16.5, 42], [16, 54], [17.6, 68]];
   for (const [x, z] of [[-w / 2 + 28, d - 28], [w / 2 - 28, d - 28]] as [number, number][]) {
@@ -1362,7 +1363,7 @@ const nuclear: Gen = (g, b) => {
 /** Water purification: settling basins, filter beds and a pump house beside the shore. */
 const purification: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, CONC(s), 0.04);
   for (let i = 0; i < 4; i++) {
     const x = -w / 2 + 9 + i * 13;
@@ -1400,7 +1401,9 @@ export function generateBuilding(input: GenInput, cx: number, cz: number, angle:
     // Research centres and buildings designed by research are composed, not hand-made.
     const spec = archForStyle(style, input.w, input.d, input.level, input.seed);
     if (spec) buildArch(g, spec, input.seed, r);
-    else g.box(-input.w / 2 + 3, 8, input.w / 2 - 3, input.d - 3, 0, 8, m(c(0xcfccc4), P.OFFICE, input.seed & 255), m(c(0x7d7a74), P.ROOF_FLAT, input.seed & 255));
-  } else (GENERATORS[input.style as keyof typeof GENERATORS] ?? house)(g, input, r);
+    else g.box(-input.w / 2 + 3, 8, input.w / 2 - 3, input.d - 3, 0, 8, m(c(0xcfccc4), P.OFFICE, input.seed & 127), m(c(0x7d7a74), P.ROOF_FLAT, input.seed & 127));
+  } else if (!(input.look && !input.look.local && generateStyled(g, input, r, input.look))) {
+    (GENERATORS[input.style as keyof typeof GENERATORS] ?? house)(g, input, r);
+  }
   return g.build(cx, cz, angle, input.d / 2, baseY);
 }

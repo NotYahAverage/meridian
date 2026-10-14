@@ -22,6 +22,7 @@ varying vec4 vState;
 varying vec3 vWPos;
 varying vec3 vWNormal;
 varying float vRelY;
+varying float vSlot;
 `;
 
 const VERT_STATE = /* glsl */ `
@@ -32,6 +33,7 @@ const VERT_STATE = /* glsl */ `
   vRelY = transformed.y - aMeta.y;
   if (prog < 0.999) transformed.y = aMeta.y + (transformed.y - aMeta.y) * max(prog, 0.03);
   vFac = aFac;
+  vSlot = aMeta.x;
   vPat = aPat;
 }
 `;
@@ -69,6 +71,7 @@ varying vec4 vState;
 varying vec3 vWPos;
 varying vec3 vWNormal;
 varying float vRelY;
+varying float vSlot;
 uniform float uTime;
 uniform float uNight;
 uniform float uHour;

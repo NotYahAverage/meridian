@@ -296,7 +296,7 @@ function plantTrees(g: GeoBuilder, spec: ArchSpec, r: Rng): void {
 
 /** Builds a composed building into the geometry builder (lot space). */
 export function buildArch(g: GeoBuilder, spec: ArchSpec, seed: number, r: Rng): void {
-  const s = seed & 255;
+  const s = seed & 127;
   const { w, d } = spec;
   const ground = spec.ground === 'grass' ? mat(0x6f8a45, P.GRASS, s) : spec.ground === 'paving' ? mat(0xb9b5ad, P.PAVING, s) : mat(0xa8a49c, P.CONCRETE, s);
   g.ground(-w / 2, 0, w / 2, d, ground, 0.04);

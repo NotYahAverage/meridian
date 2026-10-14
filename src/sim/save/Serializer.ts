@@ -1,4 +1,5 @@
 import { decodeFloat32, decodeInt32, decodeUint8, encodeTyped, rleDecode, rleEncode } from '../../core/encoding';
+import type { StyleSave } from '../style/CityStyle';
 import type { NewsSave } from '../news/News';
 import { City, type StatSample } from '../City';
 import { projectEconomy, refreshStats } from '../CitySim';
@@ -43,6 +44,7 @@ type BuildingRecord = [
   segId: number, segS: number, side: number, hhCap: number, households: number, residents: number,
   jobs: number, workers: number, garbage: number, happiness: number, landValue: number, problems: number,
   unhappyDays: number, fireHours: number, rezoneDays: number, district: number, efficiency: number, stock: number,
+  movement?: number,
 ];
 
 export interface SaveData {
@@ -118,6 +120,8 @@ export interface SaveData {
   news?: NewsSave;
   /** This civilization's research (absent in older saves). */
   research?: ResearchSave;
+  /** The city's architectural movements (older saves have only the local vernacular). */
+  style?: StyleSave;
 }
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -157,7 +161,8 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
       b.segId, r3(b.segS), b.side, b.hhCap, b.households, b.residents,
       b.jobs, b.workers, r3(b.garbage), r3(b.happiness), r3(b.landValue), b.problems,
       b.unhappyDays, b.fireHours, b.rezoneDays, b.district, r3(b.efficiency), r3(b.stock),
-    ]);
+      ...(b.movement ? [b.movement] : []),
+    ] as BuildingRecord);
   }
   yield;
   const pop = city.population;
@@ -242,6 +247,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
     scenario: city.scenario ? { ...city.scenario } : null,
     news: city.news.serialize(),
     research: city.research.serialize(),
+    style: city.style.serialize(),
   };
 }
 
@@ -283,6 +289,8 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
   const city = new City({ name: c.name, seed: c.seed, preset: c.preset, unlimitedMoney: c.unlimited, empty: true, flatTerrain: opts.flatTerrain, terrainBase: opts.terrainBase, civSeed });
   // Research first: generated building types must exist before buildings of those types are loaded.
   city.research.load(data.research);
+  // Movements before buildings, which refer to them.
+  city.style.load(data.style, city.research.civSeed);
   city.clock.tick = c.tick;
   city.peakPopulation = c.peak;
   city.milestoneIndex = c.milestone;
@@ -321,7 +329,7 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
       seed: r[11], floors: r[12], level: r[13], state: r[14] as BuildingState, progress: r[15], buildDays: r[16], age: r[17],
       segId: r[18], segS: r[19], side: r[20], hhCap: r[21], households: r[22], residents: r[23],
       jobs: r[24], workers: r[25], garbage: r[26], happiness: r[27], landValue: r[28], problems: r[29],
-      unhappyDays: r[30], fireHours: r[31], rezoneDays: r[32], district: r[33], efficiency: r[34], stock: r[35],
+      unhappyDays: r[30], fireHours: r[31], rezoneDays: r[32], district: r[33], efficiency: r[34], stock: r[35], movement: r[36] ?? 0,
     });
     if (b.segId && !city.roads.segments.has(b.segId)) b.segId = 0;
     city.buildings.add(b);

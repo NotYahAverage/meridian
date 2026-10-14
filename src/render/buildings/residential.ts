@@ -17,7 +17,7 @@ const DOORS = [0x6e2a26, 0x23384f, 0x2f4a3a, 0x1e1f21, 0x7a5a3a, 0x5a2f40, 0xe9e
 /** A detached house: plinth, one or two storeys, pitched roof with fascias, porch, chimney, garage. */
 export const house: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
   const scheme = r.next();
   const brick = b.level >= 2 && scheme > 0.55 && scheme < 0.82;
@@ -133,7 +133,7 @@ export const house: Gen = (g, b, r) => {
  */
 export const townhouse: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
   const n = Math.max(2, Math.floor((w - 1) / 6.2));
   const uw = (w - 1) / n;
@@ -216,7 +216,7 @@ type Family = 'brick' | 'render' | 'panel' | 'mixed';
  */
 function apartmentBlock(g: Parameters<Gen>[0], b: Parameters<Gen>[1], r: Parameters<Gen>[2], tall: boolean): void {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, GRASS(s), 0.03);
   const setback = r.range(3.5, 6);
   const rearPark = d > 30 ? r.range(8, 12) : 0;
@@ -336,7 +336,7 @@ export const midrise: Gen = (g, b, r) => apartmentBlock(g, b, r, true);
  */
 export const tower: Gen = (g, b, r) => {
   const { w, d } = b;
-  const s = b.seed & 255;
+  const s = b.seed & 127;
   g.ground(-w / 2, 0, w / 2, d, PAVE(s), 0.04);
   const fh = 3.1;
   const podiumH = 2 * 4.2;
