@@ -12,10 +12,15 @@ import { RoadGeo, buildPreview } from './roads/RoadMeshBuilder';
 import { createRoadMaterial } from './roads/RoadMaterial';
 import { toBufferGeometry } from './roads/RoadRenderer';
 import { globalUniforms } from './shared';
+import type { Movement } from '../sim/style/Movements';
+
+/** Size of a large preview (the Design Studio). */
+export const PREVIEW_W = 560;
+export const PREVIEW_H = 380;
 
 /** What a construction card shows: a building, a stretch of road, or a stand of trees. */
 export type ThumbSpec =
-  | { kind: 'building'; style: string; w: number; d: number; floors: number; level: number; seed?: number; plane?: boolean }
+  | { kind: 'building'; style: string; w: number; d: number; floors: number; level: number; seed?: number; plane?: boolean; look?: Movement; yaw?: number; big?: boolean }
   | { kind: 'road'; type: RoadTypeId; with?: 'cars' | 'stop' | 'bus' }
   | { kind: 'trees' };
 
@@ -107,8 +112,9 @@ export class Thumbnails {
   pump(budgetMs = 6): void {
     if (!this.queue.size || !this.ctx) return;
     const canvas = this.renderer.domElement;
-    const pw = THUMB_W * SS, ph = THUMB_H * SS;
-    if (canvas.width < pw || canvas.height < ph) return;
+    if (canvas.width < PREVIEW_W * SS || canvas.height < PREVIEW_H * SS) {
+      if (canvas.width < THUMB_W * SS || canvas.height < THUMB_H * SS) return;
+    }
     const t0 = performance.now();
     const r = this.renderer;
     const pr = r.getPixelRatio();
@@ -132,17 +138,26 @@ export class Thumbnails {
     this.scene.environmentIntensity = 0.11;
     try {
       r.setRenderTarget(null);
-      r.setViewport(0, 0, pw / pr, ph / pr);
-      r.setScissor(0, 0, pw / pr, ph / pr);
       r.setScissorTest(true);
       r.setClearColor(0x000000, 0);
       for (const [key, job] of this.queue) {
+        const big = job.spec.kind === 'building' && !!job.spec.big;
+        const ow = big ? PREVIEW_W : THUMB_W, oh = big ? PREVIEW_H : THUMB_H;
+        const pw = ow * SS, ph = oh * SS;
+        if (canvas.width < pw || canvas.height < ph) continue;
         this.queue.delete(key);
+        r.setViewport(0, 0, pw / pr, ph / pr);
+        r.setScissor(0, 0, pw / pr, ph / pr);
+        this.camera.aspect = ow / oh;
         this.build(job.spec);
         r.clear();
         r.render(this.scene, this.camera);
-        this.ctx.clearRect(0, 0, THUMB_W, THUMB_H);
-        this.ctx.drawImage(canvas, 0, canvas.height - ph, pw, ph, 0, 0, THUMB_W, THUMB_H);
+        if (this.out.width !== ow || this.out.height !== oh) {
+          this.out.width = ow;
+          this.out.height = oh;
+        }
+        this.ctx.clearRect(0, 0, ow, oh);
+        this.ctx.drawImage(canvas, 0, canvas.height - ph, pw, ph, 0, 0, ow, oh);
         this.clearContent();
         const url = this.out.toDataURL('image/png');
         this.cache.set(key, url);
@@ -216,7 +231,7 @@ export class Thumbnails {
     if (spec.kind === 'building') {
       w = spec.w;
       d = spec.d;
-      const geo = generateBuilding({ style: spec.style as never, w, d, floors: spec.floors, level: spec.level, seed: spec.seed ?? 4242 }, 0, 0, 0, 0);
+      const geo = generateBuilding({ style: spec.style as never, w, d, floors: spec.floors, level: spec.level, seed: spec.seed ?? 4242, look: spec.look }, 0, 0, 0, 0);
       const mesh = new THREE.Mesh(mergeBuilt([{ geo, slot: -1, baseY: 0 }]), this.buildingMat);
       mesh.castShadow = mesh.receiveShadow = true;
       this.content.add(mesh);
@@ -258,13 +273,13 @@ export class Thumbnails {
     this.ground.scale.set(w + m * 2, 1.4, d + m * 2);
     this.ground.position.set((box.min.x + box.max.x) / 2, -0.72, (box.min.z + box.max.z) / 2);
     box.union(new THREE.Box3().setFromCenterAndSize(this.ground.position.clone().setY(-0.7), new THREE.Vector3(w + m * 2, 1.4, d + m * 2)));
-    this.frame(box);
+    this.frame(box, spec.kind === 'building' ? spec.yaw : undefined);
   }
 
   /** Points the camera from the front-left and pulls back until the whole box fills the frame. */
-  private frame(box: THREE.Box3): void {
+  private frame(box: THREE.Box3, yawIn?: number): void {
     const cam = this.camera;
-    const yaw = -0.72, pitch = 0.6;
+    const yaw = yawIn ?? -0.72, pitch = yawIn === undefined ? 0.6 : 0.42;
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const center = box.getCenter(new THREE.Vector3());
     const tanV = Math.tan(THREE.MathUtils.degToRad(cam.fov / 2));

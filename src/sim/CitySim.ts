@@ -413,6 +413,7 @@ export function streetOf(city: City, b: Building): string {
 function daily(city: City): void {
   city.achievements.check();
   city.research.daily();
+  city.design.daily();
   city.terrain.regrow(9);
   city.nature.grow(city.clock.day);
   dailyBuildings(city);

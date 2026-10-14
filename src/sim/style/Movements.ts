@@ -42,7 +42,7 @@ export type RoofKind = 'gable' | 'hip' | 'mansard' | 'flat' | 'green' | 'butterf
 export type Massing = 'block' | 'terraced' | 'courtyard' | 'stacked' | 'slab';
 export type FeatureId =
   | 'greenRoof' | 'roofGarden' | 'skyGarden' | 'terraces' | 'planters' | 'briseSoleil' | 'pilotis' | 'arcade'
-  | 'monumental' | 'solarSkin' | 'windCrown' | 'ornament' | 'cantilever' | 'loggias' | 'courtyard';
+  | 'monumental' | 'solarSkin' | 'windCrown' | 'ornament' | 'cantilever' | 'loggias' | 'courtyard' | 'balconies';
 
 export interface FeatureDef {
   id: FeatureId;
@@ -69,6 +69,7 @@ export const FEATURES: FeatureDef[] = [
   { id: 'cantilever', name: 'Cantilevers', look: 'Upper floors reaching out over the street', lean: { heavy: -0.5, hand: -0.4, ornate: -0.3 } },
   { id: 'loggias', name: 'Loggias', look: 'Deep recessed balconies framed in solid walls', lean: { heavy: 0.6, ornate: 0.2, green: 0.1 } },
   { id: 'courtyard', name: 'Courtyards', look: 'Blocks wrapped around shared gardens', lean: { hand: 0.4, green: 0.4, dense: -0.2 } },
+  { id: 'balconies', name: 'Balconies', look: 'Plain balconies on the street side', lean: {} },
 ];
 
 export const FEATURE_BY_ID = new Map(FEATURES.map((f) => [f.id, f]));
@@ -110,11 +111,13 @@ export interface Movement {
   features: FeatureId[];
   accent: number;
   glass: number;
+  /** A designed building: only the features listed are drawn (no defaults from the axes). */
+  explicit?: boolean;
 }
 
 // ── Colour ──────────────────────────────────────────────────────────────────
 
-function hsl(h: number, s: number, l: number): number {
+export function hsl(h: number, s: number, l: number): number {
   h = ((h % 1) + 1) % 1;
   const a = s * Math.min(l, 1 - l);
   const f = (n: number) => {
@@ -126,7 +129,7 @@ function hsl(h: number, s: number, l: number): number {
 }
 
 /** A small family of wall colours for a material, tinted by the movement's hue. */
-function wallPalette(wall: WallKind, hue: number, ax: Axes, r: Rng): number[] {
+export function wallPalette(wall: WallKind, hue: number, ax: Axes, r: Rng): number[] {
   const n = 4;
   const out: number[] = [];
   for (let i = 0; i < n; i++) {
@@ -229,7 +232,7 @@ function massingFor(a: Axes, r: Rng): Massing {
 }
 
 function featuresFor(a: Axes, massing: Massing, roof: RoofKind, r: Rng): FeatureId[] {
-  const scored = FEATURES.map((f) => {
+  const scored = FEATURES.filter((f) => Object.keys(f.lean).length).map((f) => {
     let dot = 0, norm = 0;
     for (const [k, v] of Object.entries(f.lean) as [AxisId, number][]) {
       dot += v * a[k];

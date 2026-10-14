@@ -673,7 +673,7 @@ function block(g: GeoBuilder, b: GenInput, r: Rng, k: Kit, use: BlockUse): void 
     if (k.has('briseSoleil') && !small) {
       finGrid(g, F, v.y0, v.y1, k, glassy ? 0.5 : 0.7);
       if (v.y1 - v.y0 > 10) finGrid(g, face(1, v.x0, v.z0, v.x1, v.z1), v.y0, v.y1, k, 0.6);
-    } else if (use !== 'office' && (k.has('planters') || k.has('loggias') || (use === 'homes' && a.green + a.heavy > -0.4))) {
+    } else if (use !== 'office' && (k.has('planters') || k.has('loggias') || k.has('balconies') || (use === 'homes' && !k.look.explicit && a.green + a.heavy > -0.4))) {
       // Balconies: planted for green movements, framed loggias for heavy ones, plain otherwise.
       const planted = k.has('planters');
       const pattern = planted ? 'all' : r.pick(['pairs', 'alternate']);
@@ -808,7 +808,7 @@ function tower(g: GeoBuilder, b: GenInput, r: Rng, k: Kit, use: TowerUse): void 
         for (let yy = sg.y0 + fh; yy < sg.y1 - 0.5; yy += fh) {
           for (let j = 0; j < segsOn; j++) if ((j + Math.round(yy / fh)) % 2 === 0) faceBalcony(g, F, j * sw + 0.4, (j + 1) * sw - 0.4, yy + 0.02, 1.2, k, r, true);
         }
-      } else if (side === 0 && use !== 'office' && (k.has('loggias') || a.hand + a.green > -0.3)) {
+      } else if (side === 0 && use !== 'office' && (k.has('loggias') || k.has('balconies') || (!k.look.explicit && a.hand + a.green > -0.3))) {
         const segsOn = Math.max(1, Math.round(F.len / 7));
         const sw = F.len / segsOn;
         for (let yy = sg.y0 + fh; yy < sg.y1 - 0.5; yy += fh) for (let j = 0; j < segsOn; j++) faceBalcony(g, F, j * sw + 0.5, (j + 1) * sw - 0.5, yy + 0.02, 1.3, k, r, false, k.has('loggias'));

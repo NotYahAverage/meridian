@@ -32,6 +32,7 @@ import { type MapPreset, type Rect, Terrain } from './world/Terrain';
 import { LAND_TILE, Land } from './world/Land';
 import { Research } from './research/Research';
 import { CityStyle } from './style/CityStyle';
+import { DesignLab } from './design/DesignLab';
 import { conformTerrain } from './world/TerrainConform';
 import { Disasters } from './world/Disasters';
 import { Achievements } from './progress/Achievements';
@@ -52,6 +53,7 @@ export type CityEvents = {
   achievement: { id: string; title: string };
   scenario: { id: string; result: 'won' | 'lost' };
   news: Edition;
+  design: { type: 'idea'; id: string };
   research: { type: 'discovery' | 'decision' | 'failure' | 'milestone' | 'retrofit'; centerId: number; discoveryId?: string; recordId?: string; outcome?: string; milestoneId?: string };
 };
 
@@ -100,6 +102,8 @@ export class City {
   readonly research: Research;
   /** The city's architecture: its movements and which one each building follows. */
   readonly style: CityStyle;
+  /** The city's architects: ideas they know and designs in the sketchbook. */
+  readonly design: DesignLab;
   /** Traffic demand being added up over several ticks (see tickCity). */
   demandJob: Generator<void, TripDemand[], void> | null = null;
   /** Periodic coverage and land-value refreshes in progress (a slice per tick). */
@@ -177,6 +181,7 @@ export class City {
     this.rng = new Rng(opts.seed ^ 0xc17e);
     this.research = new Research(this, (opts.civSeed ?? Math.floor(Math.random() * 0xffffffff)) >>> 0);
     this.style = new CityStyle(this, this.research.civSeed);
+    this.design = new DesignLab(this);
     this.terrain = new Terrain(opts.seed, opts.preset, { flat: opts.flatTerrain, base: opts.terrainBase });
     this.terrain.landCheck = (x, z) => this.land.ownsPoint(x, z);
     this.nature = new Nature(this.terrain, opts.seed);

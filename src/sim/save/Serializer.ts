@@ -1,5 +1,6 @@
 import { decodeFloat32, decodeInt32, decodeUint8, encodeTyped, rleDecode, rleEncode } from '../../core/encoding';
 import type { StyleSave } from '../style/CityStyle';
+import type { DesignSave } from '../design/DesignLab';
 import type { NewsSave } from '../news/News';
 import { City, type StatSample } from '../City';
 import { projectEconomy, refreshStats } from '../CitySim';
@@ -122,6 +123,8 @@ export interface SaveData {
   research?: ResearchSave;
   /** The city's architectural movements (older saves have only the local vernacular). */
   style?: StyleSave;
+  /** Ideas learned and designs in the sketchbook. */
+  design?: DesignSave;
 }
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -248,6 +251,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
     news: city.news.serialize(),
     research: city.research.serialize(),
     style: city.style.serialize(),
+    design: city.design.serialize(),
   };
 }
 
@@ -406,6 +410,8 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
     if (b.state === BuildingState.Active && b.hhCap > 0 && b.households < b.hhCap) city.vacantHomes.push(b.id);
     if (b.state === BuildingState.Active && b.jobs > b.workers) city.openJobs.push(b.id);
   }
+  // Last: an older city learns what its history already shows.
+  city.design.load(data.design);
   return city;
 }
 
