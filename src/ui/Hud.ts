@@ -47,7 +47,7 @@ function zoneThumb(z: Zone): Thumb | undefined {
   return [`zone:${z}`, { kind: 'building', style: a.style, w: a.frontage[1], d: a.depth[1], floors: pick[1], level: a.levels[1], seed: 9100 + z }];
 }
 
-const serviceThumb = (st: ServiceType): Thumb => [`svc:${st.id}`, { kind: 'building', style: st.style, w: st.w, d: st.d, floors: 2, level: 1, seed: 4242, plane: st.id === 'airport' }];
+const serviceThumb = (st: ServiceType): Thumb => [`svc:${st.id}`, { kind: 'building', style: st.style, w: st.w, d: st.d, floors: st.floors ?? 2, level: st.look ? 3 : 1, seed: 4242, plane: st.id === 'airport', look: st.look }];
 const roadThumb = (id: RoadTypeId): Thumb => [`road:${id}`, { kind: 'road', type: id, with: 'cars' }];
 const BUS_STOP_THUMB: Thumb = ['transit:stop', { kind: 'road', type: 'street', with: 'stop' }];
 const BUS_LINE_THUMB: Thumb = ['transit:bus', { kind: 'road', type: 'street', with: 'bus' }];
@@ -712,7 +712,7 @@ export class Toolbar {
       const cat = this.open as ServiceCategory;
       this.tray.appendChild(header(cat === 'services' ? 'City Services' : cat === 'utilities' ? 'Utilities' : 'Parks & Landmarks', ...(cat === 'parks' || cat === 'services' ? this.serviceSwitch() : [])));
       // Buildings your researchers designed join the catalogue (this city only).
-      const all = [...SERVICE_TYPES, ...city.research.serviceTypes()];
+      const all = [...SERVICE_TYPES, ...city.research.serviceTypes(), ...city.design.serviceTypes()];
       for (const st of all.filter((s) => s.category === cat || (cat === 'parks' && s.category === 'landmarks'))) {
         const built = st.unique && [...city.buildings.all.values()].some((b) => b.typeId === st.id);
         const locked = built ? 'Already built' : peak >= st.unlockPopulation ? undefined : `Unlocks at ${formatInt(st.unlockPopulation)}`;

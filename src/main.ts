@@ -1,3 +1,5 @@
+import { SERVICE_BY_ID } from './sim/services/ServiceTypes';
+import { IDEAS } from './sim/design/Ideas';
 import './ui/styles.css';
 import { Game } from './game/Game';
 import * as CityCommands from './sim/CityCommands';
@@ -34,7 +36,7 @@ async function main(): Promise<void> {
   // Automation/debug hook (used by the Playwright end-to-end tests).
   const params = new URLSearchParams(location.search);
   if (import.meta.env.DEV || params.has('e2e')) {
-    (window as unknown as Record<string, unknown>).__meridian = { game, CityCommands, tickCity, fastForward, serializeCity, storage: platform.storage, Terraform, sim: { newBuilding, lotFrame, ARCHETYPES, capacityFor } };
+    (window as unknown as Record<string, unknown>).__meridian = { game, CityCommands, tickCity, fastForward, serializeCity, storage: platform.storage, Terraform, sim: { newBuilding, lotFrame, ARCHETYPES, capacityFor, SERVICE_BY_ID, IDEAS } };
   }
   await game.boot();
 }

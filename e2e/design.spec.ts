@@ -26,7 +26,7 @@ test('design studio: type a building, adjust it, preview it and save it', async 
   await shot(page, 'design-locked');
 
   // Teach everything, as a long-lived city would have learned it.
-  await game(page, `const D = await import('/src/sim/design/Ideas.ts'); for (const i of D.IDEAS) g.city.design.learn(i.id);`);
+  await game(page, `for (const i of window.__meridian.sim.IDEAS) g.city.design.learn(i.id);`);
   await text.fill('');
   await text.pressSequentially('cheap concrete flats, really tall, with trees on the balconies and shops at the bottom', { delay: 12 });
   for (const label of ['Homes over shops', 'Skyscraper', 'Raw concrete', 'Vertical forest', 'Affordable']) await expect(page.locator('.ds-chip', { hasText: label }).first()).toBeVisible();

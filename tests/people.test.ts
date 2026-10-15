@@ -16,7 +16,7 @@ const concept = (text: string) => compileConcept({ text, added: [], removed: [] 
 const score = (text: string, id: string) => predictGroups(concept(text)).find((p) => p.id === id)!.score;
 
 /** A small town with people living in it. */
-function town(preset: 'lakes' | 'river' = 'lakes', civSeed?: number): City {
+function town(preset: 'lakes' | 'river' = 'lakes', civSeed = 4242): City {
   const city = new City({ name: 'People', seed: 1234, preset, flatTerrain: 10, unlimitedMoney: true, civSeed });
   servicedGrid(city);
   for (const i of IDEAS) city.design.learn(i.id);

@@ -1,3 +1,4 @@
+import { registerLandmarks } from '../design/DesignLab';
 import type { PeopleSave } from '../design/People';
 import { decodeFloat32, decodeInt32, decodeUint8, encodeTyped, rleDecode, rleEncode } from '../../core/encoding';
 import type { StyleSave } from '../style/CityStyle';
@@ -301,6 +302,8 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
   city.research.load(data.research);
   // Movements before buildings, which refer to them.
   city.style.load(data.style, city.research.civSeed);
+  // Signature landmarks are building types of this city: known before its buildings load.
+  registerLandmarks(city, data.design);
   city.clock.tick = c.tick;
   city.peakPopulation = c.peak;
   city.milestoneIndex = c.milestone;

@@ -113,7 +113,7 @@ test('research centre to a discovered building, through save and load', async ({
   await game(page, `g.setTool('inspect'); window.__meridian.fastForward(g.city, 24 * 14); g.city.recomputeUtilities();`);
   const working = await game<{ state: number; kind: string; power: number; storage: number }>(page, `
     const b = [...g.city.buildings.all.values()].find((x) => x.typeId === '${design}');
-    const st = window.__meridian.game.city && (await import('/src/sim/services/ServiceTypes.ts')).SERVICE_BY_ID.get(b.typeId);
+    const st = window.__meridian.sim.SERVICE_BY_ID.get(b.typeId);
     return { state: b.state, kind: st.kind, power: g.city.utilities.totals.power.production, storage: g.city.utilities.storage.capacity };`);
   console.log('working', JSON.stringify(working));
   expect(working.state).toBe(1);

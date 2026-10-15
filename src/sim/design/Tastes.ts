@@ -2,6 +2,7 @@ import { clamp } from '../../core/math';
 import { hash01 } from '../../core/rng';
 import type { Axes, FeatureId, Massing, Movement, RoofKind, WallKind } from '../style/Movements';
 import type { Concept } from './Concept';
+import { COMBOS } from './Combos';
 import { type Factor, type Site, assess } from './Trials';
 
 /**
@@ -105,6 +106,11 @@ export const GROUPS: GroupDef[] = [
     slogans: ['Not on our street', 'Protect our light', 'Ask the neighbours first', 'Keep it human-sized'],
   },
 ];
+// Fans of a combo cheer it in a prototype.
+for (const c of COMBOS) for (const id of c.fans) {
+  const g = GROUPS.find((x) => x.id === id);
+  if (g) g.keys[`combo-${c.id}`] = 0.5;
+}
 export const GROUP_BY_ID = new Map(GROUPS.map((g) => [g.id, g]));
 export const GROUP_INDEX = new Map(GROUPS.map((g, i) => [g.id, i]));
 

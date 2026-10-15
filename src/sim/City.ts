@@ -56,7 +56,7 @@ export type CityEvents = {
   achievement: { id: string; title: string };
   scenario: { id: string; result: 'won' | 'lost' };
   news: Edition;
-  design: { type: 'idea'; id: string } | { type: 'reaction'; trial: number; reaction: Reaction } | { type: 'trial'; trial: number; what: 'placed' | 'opened' | 'month' | 'verdict' | 'gone' | 'adopted' | 'scrapped' };
+  design: { type: 'idea'; id: string } | { type: 'combo'; id: string } | { type: 'movement'; id: number } | { type: 'reaction'; trial: number; reaction: Reaction } | { type: 'trial'; trial: number; what: 'placed' | 'opened' | 'month' | 'verdict' | 'gone' | 'adopted' | 'scrapped' };
   people:
     | { type: 'stage'; group: GroupId; stage: Stage }
     | { type: 'petition'; group: GroupId; petition: number }
@@ -401,7 +401,11 @@ export class City {
   addBuilding(b: Building): Building {
     this.buildings.add(b);
     // New homes, shops and offices follow the city's current blend of movements.
-    if (b.kind === 'zoned' && !b.movement) b.movement = this.style.pick(b);
+    if (b.kind === 'zoned' && !b.movement) {
+      b.movement = this.style.pick(b);
+      // Styles built on a combo carry its traits (more homes, faster building…).
+      this.design?.onNewBuilding(b);
+    }
     const o = lotOBB(b);
     this.zones.setOccupant(o, b.id);
     this.nature.clearOBB(o, 1.5);

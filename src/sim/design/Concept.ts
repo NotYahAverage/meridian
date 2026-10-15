@@ -3,6 +3,7 @@ import { hashStr } from '../research/Generate';
 import { type Axes, type FeatureId, type Massing, type Movement, type RoofKind, type WallKind, clampAxes, hsl, makeMovement, wallPalette } from '../style/Movements';
 import { CATEGORY_LABEL, type Height, IDEAS, IDEA_BY_ID, type IdeaCategory, type Use } from './Ideas';
 import { type Mention, type Unknown, interpret, leanOf } from './Interpret';
+import { combosOf } from './Combos';
 
 /**
  * Turns what the player asked for (typed words plus cards they added or
@@ -69,6 +70,8 @@ export interface Concept {
   unknown: Unknown[];
   /** How bold it is, 1–5: sets how long a prototype is tested (months). */
   ambition: number;
+  /** Recipes it achieves (combo ids). Missing in designs saved before combos. */
+  combos?: string[];
 }
 
 const LOT: Record<BuildKind, [number, number]> = {
@@ -333,7 +336,9 @@ export function compileConcept(input: DesignInput, ctx: DesignContext): Concept 
   const unusual = features.length + (massing !== 'block' ? 1 : 0) + (look.wall !== ctx.base.wall ? 1 : 0);
   const ambition = Math.max(1, Math.min(5, Math.round((height === 'house' || height === 'row' ? 0.6 : height === 'low' ? 1.2 : height === 'mid' ? 2 : height === 'tall' ? 3 : 3.8) + unusual * 0.45)));
   chips.sort((a, b) => ORDER.indexOf(a.category) - ORDER.indexOf(b.category));
-  return { name, description, kind, use, height, floors, level, w: LOT[kind][0], d: LOT[kind][1], look, chips, locked, blocked: [...blocked], notes, unknown: interp.unknown, ambition };
+  const concept: Concept = { name, description, kind, use, height, floors, level, w: LOT[kind][0], d: LOT[kind][1], look, chips, locked, blocked: [...blocked], notes, unknown: interp.unknown, ambition };
+  concept.combos = combosOf(concept);
+  return concept;
 }
 
 const ROOF_IDEA = new Map(IDEAS.filter((i) => i.roof).map((i) => [i.roof!, i.id]));

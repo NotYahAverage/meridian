@@ -28,7 +28,7 @@ test('taste groups: who likes what, petitions, protests and verdicts by group', 
     city.peakPopulation = 0;
     C.fillZone(city, s.x + 300, s.z + 30, 1);
     window.__meridian.fastForward(city, 24 * 60);
-    for (const i of (await import('/src/sim/design/Ideas.ts')).IDEAS) city.design.learn(i.id);
+    for (const i of window.__meridian.sim.IDEAS) city.design.learn(i.id);
     window.__s = s;`);
   expect(await game<number>(page, `return g.city.population.residents;`)).toBeGreaterThan(20);
 

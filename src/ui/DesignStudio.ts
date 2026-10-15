@@ -7,6 +7,9 @@ import { rebuildPrototype } from '../sim/CityCommands';
 import { Clock } from '../sim/Clock';
 import { GROUPS, GROUP_BY_ID, type GroupId, approvalFromScore, likeOf, predictGroups, tastesOf } from '../sim/design/Tastes';
 import { STAGE_LABEL, type Petition } from '../sim/design/People';
+import { COMBOS, COMBO_BY_ID } from '../sim/design/Combos';
+import { type Born, LANDMARK_FORMS, type LandmarkForm } from '../sim/design/DesignLab';
+import type { PlaceTool } from '../tools/PlaceTool';
 import type { PrototypeTool } from '../tools/PrototypeTool';
 import { CATEGORY_LABEL, IDEAS, IDEA_BY_ID, type IdeaCategory } from '../sim/design/Ideas';
 import { hashStr } from '../sim/research/Generate';
@@ -270,6 +273,12 @@ export class DesignStudio extends Modal {
     // Notes and words it didn't know.
     const notes = this.els.notes!;
     notes.innerHTML = '';
+    for (const id of c.combos ?? []) {
+      const def = COMBO_BY_ID.get(id)!;
+      const isNew = !city.design.found.has(id);
+      notes.append(h('div', { class: `ds-combo${isNew ? ' new' : ''}`, 'data-combo': id, 'data-tip': `${def.blurb} Once a design with it is adopted: ${def.effect.charAt(0).toLowerCase()}${def.effect.slice(1)}` },
+        icon(def.icon, 14), h('b', null, def.name), h('span', null, isNew ? 'New combo! Save or build it to discover it.' : def.effect)));
+    }
     for (const n of c.notes) notes.append(h('div', { class: 'ds-note' }, icon('info', 12), n));
     for (const id of c.blocked) notes.append(h('div', { class: 'ds-note' }, icon('close', 12), `No ${IDEA_BY_ID.get(id)?.name.toLowerCase() ?? id}.`));
     for (const u of c.unknown) {
@@ -557,6 +566,7 @@ export class DesignStudio extends Modal {
         h('b', null, t.name),
         h('span', { class: 'rs-muted' }, city.design.stageOf(t)),
         h('span', { class: 'rs-muted' }, `${c.description} Built for ${formatMoney(t.cost)}.`),
+        c.combos?.length ? h('div', { class: 'ds-combos' }, ...c.combos.map((id) => h('span', { class: 'ds-combo-chip' }, icon(COMBO_BY_ID.get(id)!.icon, 11), COMBO_BY_ID.get(id)!.name))) : null,
       ),
       h('div', { class: 'tr-acts' },
         b ? h('button', { class: 'btn small', onclick: () => { this.close(); this.game.flyTo(b.cx, b.cz, 220); this.game.select({ kind: 'building', id: b.id }); } }, icon('compass', 13), 'Show') : null,
@@ -668,6 +678,14 @@ export class DesignStudio extends Modal {
     const counts = d.styleCounts();
     const blend = city.style.blend();
     const share = (id: number) => blend.find((e) => e.movement.id === id)?.share ?? 0;
+    const known = d.identity();
+    if (known) b.append(h('div', { class: 'st-identity' }, icon('milestone', 18), h('span', null, `${city.name} is known for `, h('b', null, known.name), '.')));
+    if (d.births.length) {
+      b.append(h('div', { class: 'ds-section' }, 'Movements'));
+      b.append(h('div', { class: 'st-list' }, ...[...d.births].reverse().map((born) => this.movementCard(born, counts))));
+    } else if (d.styles.length) {
+      b.append(h('div', { class: 'hint small' }, 'When the styles you adopt take hold (about a fifth of the city’s buildings) and point the same way, a movement is born: an architecture your city is known for, with a signature landmark of its own.'));
+    }
     const list = h('div', { class: 'st-list' });
     const local = city.style.movements[0];
     list.append(h('div', { class: 'st-card local' },
@@ -703,6 +721,10 @@ export class DesignStudio extends Modal {
             this.stat('New building elsewhere', `${Math.round(globalShare(st, day) * 100)}%`),
             this.stat('Residents’ mood', `${mood >= 0 ? '+' : ''}${mood.toFixed(1)}`, mood >= 0 ? 'happier living in it' : 'less happy living in it'),
           ),
+          ...(st.combos ?? []).map((id) => {
+            const def = COMBO_BY_ID.get(id)!;
+            return h('div', { class: 'ds-combo', 'data-tip': def.blurb }, icon(def.icon, 14), h('b', null, def.name), h('span', null, def.effect));
+          }),
           h('div', { class: 'st-likes' }, ...GROUPS.map((g) => {
             const m = city.style.get(st.id);
             const like = m ? likeOf(g, m) : 0;
@@ -804,6 +826,73 @@ export class DesignStudio extends Modal {
     );
   }
 
+  /** A movement: what it stands for, what it grew from, and its signature landmark. */
+  private movementCard(born: Born, counts: Map<number, number>): HTMLElement {
+    const city = this.game.city!;
+    const d = city.design;
+    const n = born.styles.reduce((a, id) => a + (counts.get(id) ?? 0), 0);
+    const m = city.style.get(born.id);
+    const lm = born.landmark;
+    const building = lm ? [...city.buildings.all.values()].find((x) => x.typeId === lm.serviceId) : undefined;
+    let landmark: HTMLElement;
+    if (building) {
+      landmark = h('div', { class: 'mv-landmark' }, icon('landmark', 15), h('span', null, h('b', null, lm!.name), lm!.opened !== undefined ? ' stands as its signature building.' : ` is being built (${Math.round(building.progress * 100)}%).`),
+        h('button', { class: 'btn small', onclick: () => { this.close(); this.game.flyTo(building.cx, building.cz, 320); this.game.select({ kind: 'building', id: building.id }); } }, icon('compass', 13), 'Show'));
+    } else if (lm) {
+      landmark = h('div', { class: 'mv-landmark' }, icon('landmark', 15), h('span', null, h('b', null, lm.name), ' is designed and waiting for a site.'),
+        h('button', { class: 'btn small primary', onclick: () => this.placeLandmark(lm.serviceId, lm.name) }, icon('build', 13), 'Choose a site'));
+    } else {
+      landmark = h('div', { class: 'mv-forms' }, h('div', { class: 'ds-section' }, 'Commission its signature landmark'),
+        h('div', { class: 'mv-form-row' }, ...(Object.keys(LANDMARK_FORMS) as LandmarkForm[]).map((f) => {
+          const def = LANDMARK_FORMS[f];
+          const img = h('img', { alt: '', draggable: 'false' }) as HTMLImageElement;
+          if (m) {
+            const ready = this.game.thumbs.request(`sig:${born.id}:${f}`, { kind: 'building', style: def.style, w: def.w, d: def.d, floors: def.floors, level: 3, seed: 4242, look: m }, (u) => (img.src = u));
+            if (ready) img.src = ready;
+          }
+          return h('button', { class: 'mv-form', 'data-form': f, onclick: () => this.commission(born.id, f) },
+            img, h('b', null, `The ${born.short} ${def.noun}`), h('span', null, def.blurb), h('span', { class: 'rs-muted' }, `${formatMoney(def.cost)} · ${formatMoney(def.tourism)}/mo in tourism`));
+        })));
+    }
+    return h('div', { class: 'st-card movement', 'data-born': String(born.id) },
+      h('div', { class: 'st-swatch mv-swatch' }, icon('milestone', 26)),
+      h('div', { class: 'st-main' },
+        h('b', null, born.name),
+        h('span', { class: 'mv-kind' }, `${born.kind}, born ${Clock.monthLabel(Math.floor(born.day / 30))}`),
+        h('span', { class: 'rs-muted mv-manifesto' }, `“${born.manifesto}”`),
+        h('div', { class: 'st-stats' },
+          this.stat('Buildings', `${n}`),
+          this.stat('Grew from', born.styles.map((id) => d.style(id)?.name ?? '').filter(Boolean).join(', ') || '—'),
+        ),
+        m ? h('div', { class: 'st-likes' }, ...GROUPS.map((g) => {
+          const like = likeOf(g, m);
+          const mood = like > 0.15 ? 'pos' : like < -0.15 ? 'neg' : 'meh';
+          return h('span', { class: `ds-who-chip ${mood}`, style: `--g:${g.color}` }, h('i', null), g.short, h('b', null, mood === 'pos' ? '▲' : mood === 'neg' ? '▼' : '•'));
+        })) : null,
+        landmark,
+      ),
+    );
+  }
+
+  private commission(bornId: number, form: LandmarkForm): void {
+    const city = this.game.city!;
+    const f = LANDMARK_FORMS[form];
+    if (!city.economy.canAfford(f.cost)) {
+      this.game.toastError(`Not enough money: it costs ${formatMoney(f.cost)}`);
+      return;
+    }
+    const st = city.design.commission(bornId, form);
+    if (!st) return;
+    this.game.play('good');
+    this.placeLandmark(st.id, st.name);
+  }
+
+  private placeLandmark(serviceId: string, name: string): void {
+    this.close();
+    this.game.setTool('place', (t: PlaceTool) => t.configure(serviceId));
+    this.game.ui.toasts.push({ severity: 'info', icon: 'landmark', title: `Choose a site for ${name}`, text: 'Click beside a road. It is unique: it will also wait in the Build menu under Parks & Landmarks.' });
+  }
+
   private stat(label: string, value: string, tip?: string): HTMLElement {
     return h('div', { class: 'st-stat', 'data-tip': tip ?? '' }, h('span', null, label), h('b', null, value));
   }
@@ -836,6 +925,16 @@ export class DesignStudio extends Modal {
     const city = this.game.city!;
     const learned = city.design.learned;
     b.append(h('div', { class: 'hint' }, 'Your architects learn new ideas from what happens in your city. Every city’s history gives it a different toolbox.'));
+    const found = city.design.found;
+    b.append(h('div', { class: 'ds-section' }, `Combos · ${found.size}/${COMBOS.length}`));
+    b.append(h('div', { class: 'ds-idea-grid' }, ...COMBOS.map((c) => {
+      const f = found.get(c.id);
+      return h('div', { class: `ds-idea combo${f ? '' : ' locked'}`, 'data-combo': c.id },
+        h('div', { class: 'ds-idea-head' }, f ? icon(c.icon, 14) : icon('lock', 14), h('b', null, f ? c.name : '???')),
+        h('div', { class: 'rs-muted' }, f ? c.blurb : c.hint),
+        h('div', { class: 'ds-idea-how' }, f ? `${c.effect} First put together in ${f.design}.` : 'Find it by designing.'),
+      );
+    })));
     for (const cat of CAT_ORDER) {
       const list = IDEAS.filter((i) => i.category === cat);
       b.append(h('div', { class: 'ds-section' }, `${CATEGORY_LABEL[cat]} · ${list.filter((i) => learned.has(i.id)).length}/${list.length}`));

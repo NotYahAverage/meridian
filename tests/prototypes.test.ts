@@ -18,7 +18,7 @@ const SITE: Site = { lv: 0.4, pollution: 0, noise: 0.1, park: 0, nearFloors: 1.5
 
 /** A serviced town where everything has been learned. */
 function town(): City {
-  const city = new City({ name: 'Trials', seed: 1234, preset: 'lakes', flatTerrain: 10, unlimitedMoney: true });
+  const city = new City({ name: 'Trials', seed: 1234, preset: 'lakes', flatTerrain: 10, unlimitedMoney: true, civSeed: 4242 });
   servicedGrid(city);
   for (const i of IDEAS) city.design.learn(i.id);
   return city;

@@ -31,7 +31,7 @@ test('prototypes: build a design on a street, hear the reactions, get the verdic
     // A row of houses along the north side for neighbours.
     C.fillZone(city, s.x + 300, s.z + 30, 1);
     window.__meridian.fastForward(city, 24 * 30);
-    for (const i of (await import('/src/sim/design/Ideas.ts')).IDEAS) city.design.learn(i.id);
+    for (const i of window.__meridian.sim.IDEAS) city.design.learn(i.id);
     window.__s = s;`);
   const houses = await game<number>(page, `return [...g.city.buildings.all.values()].filter((b) => b.kind === 'zoned').length;`);
   expect(houses).toBeGreaterThan(3);

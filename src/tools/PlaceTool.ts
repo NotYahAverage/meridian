@@ -62,7 +62,8 @@ export class PlaceTool extends Tool {
     w.buildings.clearHighlights(3);
     this.highlightSameKind();
     if (this.preview.frame) {
-      w.ghost.showBuilding(this.typeId, this.preview.frame, this.preview.valid);
+      const st0 = SERVICE_BY_ID.get(this.typeId)!;
+      w.ghost.showBuilding(this.typeId, this.preview.frame, this.preview.valid, st0.look ? { style: st0.style, floors: st0.floors ?? 2, level: 3, look: st0.look } : undefined);
       w.buildings.setHighlight(this.preview.conflicts.map((b) => b.id), 3);
       const st = SERVICE_BY_ID.get(this.typeId)!;
       const o = this.preview.frame.obb;

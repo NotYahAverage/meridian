@@ -27,6 +27,8 @@ export interface AdoptedStyle {
   push: number;
   /** Older buildings renovated in it so far. */
   renovated: number;
+  /** Recipes its design achieved: their traits apply to buildings in it. */
+  combos?: string[];
 }
 
 export const PUSH_LEVELS: [number, string][] = [[0, 'Retire'], [0.5, 'Discourage'], [1, 'Let it spread'], [1.5, 'Encourage']];

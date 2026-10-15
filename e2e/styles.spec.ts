@@ -28,7 +28,7 @@ test('verdicts: adopt a style and watch it spread, refine and rebuild, scrap', a
     city.peakPopulation = 0;
     C.fillZone(city, s.x + 300, s.z + 30, 1);
     window.__meridian.fastForward(city, 24 * 100);
-    for (const i of (await import('/src/sim/design/Ideas.ts')).IDEAS) city.design.learn(i.id);
+    for (const i of window.__meridian.sim.IDEAS) city.design.learn(i.id);
     // Three prototypes on the south side, tested side by side.
     const texts = ['white timber row houses with a green roof and balconies', 'a 12-storey raw concrete tower', 'a brick cottage with a mansard roof'];
     const placed = [];

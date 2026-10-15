@@ -65,6 +65,8 @@ export function tourismIncome(city: City): number {
       if (st?.tourism) t += st.tourism;
     } else if (b.typeId === 'hotel') stays += 55 * b.floors * (0.6 + 0.2 * b.level) * (b.workers / Math.max(1, b.jobs));
   }
+  // Visitors come to see the city's architecture too.
+  t += city.design?.tourism() ?? 0;
   return (t + Math.min(stays, t * 0.6)) * (0.4 + 0.6 * clamp(city.stats.happiness / 100, 0, 1));
 }
 

@@ -10,7 +10,7 @@ import { Zone } from '../src/sim/types';
 import { servicedGrid } from './helpers';
 
 function town(): City {
-  const city = new City({ name: 'Styles', seed: 1234, preset: 'lakes', flatTerrain: 10, unlimitedMoney: true });
+  const city = new City({ name: 'Styles', seed: 1234, preset: 'lakes', flatTerrain: 10, unlimitedMoney: true, civSeed: 4242 });
   servicedGrid(city);
   for (const i of IDEAS) city.design.learn(i.id);
   return city;

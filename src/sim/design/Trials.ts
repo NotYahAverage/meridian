@@ -7,6 +7,7 @@ import type { Axes, FeatureId } from '../style/Movements';
 import { Problem, Zone, isResidential } from '../types';
 import type { Concept } from './Concept';
 import type { GroupId } from './Tastes';
+import { COMBO_BY_ID } from './Combos';
 
 /**
  * Prototype trials: a design from the sketchbook built on a real lot and
@@ -320,6 +321,8 @@ export function assess(c: Concept, s: Site): Factor[] {
   if (f.has('windCrown')) add('hum', 'neighbours', -0.2, 0.25);
   if (f.has('ornament')) add('tone', 'neighbours', 0.1);
   if (s.familiarity < 0.4) add('clash', 'neighbours', -0.1, 0.3);
+  // A recognised recipe: people come to see it.
+  for (const id of c.combos ?? []) add(`combo-${id}`, 'looks', 0.22, 0.2);
   return out;
 }
 
@@ -536,6 +539,12 @@ const LINES: Record<string, Lines> = {
 };
 LINES.skyGarden.pos = [...(LINES.skyGarden.pos ?? []), ...(LINES.skyGardenGreen.pos ?? [])];
 
+/** Lines about a combo ({combo} is its name). */
+const COMBO_LINES: Lines = {
+  pos: [['critic', 'A textbook {combo}, and a fine one.'], ['passer', 'People come from all over to see a real {combo}.'], ['resident', 'I live in a proper {combo}. Visitors take photos of my window.'], ['worker', 'Clients ask to see the building before the office.']],
+  neg: [['critic', 'A {combo} by numbers: all the parts, none of the magic.'], ['neighbour', 'They call it a {combo}. I call it showing off.']],
+};
+
 const GENERIC: Record<AspectId, Lines> = {
   home: { pos: [['resident', 'It’s a good place to live. Quiet, solid and well thought out.'], ['worker', 'A good place to work.']], neg: [['resident', 'It looks better than it lives.'], ['worker', 'The offices are fine, but nobody loves them.']] },
   street: { pos: [['passer', 'It makes the walk down {street} nicer.']], neg: [['passer', 'It does nothing for {street}.']] },
@@ -603,7 +612,7 @@ export function makeReaction(t: Trial, factors: Factor[], r: Rng, day: number, s
     // Who speaks up: people who feel strongly about it, in proportion to how many of them live here.
     const v = voices?.length ? r.weighted(voices, (g) => g.share * (0.4 + Math.abs(g.keys[f.key] ?? 0) * 2.5)) : undefined;
     const m = clamp(f.w + 0.8 * (v?.keys[f.key] ?? 0) + (f.spread ?? 0) * gauss(r) * 0.9 + gauss(r) * 0.06, -1, 1);
-    const lines = LINES[f.key] ?? {};
+    const lines = LINES[f.key] ?? (f.key.startsWith('combo-') ? COMBO_LINES : {});
     // Lines from a voice that belongs to another group don't suit this speaker.
     const suits = (l: Line) => fits(l) && (!v || !VOICE_GROUP[l[0]] || VOICE_GROUP[l[0]] === v.id);
     let p = (m >= 0 ? lines.pos : lines.neg)?.filter(suits) ?? [];
@@ -634,7 +643,7 @@ export function makeReaction(t: Trial, factors: Factor[], r: Rng, day: number, s
     month,
     who: whoFor(voice, r, t.concept, sp, floor),
     voice,
-    text: fill(text, t, sp, floor),
+    text: fill(text, t, sp, floor).replace(/\{combo\}/g, COMBO_BY_ID.get(fac.key.slice(6))?.name ?? 'design'),
     mood: Math.round(mood * 100) / 100,
     aspect: fac.aspect,
     key: fac.key,

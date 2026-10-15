@@ -12,7 +12,10 @@ import { type Concept, type DesignContext, type DesignInput, compileConcept } fr
 import {
   type Factor, GRADE_LABEL, MAX_ACTIVE_TRIALS, type Reaction, type Site, type Speaker, type Trial, type Voices, absorb, approvalOf, assess, capReactions, emptyScores, followUp, liveFactors, makeReaction, makeVerdict, openingScores, speaksToday, surveySite,
 } from './Trials';
-import { GROUPS, approvalFromScore, groupScore } from './Tastes';
+import { GROUPS, approvalFromScore, groupScore, likeOf } from './Tastes';
+import { COMBO_BY_ID, type ComboTraits, mergeTraits } from './Combos';
+import { type ServiceType, registerServiceType } from '../services/ServiceTypes';
+import { type Axes, type FeatureId, makeMovement } from '../style/Movements';
 import { type AdoptedStyle, globalShare, kindsFor, localChance, moodOf, reachOf, renovationsDue, saturation, styleName } from './Styles';
 
 /** A design saved to the sketchbook. */
@@ -31,6 +34,62 @@ export interface Sketch {
   scrapped?: boolean;
 }
 
+export interface FoundCombo {
+  day: number;
+  /** The design that first put it together. */
+  design: string;
+}
+
+/** An architectural movement the city's adopted styles gave birth to. */
+export interface Born {
+  /** Its movement's id in the city's style. */
+  id: number;
+  name: string;
+  short: string;
+  kind: string;
+  manifesto: string;
+  axes: Axes;
+  day: number;
+  /** Adopted styles it grew from (movement ids). */
+  styles: number[];
+  landmark?: LandmarkCommission;
+}
+
+export type LandmarkForm = 'tower' | 'hall' | 'pavilion';
+
+export interface LandmarkCommission {
+  serviceId: string;
+  form: LandmarkForm;
+  name: string;
+  /** Day it opened. */
+  opened?: number;
+}
+
+/** The signature buildings a movement can commission. */
+export const LANDMARK_FORMS: Record<LandmarkForm, { noun: string; label: string; blurb: string; style: 'officeTower' | 'midrise' | 'office'; floors: number; w: number; d: number; cost: number; upkeep: number; tourism: number; radius: number; attractiveness: number; jobs: number }> = {
+  tower: { noun: 'Tower', label: 'A tower', blurb: 'A tower on the skyline, seen from everywhere.', style: 'officeTower', floors: 30, w: 46, d: 46, cost: 380_000, upkeep: 3_600, tourism: 7_500, radius: 1_000, attractiveness: 0.7, jobs: 160 },
+  hall: { noun: 'Hall', label: 'A grand hall', blurb: 'A great civic hall, wide and stately.', style: 'midrise', floors: 7, w: 60, d: 46, cost: 240_000, upkeep: 2_600, tourism: 5_000, radius: 850, attractiveness: 0.65, jobs: 90 },
+  pavilion: { noun: 'Pavilion', label: 'A pavilion', blurb: 'A low pavilion for exhibitions and gatherings.', style: 'office', floors: 3, w: 56, d: 42, cost: 150_000, upkeep: 1_700, tourism: 3_400, radius: 700, attractiveness: 0.6, jobs: 50 },
+};
+
+/** The service type of a movement's signature landmark (registered so it can be placed and run like any landmark). */
+export function landmarkType(civSeed: number, born: Born, form: LandmarkForm, look: Movement): ServiceType {
+  const f = LANDMARK_FORMS[form];
+  return {
+    id: `sig-${civSeed}-${born.id}`, name: `The ${born.short} ${f.noun}`, description: `The signature building of ${born.name}. ${f.blurb}`,
+    kind: 'landmark', category: 'landmarks', style: f.style, cost: f.cost, upkeep: f.upkeep, radius: f.radius, capacity: 0, output: 0, w: f.w, d: f.d, jobs: f.jobs,
+    pollution: 0, attractiveness: f.attractiveness, needsShore: false, unlockPopulation: 0, tourism: f.tourism, unique: true, floors: f.floors, look, movementId: born.id,
+  };
+}
+
+/** Registers saved signature landmarks before the buildings that use them load. */
+export function registerLandmarks(city: City, d: DesignSave | undefined): void {
+  for (const b of d?.births ?? []) {
+    const look = city.style.get(b.id);
+    if (b.landmark && look) registerServiceType(landmarkType(city.research.civSeed, b, b.landmark.form, look));
+  }
+}
+
 export interface LearnedIdea {
   day: number;
   story: string;
@@ -44,6 +103,8 @@ export interface DesignSave {
   trials?: Trial[];
   trialCounter?: number;
   styles?: AdoptedStyle[];
+  found?: [string, FoundCombo][];
+  births?: Born[];
   storm: boolean;
   powerShort: boolean;
   smogMonths: number;
@@ -63,6 +124,11 @@ export class DesignLab {
   /** Adopted designs the city now builds in. */
   styles: AdoptedStyle[] = [];
   private styleById = new Map<number, AdoptedStyle>();
+  /** Combos discovered, and the design that first put each together. */
+  readonly found = new Map<string, FoundCombo>();
+  /** Movements born in this city, oldest first. */
+  births: Born[] = [];
+  private countCache: { day: number; counts: Map<number, number> } | null = null;
   version = 0;
   private counter = 1;
   private trialCounter = 1;
@@ -170,7 +236,11 @@ export class DesignLab {
     if (out.length) this.version++;
     if (!quiet) {
       this.dailyTrials();
-      if (this.city.clock.day > 0 && this.city.clock.day % 30 === 0) this.monthlyStyles();
+      if (this.city.clock.day > 0 && this.city.clock.day % 30 === 0) {
+        this.monthlyStyles();
+        this.checkBirths();
+      }
+      this.checkLandmarks();
     }
     return out;
   }
@@ -209,7 +279,158 @@ export class DesignLab {
       return t.scores.home * 10 + ((t.approval - 50) / 50) * 4;
     }
     const st = b.movement ? this.styleById.get(b.movement) : undefined;
-    return st ? moodOf(st) : 0;
+    if (!st) return 0;
+    const t = this.traitsOf(st);
+    // Planted, clean-powered styles: residents shrug off part of the smog.
+    const clean = t.clean ? t.clean * this.city.landValue.pollutionAt(b.cx, b.cz) * 38 : 0;
+    return moodOf(st) + (t.mood ?? 0) + clean;
+  }
+
+  // -- Combos ---------------------------------------------------------------------
+
+  /** A design puts a recipe together for the first time. */
+  private discover(c: Concept, design: string): void {
+    for (const id of c.combos ?? []) {
+      if (this.found.has(id)) continue;
+      const def = COMBO_BY_ID.get(id);
+      if (!def) continue;
+      this.found.set(id, { day: this.city.clock.day, design });
+      this.city.emitNotice({ severity: 'good', icon: 'milestone', title: `Combo discovered: ${def.name}`, text: `${def.blurb} ${design} puts it together. Adopt a design with it and the style carries its effect: ${def.effect.charAt(0).toLowerCase()}${def.effect.slice(1)}` });
+      this.city.events.emit('design', { type: 'combo', id });
+      this.version++;
+    }
+  }
+
+  /** The traits a style carries from the recipes its design achieved. */
+  traitsOf(st: AdoptedStyle): ComboTraits {
+    return st.combos?.length ? mergeTraits(st.combos) : {};
+  }
+
+  /** A new building in an adopted style takes on its traits: more homes or jobs, faster building. */
+  onNewBuilding(b: Building): void {
+    const st = b.movement ? this.styleById.get(b.movement) : undefined;
+    if (!st?.combos?.length || b.kind !== 'zoned') return;
+    const t = mergeTraits(st.combos);
+    if (t.capacity && t.capacity !== 1) {
+      b.hhCap = Math.round(b.hhCap * t.capacity);
+      b.jobs = Math.round(b.jobs * t.capacity);
+    }
+    if (t.jobs && t.jobs !== 1 && b.jobs) b.jobs = Math.round(b.jobs * t.jobs);
+    if (t.speed && t.speed !== 1) b.buildDays /= t.speed;
+  }
+
+  /** Monthly tourism from styles that draw visitors, and from the city's movements. */
+  tourism(): number {
+    let t = 0;
+    const counts = this.cachedCounts();
+    for (const st of this.styles) {
+      const per = this.traitsOf(st).tourism ?? 0;
+      if (per) t += per * Math.min(80, counts.get(st.id) ?? 0);
+    }
+    return t + this.births.length * 600;
+  }
+
+  private cachedCounts(): Map<number, number> {
+    const day = this.city.clock.day;
+    if (!this.countCache || this.countCache.day !== day) this.countCache = { day, counts: this.styleCounts() };
+    return this.countCache.counts;
+  }
+
+  // -- Movements and landmarks ------------------------------------------------------
+
+  /** The movement the city is best known for. */
+  identity(): Born | undefined {
+    const counts = this.cachedCounts();
+    const size = (b: Born) => b.styles.reduce((a, id) => a + (counts.get(id) ?? 0), 0);
+    return [...this.births].sort((a, b) => size(b) - size(a))[0];
+  }
+
+  /** When adopted styles take hold and point the same way, a movement is born. */
+  private checkBirths(): void {
+    const city = this.city;
+    const counts = this.styleCounts();
+    let zoned = 0;
+    for (const v of counts.values()) zoned += v;
+    const free = this.styles.filter((s) => s.push > 0 && (counts.get(s.id) ?? 0) > 0 && !this.births.some((b) => b.styles.includes(s.id)));
+    const n = free.reduce((a, s) => a + (counts.get(s.id) ?? 0), 0);
+    // About a fifth of the city in its own styles (no more than 120 buildings in a big city).
+    if (n < Math.max(15, Math.min(120, zoned * 0.2))) return;
+    const axes: Axes = { green: 0, heavy: 0, ornate: 0, dense: 0, hand: 0 };
+    for (const s of free) {
+      const m = city.style.get(s.id);
+      if (!m) continue;
+      for (const k of Object.keys(axes) as (keyof Axes)[]) axes[k] += (m.axes[k] * (counts.get(s.id) ?? 0)) / n;
+    }
+    const dist = (a: Axes, b: Axes) => Math.hypot(a.green - b.green, a.heavy - b.heavy, a.ornate - b.ornate, a.dense - b.dense, a.hand - b.hand);
+    const near = this.births.find((b) => dist(b.axes, axes) < 0.7);
+    if (near) {
+      // The same direction: these styles join the movement already there.
+      near.styles.push(...free.map((s) => s.id));
+      this.version++;
+      return;
+    }
+    const lead = [...free].sort((a, b) => (counts.get(b.id) ?? 0) - (counts.get(a.id) ?? 0))[0];
+    const gen = makeMovement(city.research.civSeed, 300 + this.births.length, axes, city.clock.day);
+    const look = structuredClone(city.style.get(lead.id)!);
+    // Its signature buildings go further than everyday ones: the movement's leanings, made grand.
+    const extra: FeatureId[] = [];
+    if (axes.green > 0.25) extra.push('skyGarden', 'planters', 'roofGarden');
+    if (axes.ornate > 0.25) extra.push('ornament', 'arcade');
+    if (axes.heavy > 0.3) extra.push('monumental');
+    if (axes.hand < -0.3) extra.push('cantilever', 'briseSoleil');
+    if (axes.dense > 0.4 && axes.heavy > 0) extra.push('loggias');
+    if (!extra.length) extra.push('monumental');
+    look.features = [...new Set([...look.features, ...extra])].slice(0, 6) as FeatureId[];
+    const m = city.style.adopt(look, gen.name, gen.short, gen.manifesto, 0);
+    m.kind = gen.kind;
+    m.axes = axes;
+    const born: Born = { id: m.id, name: gen.name, short: gen.short, kind: gen.kind, manifesto: gen.manifesto, axes, day: city.clock.day, styles: free.map((s) => s.id) };
+    this.births.push(born);
+    const from = free.map((s) => s.name).join(' and ');
+    city.emitNotice({ severity: 'good', icon: 'milestone', title: `A movement is born: ${born.name}`, text: `${from} have given ${city.name} an architecture of its own. Your architects can now design its signature landmark (Design Studio, City style).` });
+    city.news.file(`movement-${born.id}`, 88, 'good', `A movement is born: ${born.name}`, `${born.manifesto} Critics say ${city.name} now builds like nowhere else.`);
+    for (const g of GROUPS) {
+      const like = likeOf(g, m);
+      if (Math.abs(like) > 0.1) city.people?.remember(g.id, 14 * like, `${born.name} was born`);
+    }
+    city.events.emit('design', { type: 'movement', id: born.id });
+    this.version++;
+  }
+
+  /** Commissions a movement's signature landmark: it can then be placed like any landmark. */
+  commission(bornId: number, form: LandmarkForm): ServiceType | null {
+    const born = this.births.find((b) => b.id === bornId);
+    const look = this.city.style.get(bornId);
+    if (!born || !look) return null;
+    if (born.landmark && this.city.buildings.all.size && [...this.city.buildings.all.values()].some((b) => b.typeId === born.landmark!.serviceId)) return null;
+    const st = landmarkType(this.city.research.civSeed, born, form, look);
+    registerServiceType(st);
+    born.landmark = { serviceId: st.id, form, name: st.name };
+    this.version++;
+    return st;
+  }
+
+  /** Signature landmarks commissioned (they join the landmarks in the Build menu). */
+  serviceTypes(): ServiceType[] {
+    return this.births.map((b) => (b.landmark ? SERVICE_BY_ID.get(b.landmark.serviceId) : undefined)).filter((s): s is ServiceType => !!s);
+  }
+
+  /** A signature landmark has opened: the movement's fans celebrate. */
+  private checkLandmarks(): void {
+    for (const born of this.births) {
+      const lm = born.landmark;
+      if (!lm || lm.opened !== undefined) continue;
+      const b = [...this.city.buildings.all.values()].find((x) => x.typeId === lm.serviceId && x.state === BuildingState.Active);
+      if (!b) continue;
+      lm.opened = this.city.clock.day;
+      const m = this.city.style.get(born.id);
+      for (const g of GROUPS) {
+        const like = m ? likeOf(g, m) : 0;
+        if (Math.abs(like) > 0.1) this.city.people?.remember(g.id, 12 * like, `${lm.name} opened`);
+      }
+      this.city.news.file(`landmark-${born.id}`, 80, 'good', `${lm.name} opens`, `The signature building of ${born.name} opened to crowds. ${born.manifesto.split('. ')[0]}.`, { x: b.cx, z: b.cz });
+      this.version++;
+    }
   }
 
   /** A sketch has been built on a lot: its trial begins once construction ends. */
@@ -227,6 +448,7 @@ export class DesignLab {
     t.site = surveySite(this.city, b, c.look.axes);
     t.factors = this.factorsFor(t, t.site);
     this.trials.push(t);
+    this.discover(c, t.name);
     // Word gets around as soon as the hoardings go up.
     const r = new Rng(hashStr(t.id, 'plans', this.city.research.civSeed));
     const early = t.factors.filter((f) => f.aspect === 'neighbours' || f.aspect === 'looks');
@@ -389,6 +611,7 @@ export class DesignLab {
       if (t.state === 'done' && !t.decision) t.decision = { kind: 'refined', day: this.city.clock.day, sketchId: sk.id };
     }
     this.sketches.push(sk);
+    this.discover(concept, sk.name);
     this.version++;
     return sk;
   }
@@ -404,7 +627,7 @@ export class DesignLab {
     const b = city.buildings.get(t.buildingId);
     const street = (b && city.roads.segments.get(b.segId)?.name) || '';
     const m = city.style.adopt(t.concept.look, name, name.replace(/ style$/, ''), `${t.concept.description} ${t.verdict.summary}`);
-    const st: AdoptedStyle = { id: m.id, trialId: t.id, name, x: t.x, z: t.z, street, day: city.clock.day, approval: t.verdict.approval, kinds: kindsFor(t.concept.use), push: 1, renovated: 0 };
+    const st: AdoptedStyle = { id: m.id, trialId: t.id, name, x: t.x, z: t.z, street, day: city.clock.day, approval: t.verdict.approval, kinds: kindsFor(t.concept.use), push: 1, renovated: 0, combos: [...(t.concept.combos ?? [])] };
     this.styles.push(st);
     this.styleById.set(st.id, st);
     t.decision = { kind: 'adopted', day: city.clock.day, styleId: st.id };
@@ -532,7 +755,7 @@ export class DesignLab {
   }
 
   serialize(): DesignSave {
-    return structuredClone({ v: 1 as const, learned: [...this.learned.entries()], sketches: this.sketches, counter: this.counter, trials: this.trials, trialCounter: this.trialCounter, styles: this.styles, storm: this.storm, powerShort: this.powerShort, smogMonths: this.smogMonths });
+    return structuredClone({ v: 1 as const, learned: [...this.learned.entries()], sketches: this.sketches, counter: this.counter, trials: this.trials, trialCounter: this.trialCounter, styles: this.styles, found: [...this.found.entries()], births: this.births, storm: this.storm, powerShort: this.powerShort, smogMonths: this.smogMonths });
   }
 
   load(d: DesignSave | undefined): void {
@@ -550,6 +773,9 @@ export class DesignLab {
     this.trialCounter = data.trialCounter ?? this.trials.length + 1;
     this.styles = data.styles ?? [];
     this.styleById = new Map(this.styles.map((st) => [st.id, st]));
+    this.found.clear();
+    for (const [k, v] of data.found ?? []) this.found.set(k, v);
+    this.births = data.births ?? [];
     this.storm = data.storm;
     this.powerShort = data.powerShort;
     this.smogMonths = data.smogMonths;
