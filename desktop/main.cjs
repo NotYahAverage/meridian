@@ -50,7 +50,48 @@ async function writeAtomic(file, data) {
   await fs.rename(tmp, file);
 }
 
+// -- Updates: new versions come from the GitHub releases of the Meridian repository.
+// They download quietly in the background and install when the game closes;
+// the game's Update button can check now and restart into a new version.
+let updater = null;
+let updateState = { status: 'idle' };
+function sendUpdate(state) {
+  updateState = state;
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('update:state', state);
+}
+function setupUpdates() {
+  if (!app.isPackaged || process.argv.includes('--e2e')) return;
+  try {
+    ({ autoUpdater: updater } = require('electron-updater'));
+  } catch {
+    return;
+  }
+  updater.autoDownload = true;
+  updater.autoInstallOnAppQuit = true;
+  updater.on('checking-for-update', () => sendUpdate({ status: 'checking' }));
+  updater.on('update-available', (i) => sendUpdate({ status: 'downloading', version: i.version, percent: 0 }));
+  updater.on('update-not-available', () => sendUpdate({ status: 'latest', version: app.getVersion() }));
+  updater.on('download-progress', (p) => sendUpdate({ ...updateState, status: 'downloading', percent: Math.round(p.percent) }));
+  updater.on('update-downloaded', (i) => sendUpdate({ status: 'ready', version: i.version }));
+  updater.on('error', (e) => sendUpdate({ status: 'error', message: String(e && e.message ? e.message : e).slice(0, 200) }));
+  const check = () => updater.checkForUpdates().catch(() => undefined);
+  setTimeout(check, 8_000);
+  setInterval(check, 4 * 60 * 60 * 1000);
+}
+
 function registerIpc() {
+  ipcMain.handle('update:check', async () => {
+    if (!updater) return { status: 'unavailable', version: app.getVersion() };
+    await updater.checkForUpdates().catch(() => undefined);
+    return updateState;
+  });
+  ipcMain.handle('update:state', () => (updater ? updateState : { status: 'unavailable', version: app.getVersion() }));
+  ipcMain.on('update:install', () => {
+    if (!updater || updateState.status !== 'ready') return;
+    quitting = true;
+    updater.quitAndInstall(true, true);
+  });
+  ipcMain.handle('app:version', () => app.getVersion());
   ipcMain.handle('saves:list', () => listSlots());
   ipcMain.handle('saves:save', async (_e, id, data, thumbnail) => {
     await fs.mkdir(savesDir(), { recursive: true });
@@ -156,6 +197,7 @@ app.whenReady().then(() => {
   });
   registerIpc();
   createWindow();
+  setupUpdates();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

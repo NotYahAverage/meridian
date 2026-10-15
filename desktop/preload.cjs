@@ -12,4 +12,11 @@ contextBridge.exposeInMainWorld('meridianNative', {
   onCloseRequested: (cb) => ipcRenderer.on('app:close-requested', () => cb()),
   setFullscreen: (on) => ipcRenderer.send('app:fullscreen', !!on),
   isFullscreen: () => ipcRenderer.invoke('app:is-fullscreen'),
+  version: () => ipcRenderer.invoke('app:version'),
+  updates: {
+    check: () => ipcRenderer.invoke('update:check'),
+    state: () => ipcRenderer.invoke('update:state'),
+    install: () => ipcRenderer.send('update:install'),
+    onState: (cb) => ipcRenderer.on('update:state', (_e, s) => cb(s)),
+  },
 });

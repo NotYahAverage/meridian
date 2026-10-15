@@ -26,6 +26,21 @@ export interface NativeBridge {
   isFullscreen?: () => Promise<boolean>;
   /** Called when the player closes the window; the game answers by calling `quit`. */
   onCloseRequested?: (cb: () => void) => void;
+  version?: () => Promise<string>;
+  /** New versions from GitHub releases: downloaded in the background, installed on quit or on demand. */
+  updates?: {
+    check: () => Promise<UpdateState>;
+    state: () => Promise<UpdateState>;
+    install: () => void;
+    onState: (cb: (s: UpdateState) => void) => void;
+  };
+}
+
+export interface UpdateState {
+  status: 'idle' | 'checking' | 'downloading' | 'ready' | 'latest' | 'error' | 'unavailable';
+  version?: string;
+  percent?: number;
+  message?: string;
 }
 
 declare global {
@@ -119,6 +134,8 @@ export const platform = {
   setFullscreen: window.meridianNative?.setFullscreen,
   isFullscreen: window.meridianNative?.isFullscreen,
   onCloseRequested: window.meridianNative?.onCloseRequested,
+  version: window.meridianNative?.version,
+  updates: window.meridianNative?.updates,
 };
 
 /** Player preferences persisted in localStorage. */

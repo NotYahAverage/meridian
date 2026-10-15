@@ -1,7 +1,7 @@
 import { formatInt, formatMoney } from '../core/math';
 import { randomSeed } from '../core/rng';
 import type { Game } from '../game/Game';
-import { DEFAULT_SETTINGS, LARGE_CITY_POPULATION, type SlotInfo, platform } from '../platform/Platform';
+import { DEFAULT_SETTINGS, LARGE_CITY_POPULATION, type SlotInfo, type UpdateState, platform } from '../platform/Platform';
 import { MAP_PRESETS, type MapPreset } from '../sim/world/Terrain';
 import { h } from './dom';
 import { icon } from './icons';
@@ -362,6 +362,38 @@ export class MainMenu {
   private playBtn: HTMLButtonElement;
   private playSub: HTMLElement;
   private resume: HTMLElement;
+  private versionEl = h('span', null, 'v0.1 · Early build');
+  private updateBtn: HTMLButtonElement | null = null;
+  private updateText = h('span', { class: 'mm-update-text' });
+  private updateState: UpdateState = { status: 'idle' };
+
+  /** Desktop only: check for a new version, watch it download, and restart into it. */
+  private updateRow(): HTMLElement | null {
+    const u = platform.updates;
+    if (!u) return null;
+    void platform.version?.().then((v) => (this.versionEl.textContent = `v${v} · Early build`));
+    this.updateBtn = h('button', { class: 'menu-btn small mm-update-btn', onclick: () => {
+      this.game.play('click');
+      if (this.updateState.status === 'ready') u.install();
+      else void u.check().then((s) => this.showUpdate(s));
+    } }, icon('download', 16), h('span', null, 'Check for updates')) as HTMLButtonElement;
+    u.onState((s) => this.showUpdate(s));
+    void u.state().then((s) => this.showUpdate(s));
+    return h('div', { class: 'mm-update' }, this.updateBtn, this.updateText);
+  }
+
+  private showUpdate(s: UpdateState): void {
+    this.updateState = s;
+    const label = this.updateBtn?.querySelector('span');
+    const text: Record<UpdateState['status'], string> = {
+      idle: '', unavailable: '', checking: 'Checking…', latest: 'You have the latest version.',
+      downloading: `Downloading v${s.version ?? ''}… ${s.percent ?? 0}%`, ready: `Version ${s.version} is ready.`,
+      error: 'Couldn’t check for updates. Are you online?',
+    };
+    this.updateText.textContent = text[s.status];
+    if (label) label.textContent = s.status === 'ready' ? 'Restart and update' : 'Check for updates';
+    this.updateBtn?.classList.toggle('primary', s.status === 'ready');
+  }
 
   constructor(private game: Game) {
     const click = (fn: () => void) => () => { this.game.play('click'); fn(); };
@@ -391,7 +423,8 @@ export class MainMenu {
           small('Controls', 'keyboard', () => this.game.ui.help.open()),
           platform.quit ? small('Quit', 'close', () => platform.quit?.()) : null,
         ),
-        h('div', { class: 'mm-foot' }, h('span', null, 'v0.1 · Early build'), h('span', null, platform.isDesktop ? 'Desktop' : 'Web')),
+        this.updateRow(),
+        h('div', { class: 'mm-foot' }, this.versionEl, h('span', null, platform.isDesktop ? 'Desktop' : 'Web')),
       ),
     );
   }
