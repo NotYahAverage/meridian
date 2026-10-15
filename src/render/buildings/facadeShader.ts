@@ -174,7 +174,7 @@ void applyPattern(inout vec3 col, vec3 base, float isWall) {
   float wtype = styled ? floor((seed - 128.0) / 16.0) : -1.0;
   float ftone = styled ? mod(floor((seed - 128.0) / 4.0), 4.0) : -1.0;
   // Per-building variety for lights and curtains (styled buildings share a seed).
-  float bseed = styled ? seed + mod(vSlot, 97.0) * 1.37 : seed;
+  float bseed = styled ? seed + floor(vSlot + 0.5) * 1.37 : seed;
   float rdepth = -1.0;
   // Per-building trim: white, warm stone or dark bronze.
   float tk = m_hash12(vec2(seed, 5.9));

@@ -496,6 +496,7 @@ button.tb-stat:hover { background: var(--panel-2); }
 .loading { position: absolute; inset: 0; z-index: 200; display: grid; place-items: center; background: var(--page); transition: opacity 0.45s ease; }
 .loading.fade { opacity: 0; pointer-events: none !important; }
 .load-inner { width: min(420px, 80vw); display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.load-logo { width: min(320px, 70vw); margin-bottom: 8px; }
 .load-track { width: 100%; height: 3px; border-radius: 2px; background: var(--panel-3); overflow: hidden; }
 .load-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s ease; }
 .load-label { color: #c6d2dc; font-size: 13px; }

@@ -33,7 +33,9 @@ const VERT_STATE = /* glsl */ `
   vRelY = transformed.y - aMeta.y;
   if (prog < 0.999) transformed.y = aMeta.y + (transformed.y - aMeta.y) * max(prog, 0.03);
   vFac = aFac;
-  vSlot = aMeta.x;
+  // Reduced here: a big city's slot numbers lose precision on their way to the fragment
+  // shader on some GPUs, and the wobble turned per-building variety into per-pixel noise.
+  vSlot = aMeta.x < 0.0 ? 0.0 : mod(aMeta.x, 97.0);
   vPat = aPat;
 }
 `;
