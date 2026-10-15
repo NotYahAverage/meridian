@@ -37,7 +37,8 @@ export interface NativeBridge {
 }
 
 export interface UpdateState {
-  status: 'idle' | 'checking' | 'downloading' | 'ready' | 'latest' | 'error' | 'unavailable';
+  /** `manual`: a new version is out but must be downloaded by hand (Mac, unsigned). */
+  status: 'idle' | 'checking' | 'downloading' | 'ready' | 'manual' | 'latest' | 'error' | 'unavailable';
   version?: string;
   percent?: number;
   message?: string;

@@ -54,6 +54,8 @@ async function writeAtomic(file, data) {
 // They download quietly in the background and install when the game closes;
 // the game's Update button can check now and restart into a new version.
 let updater = null;
+const MANUAL_UPDATES = process.platform === 'darwin';
+const DOWNLOAD_PAGE = 'https://notyahaverage.itch.io/meridian';
 let updateState = { status: 'idle' };
 function sendUpdate(state) {
   updateState = state;
@@ -66,10 +68,11 @@ function setupUpdates() {
   } catch {
     return;
   }
-  updater.autoDownload = true;
-  updater.autoInstallOnAppQuit = true;
+  // An unsigned Mac app can't replace itself: on a Mac, only check, and send players to itch.io for new versions.
+  updater.autoDownload = !MANUAL_UPDATES;
+  updater.autoInstallOnAppQuit = !MANUAL_UPDATES;
   updater.on('checking-for-update', () => sendUpdate({ status: 'checking' }));
-  updater.on('update-available', (i) => sendUpdate({ status: 'downloading', version: i.version, percent: 0 }));
+  updater.on('update-available', (i) => sendUpdate(MANUAL_UPDATES ? { status: 'manual', version: i.version } : { status: 'downloading', version: i.version, percent: 0 }));
   updater.on('update-not-available', () => sendUpdate({ status: 'latest', version: app.getVersion() }));
   updater.on('download-progress', (p) => sendUpdate({ ...updateState, status: 'downloading', percent: Math.round(p.percent) }));
   updater.on('update-downloaded', (i) => sendUpdate({ status: 'ready', version: i.version }));
@@ -87,6 +90,10 @@ function registerIpc() {
   });
   ipcMain.handle('update:state', () => (updater ? updateState : { status: 'unavailable', version: app.getVersion() }));
   ipcMain.on('update:install', () => {
+    if (updater && updateState.status === 'manual') {
+      void shell.openExternal(DOWNLOAD_PAGE);
+      return;
+    }
     if (!updater || updateState.status !== 'ready') return;
     quitting = true;
     updater.quitAndInstall(true, true);
