@@ -21,6 +21,10 @@ test('coach marks guide a new city', async ({ page }) => {
   // Pretend the first goals are done: the tip moves on.
   await game(page, `for (const id of ['connect', 'zoneRes', 'zoneJobs', 'power', 'water', 'sewage', 'pop100', 'service', 'park', 'pop500', 'bus']) g.city.goalsDone.add(id); g.setTool('inspect'); g.ui.toolbar.close();`);
   await page.waitForTimeout(600);
+  // The Design Studio is next: the coach points at it.
+  await expect(page.locator('.coach-title')).toHaveText('Design a building');
+  await game(page, `for (const id of ['design', 'prototype']) g.city.goalsDone.add(id);`);
+  await page.waitForTimeout(600);
   await expect(page.locator('.coach-title')).toHaveText('Enact a city policy');
     await page.locator('.coach-off').click();
   await page.waitForTimeout(400);

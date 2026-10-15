@@ -8,7 +8,7 @@ import {
   type CenterInfo, type Choice, type Decision, type DecisionOption, type Design, type Discovery, type Effect, type Outcome, type Plan, type ProposalContext,
   STAGE_PLAN, baseName, decisionFor, generateProposals, hashStr, makeDiscovery, odds, resolve, centerName as makeCenterName,
 } from './Generate';
-import { DEPOSITS, FIELD_BY_ID, FIELDS, type FieldId, PRINCIPLE_BY_ID, RESOURCES, RESOURCE_BY_ID, fit, type ComponentKind } from './Knowledge';
+import { DEPOSITS, FIELD_BY_ID, type FieldId, LIVE_FIELD_DEFS, isLiveField, PRINCIPLE_BY_ID, RESOURCES, RESOURCE_BY_ID, fit, type ComponentKind } from './Knowledge';
 import { MASTERY_NAMES, type Retrofit, type ScienceSummary, masteryLevel, newMilestones, retrofitFor } from './Progress';
 
 /** Days a decision may wait before the careful option is taken (when the player allows it). */
@@ -230,7 +230,7 @@ export class Research {
         continue;
       }
       if (!b) {
-        out.set(r.id, { ok: false, why: 'Needs a research centre' });
+        out.set(r.id, { ok: false, why: 'Needs a utility lab' });
         continue;
       }
       if (r.id === 'slag') {
@@ -358,7 +358,7 @@ export class Research {
     for (const s of city.roads.segments.values()) if (Math.hypot(s.cx - x, s.cz - z) < 600) roads++;
     const factors: SiteFactor[] = [];
     const add = (field: FieldId, weight: number, label: string) => {
-      if (weight > 0.04) factors.push({ field, weight, label });
+      if (weight > 0.04 && isLiveField(field)) factors.push({ field, weight, label });
     };
     add('manufacturing', Math.min(1.2, ind * 0.07), `${ind} factories nearby`);
     add('materials', Math.min(0.6, ind * 0.03) + (city.preset === 'highlands' ? 0.45 : 0), city.preset === 'highlands' ? 'Quarry country and industry nearby' : 'Industry nearby');
@@ -371,7 +371,7 @@ export class Research {
     add('transport', Math.min(0.9, roads * 0.012), `${roads} road segments within 600 m`);
     // Each civilization leans its own way too.
     const score = new Map<FieldId, number>();
-    for (const f of FIELDS) score.set(f.id, (hashStr(this.civSeed, 'lean', f.id) / 4294967296) * 0.3 + (hashStr(this.civSeed, buildingId, f.id) / 4294967296) * 0.15);
+    for (const f of LIVE_FIELD_DEFS) score.set(f.id, (hashStr(this.civSeed, 'lean', f.id) / 4294967296) * 0.3 + (hashStr(this.civSeed, buildingId, f.id) / 4294967296) * 0.15);
     for (const f of factors) score.set(f.field, (score.get(f.field) ?? 0) + f.weight);
     const ranked = [...score.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([f]) => f);
     factors.sort((a, b) => b.weight - a.weight);
@@ -401,6 +401,36 @@ export class Research {
     b.level = 1;
     this.version++;
     return c;
+  }
+
+  /**
+   * Older cities: centres that specialised in a field research no longer
+   * works in turn to the utility field nearest their site. Work under way
+   * finishes as planned; offers outside the utility fields are withdrawn.
+   */
+  retireFields(): void {
+    let changed = false;
+    for (const c of this.centers.values()) {
+      const b = this.city.buildings.get(c.id);
+      if (!isLiveField(c.field)) {
+        const ranked = b ? this.assessSite(b.cx, b.cz, b.id).ranked : LIVE_FIELD_DEFS.map((f) => f.id);
+        const keep = [c.field, ...c.secondary].filter(isLiveField);
+        c.field = keep[0] ?? ranked[0];
+        c.secondary = [...keep.slice(1), ...ranked].filter((f, i, a) => f !== c.field && a.indexOf(f) === i).slice(0, 2);
+        if (b) {
+          b.style = `lab:${c.field}`;
+          this.city.buildings.markChanged(b, 'geometry');
+        }
+        changed = true;
+      } else if (c.secondary.some((f) => !isLiveField(f))) {
+        c.secondary = c.secondary.filter(isLiveField);
+        changed = true;
+      }
+      const before = c.offers.length;
+      c.offers = c.offers.filter((o) => isLiveField(o.field));
+      if (c.offers.length !== before) changed = true;
+    }
+    if (changed) this.version++;
   }
 
   onBuildingRemoved(id: number): void {
@@ -518,7 +548,7 @@ export class Research {
 
   start(centerId: number, planId: string, partnerId?: number): { ok: boolean; error?: string } {
     const c = this.centers.get(centerId);
-    if (!c) return { ok: false, error: 'No such research centre' };
+    if (!c) return { ok: false, error: 'No such utility lab' };
     const plan = c.offers.find((p) => p.id === planId);
     if (!plan) return { ok: false, error: 'That proposal is no longer on offer' };
     const unmet = this.requirements(c, plan).filter((r) => !r.ok);
@@ -592,7 +622,7 @@ export class Research {
   upgrade(centerId: number): { ok: boolean; error?: string } {
     const c = this.centers.get(centerId);
     const b = c && this.city.buildings.get(c.id);
-    if (!c || !b) return { ok: false, error: 'No such research centre' };
+    if (!c || !b) return { ok: false, error: 'No such utility lab' };
     if (c.equipment >= 3) return { ok: false, error: 'Fully equipped' };
     const cost = UPGRADE_COST[c.equipment + 1];
     if (!this.city.economy.spend(cost, 'Research')) return { ok: false, error: `Needs ${formatMoney(cost)}` };

@@ -28,8 +28,12 @@ export interface PolicyDef {
   effects: string[];
   unlockPopulation: number;
   icon: string;
-  /** Only possible once the city's scientists have made a discovery in this field. */
+  /** Only possible once the city's utility labs have made a discovery in this field. */
   requiresField?: FieldId;
+  /** Only possible once the city has adopted a style in the Design Studio. */
+  requiresStyle?: boolean;
+  /** Its effects work through the research modifiers (recomputed when it changes). */
+  researchLed?: boolean;
 }
 
 export const POLICIES: PolicyDef[] = [
@@ -83,30 +87,30 @@ export const POLICIES: PolicyDef[] = [
     description: 'Caps new buildings at six floors to keep the skyline low.',
     effects: ['Residents like the low skyline (+3 happiness)', 'New buildings are lower and house fewer people'],
   },
-  // Policies your scientists make possible.
+  // Policies your labs and architects make possible.
   {
-    id: 'congestionPricing', name: 'Congestion Pricing', icon: 'road', unlockPopulation: 1_000, requiresField: 'transport',
-    description: 'Drivers pay to enter busy streets at peak times, measured by your researchers’ traffic sensors.',
+    id: 'congestionPricing', name: 'Congestion Pricing', icon: 'road', unlockPopulation: 2_000, researchLed: true,
+    description: 'Drivers pay to enter busy streets at peak times, measured by traffic sensors on every junction.',
     effects: ['Road capacity +10%', 'Income from charges', 'Residents grumble (−1 happiness)'],
   },
   {
-    id: 'greenBuildingCode', name: 'Green Building Code', icon: 'build', unlockPopulation: 1_000, requiresField: 'architecture',
-    description: 'New construction must meet efficiency standards your architects worked out.',
+    id: 'greenBuildingCode', name: 'Green Building Code', icon: 'build', unlockPopulation: 1_000, requiresStyle: true, researchLed: true,
+    description: 'New construction must meet efficiency standards your architects worked out for the city’s own styles.',
     effects: ['Buildings use 8% less power', 'Construction costs 6% more'],
   },
   {
-    id: 'waterMetering', name: 'Water Metering', icon: 'water', unlockPopulation: 1_000, requiresField: 'water',
+    id: 'waterMetering', name: 'Water Metering', icon: 'water', unlockPopulation: 1_000, requiresField: 'water', researchLed: true,
     description: 'Every home and business is metered and billed for what it uses.',
     effects: ['12% less water used', 'Residents are a little less happy'],
   },
   {
-    id: 'healthDrive', name: 'Public Health Drive', icon: 'health', unlockPopulation: 1_000, requiresField: 'medicine',
-    description: 'Screenings, vaccination days and health advice built on your medical research.',
+    id: 'healthDrive', name: 'Public Health Drive', icon: 'health', unlockPopulation: 1_500, researchLed: true,
+    description: 'Screenings, vaccination days and health advice in every neighbourhood.',
     effects: ['Residents are happier (+1)', 'Costs per household'],
   },
   {
-    id: 'urbanFarming', name: 'Urban Farming Scheme', icon: 'parks', unlockPopulation: 1_000, requiresField: 'agriculture',
-    description: 'Rooftop beds and allotments, using growing methods your scientists developed.',
+    id: 'urbanFarming', name: 'Urban Farming Scheme', icon: 'parks', unlockPopulation: 1_000, requiresField: 'environment', researchLed: true,
+    description: 'Rooftop beds and allotments, using growing methods your environmental engineers developed.',
     effects: ['8% less garbage', 'Residents are a little happier', 'Costs per park'],
   },
 ];
@@ -167,7 +171,8 @@ export class Policies {
   lockReason(id: PolicyId): string | undefined {
     const def = POLICY_BY_ID.get(id);
     if (!def) return 'Unknown policy';
-    if (def.requiresField && !this.city.research.discoveries.some((d) => d.field === def.requiresField)) return `Needs a discovery in ${FIELD_NAMES[def.requiresField]}`;
+    if (def.requiresField && !this.city.research.discoveries.some((d) => d.field === def.requiresField)) return `Needs a utility lab discovery in ${FIELD_NAMES[def.requiresField]}`;
+    if (def.requiresStyle && !this.city.design.styles.length) return 'Needs a style adopted in the Design Studio';
     if (this.city.peakPopulation < def.unlockPopulation) return `Unlocks at ${def.unlockPopulation.toLocaleString('en-US')} population`;
     return undefined;
   }
@@ -180,7 +185,7 @@ export class Policies {
     else this.active.delete(id);
     this.city.coverageDirty = true;
     // Research-led policies change the city through the research effects.
-    if (def.requiresField) this.city.research.recomputeMods();
+    if (def.researchLed) this.city.research.recomputeMods();
     return true;
   }
 

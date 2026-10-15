@@ -842,6 +842,14 @@ export function goalComplete(city: City, id: string): boolean {
       return false;
     case 'pop500':
       return city.population.residents >= 500;
+    case 'design':
+      return city.design.sketches.length > 0;
+    case 'prototype':
+      return city.design.trials.length > 0;
+    case 'adopt':
+      return city.design.styles.length > 0;
+    case 'movement':
+      return city.design.births.length > 0;
   }
   return false;
 }

@@ -182,7 +182,7 @@ export class UI {
     tb.addRailButton('analysis', 'layers', 'Analysis', 'Map layers: traffic, land value, pollution, coverage… (L) · Tab cycles layers', () => this.togglePanel('overlays'));
     tb.addRailButton('info', 'stats', 'City Info', 'Statistics, budget, policies, districts, goals (I)', () => this.toggleCityInfo());
     tb.addRailButton('design', 'brush', 'Design', 'Design Studio: describe a building in your own words and your architects will design it', () => (this.studio.isOpen ? this.studio.close() : this.studio.open()));
-    tb.addRailButton('research', 'flask', 'Research', 'Research centres, experiments, discoveries and the buildings they designed', () => (this.research.isOpen ? this.research.close() : this.research.open()));
+    tb.addRailButton('research', 'flask', 'Utility Labs', 'Utility research: labs, experiments and discoveries for power, water and waste', () => (this.research.isOpen ? this.research.close() : this.research.open()));
     tb.addRailGap('rail-spacer');
     tb.addRailButton('news', 'news', 'News', 'City newspaper (N)', () => this.newspaper.open());
     tb.addRailButton('photo', 'photo', 'Photo', 'Photo mode (P)', () => this.game.setPhotoMode(true));

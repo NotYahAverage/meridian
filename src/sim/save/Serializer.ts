@@ -423,6 +423,8 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
     if (b.state === BuildingState.Active && b.jobs > b.workers) city.openJobs.push(b.id);
   }
   // Last: an older city learns what its history already shows.
+  // Research is a utilities side branch now: older centres move to a utility field.
+  city.research.retireFields();
   city.design.load(data.design);
   city.people.load(data.people);
   return city;

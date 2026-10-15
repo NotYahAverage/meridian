@@ -27,7 +27,7 @@ test('research centre to a discovered building, through save and load', async ({
   // Build the centre with the place tool, clicking on the map.
   await game(page, `g.ui.toolbar.select('services'); g.setTool('place', (t) => t.configure('research_center')); g.cam.jumpTo({ x: window.__s.x + 300, z: window.__s.z, distance: 420, pitch: 0.9, yaw: 0.2 });`);
   await frames(page, 20);
-  await expect(page.locator('.card', { hasText: 'Research Center' })).toBeVisible();
+  await expect(page.locator('.card', { hasText: 'Utility Lab' })).toBeVisible();
   const at = await screenOf(page, 0, 0).then(() => game<{ x: number; z: number }>(page, `return { x: window.__s.x + 300, z: window.__s.z - 40 };`));
   const pt = await screenOf(page, at.x, at.z);
   await page.mouse.move(pt.x, pt.y);
@@ -83,7 +83,7 @@ test('research centre to a discovered building, through save and load', async ({
     }
     if (design) break;
     if (!(await page.locator('.research-modal').isVisible())) await page.locator('.rail-btn[data-cat="research"]').click();
-    await page.locator('.rs-tabs .ci-tab', { hasText: 'Research centres' }).click();
+    await page.locator('.rs-tabs .ci-tab', { hasText: 'Labs' }).click();
   }
   expect(design).not.toBeNull();
   // From the discovery to the Buildings tab, inspect it, and build it.

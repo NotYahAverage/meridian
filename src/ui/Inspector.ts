@@ -205,7 +205,7 @@ export class Inspector {
           body.append(h('div', { class: 'section-title' }, 'Experiment'), h('div', { class: 'insp-exp' }, a.plan.title));
           body.append(h('div', { class: 'kv' }, h('span', null, a.pending ? 'Waiting for a decision' : a.status), meter(a.progress, 'var(--accent)')));
         } else body.append(h('div', { class: 'hint small' }, centre.offers.length ? `${centre.offers.length} experiments proposed. Open the research window to begin one.` : 'Proposals arrive once the centre is open and has spare power.'));
-        body.append(h('div', { class: 'btn-row' }, h('button', { class: `btn ${a?.pending ? 'primary' : ''}`, onclick: () => this.game.ui.research.open({ tab: 'centres', centreId: centre.id }) }, icon('flask', 14), a?.pending ? 'Decide…' : 'Research…')));
+        body.append(h('div', { class: 'btn-row' }, h('button', { class: `btn ${a?.pending ? 'primary' : ''}`, onclick: () => this.game.ui.research.open({ tab: 'centres', centreId: centre.id }) }, icon('flask', 14), a?.pending ? 'Decide…' : 'Lab work…')));
       } else if (st) {
         const status = city.coverage.status.get(b.id);
         if (st.designId) {

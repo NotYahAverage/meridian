@@ -1,7 +1,7 @@
 import type { City } from '../City';
 import { SERVICE_BY_ID } from '../services/ServiceTypes';
 import { BuildingState, Zone, isResidential, zoneBase } from '../types';
-import type { FieldId, FunctionKind } from './Knowledge';
+import { type FieldId, type FunctionKind, isLiveField } from './Knowledge';
 
 /**
  * City briefs: the problems the city is facing right now, put to its
@@ -117,7 +117,8 @@ export function cityBriefs(city: City, needs: Partial<Record<FieldId, number>>):
   }
   if ((needs.agriculture ?? 0) > 0) add({ field: 'agriculture', severity: needs.agriculture ?? 0, title: 'Unhappy residents', text: `Happiness is down to ${Math.round(city.stats.happiness)}%: people want fresher food and greener streets.` });
   if ((needs.materials ?? 0) > 0.5) add({ field: 'materials', severity: needs.materials ?? 0, title: 'A tight budget', text: 'Money is short: cheaper ways to build would help.' });
-  return out.sort((a, b) => b.severity - a.severity);
+  // Research answers the city's utility needs; the rest is for the Design Studio and the mayor.
+  return out.filter((b) => isLiveField(b.field)).sort((a, b) => b.severity - a.severity);
 }
 
 /**

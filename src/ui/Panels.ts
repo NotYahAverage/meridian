@@ -742,7 +742,7 @@ export class PoliciesPanel extends Panel {
             !on && pol.districtsWith(def.id).length
               ? h('div', { class: 'small good-text' }, `In force in ${pol.districtsWith(def.id).map((d) => city.districts.list.get(d)!.name).join(', ')}`)
               : null,
-            def.requiresField && !locked ? h('div', { class: 'small good-text' }, 'Made possible by your research') : null,
+            (def.requiresField || def.requiresStyle) && !locked ? h('div', { class: 'small good-text' }, def.requiresStyle ? 'Made possible by your architects' : 'Made possible by your utility labs') : null,
             h('div', { class: 'muted small' }, locked ? lock : def.description),
             locked ? null : h('ul', { class: 'policy-effects' }, ...def.effects.map((e, i) => h('li', { class: i === def.effects.length - 1 && def.effects.length > 1 ? 'con' : 'pro' }, e))),
             !locked && cost > 0 ? h('div', { class: 'small muted' }, `${on ? 'Costs' : 'Would cost'} ${formatMoney(cost)}/month`) : null,

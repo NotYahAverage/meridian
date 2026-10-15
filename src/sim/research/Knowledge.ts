@@ -33,6 +33,16 @@ export const FIELDS: FieldDef[] = [
 
 export const FIELD_BY_ID = new Map(FIELDS.map((f) => [f.id, f]));
 
+/**
+ * The fields research still works in. Architecture and the city's look now
+ * belong to the Design Studio; research is a side branch for the city's
+ * utilities: power, water and waste. The other fields stay defined so older
+ * cities' discoveries still read and work as they did.
+ */
+export const LIVE_FIELDS: FieldId[] = ['energy', 'water', 'environment'];
+export const LIVE_FIELD_DEFS = FIELDS.filter((f) => LIVE_FIELDS.includes(f.id));
+export const isLiveField = (f: FieldId): boolean => LIVE_FIELDS.includes(f);
+
 /** Physical properties of a substance, each 0–1. */
 export type Prop = 'strength' | 'conductivity' | 'porosity' | 'energy' | 'fertility' | 'purity' | 'renewable';
 
@@ -152,13 +162,13 @@ export const PRINCIPLES: Principle[] = [
   { id: 'engineered_wood', field: 'materials', name: 'Engineered wood', nouns: ['Laminate', 'Timber Frame', 'Glulam'], theory: 'Fibre Bonding Principle', prefers: { renewable: 0.8, strength: 0.6 }, only: ['timber', 'reeds', 'kelp'], needs: ['binder'], gives: ['lattice', 'bio'], comp: 'timber', mod: 'buildCost', modules: ['canopy'], difficulty: 0.3, tier: 1 },
   // ── Manufacturing ──
   { id: 'automation', field: 'manufacturing', name: 'Process automation', nouns: ['Line', 'Automaton Method', 'Control System'], theory: 'Feedback Control Theory', prefers: { conductivity: 0.7, strength: 0.4 }, gives: ['control'], mod: 'industryEfficiency', modules: ['turbineHouse', 'pipes'], difficulty: 0.35, tier: 1 },
-  { id: 'heat_recovery', field: 'manufacturing', name: 'Process heat recovery', nouns: ['Recuperator', 'Heat Loop'], facilities: ['Heat Recovery Plant', 'Recuperator Station'], theory: 'Waste Heat Principle', prefers: { energy: 0.5, strength: 0.5 }, only: ['geothermal', 'slag', 'coal_ash', 'granite', 'basalt', 'copper'], needs: ['thermal'], gives: ['thermal', 'control'], mod: 'industryPollution', build: 'powerGen', modules: ['pipes', 'stack'], difficulty: 0.3, tier: 1 },
+  { id: 'heat_recovery', field: 'energy', name: 'Process heat recovery', nouns: ['Recuperator', 'Heat Loop'], facilities: ['Heat Recovery Plant', 'Recuperator Station'], theory: 'Waste Heat Principle', prefers: { energy: 0.5, strength: 0.5 }, only: ['geothermal', 'slag', 'coal_ash', 'granite', 'basalt', 'copper'], needs: ['thermal'], gives: ['thermal', 'control'], mod: 'industryPollution', build: 'powerGen', modules: ['pipes', 'stack'], difficulty: 0.3, tier: 1 },
   { id: 'casting', field: 'manufacturing', name: 'Precision casting', nouns: ['Casting', 'Foundry Method'], theory: 'Solidification Model', prefers: { strength: 0.7, conductivity: 0.5, purity: 0.3 }, only: ['slag', 'copper', 'basalt', 'coal_ash', 'granite'], gives: ['metallurgy'], mod: 'buildCost', comp: 'fins', modules: ['stack', 'turbineHouse'], difficulty: 0.35, tier: 1 },
-  { id: 'reclamation', field: 'manufacturing', name: 'Material reclamation', nouns: ['Reclaimer', 'Recovery Works', 'Sorting Hall'], facilities: ['Reclaimer', 'Recovery Works', 'Sorting Hall'], theory: 'Closed Loop Principle', prefers: { purity: 0.3, strength: 0.4, energy: 0.3 }, only: ['cullet', 'slag', 'coal_ash', 'refuse_gas', 'compost'], gives: ['loop'], build: 'waste', mod: 'garbage', modules: ['turbineHouse', 'silo'], difficulty: 0.3, tier: 1 },
+  { id: 'reclamation', field: 'environment', name: 'Material reclamation', nouns: ['Reclaimer', 'Recovery Works', 'Sorting Hall'], facilities: ['Reclaimer', 'Recovery Works', 'Sorting Hall'], theory: 'Closed Loop Principle', prefers: { purity: 0.3, strength: 0.4, energy: 0.3 }, only: ['cullet', 'slag', 'coal_ash', 'refuse_gas', 'compost'], gives: ['loop'], build: 'waste', mod: 'garbage', modules: ['turbineHouse', 'silo'], difficulty: 0.3, tier: 1 },
   // ── Agriculture ──
   { id: 'hydroponics', field: 'agriculture', name: 'Hydroponics', nouns: ['Grow House', 'Vertical Farm', 'Glass Farm'], facilities: ['Grow House', 'Vertical Farm', 'Glass Farm'], theory: 'Root Uptake Model', prefers: { fertility: 0.7, purity: 0.5 }, gives: ['bio'], build: 'farm', mod: 'happiness', modules: ['greenhouse', 'tank'], difficulty: 0.3, tier: 1 },
   { id: 'soil', field: 'agriculture', name: 'Soil enrichment', nouns: ['Soil Method', 'Humus Process'], facilities: ['Market Garden', 'Farmstead', 'Allotment Hall'], theory: 'Soil Biome Theory', prefers: { fertility: 1, porosity: 0.4 }, gives: ['bio'], mod: 'happiness', build: 'farm', modules: ['greenhouse', 'silo'], difficulty: 0.2, tier: 1 },
-  { id: 'fermentation', field: 'agriculture', name: 'Fermentation', nouns: ['Digester', 'Ferment Works', 'Biogas Plant'], facilities: ['Digester Plant', 'Biogas Works', 'Ferment Works'], theory: 'Microbial Conversion', prefers: { fertility: 0.6, energy: 0.6, renewable: 0.5 }, gives: ['bio', 'biofilm'], build: 'powerGen', mod: 'garbage', modules: ['sphere', 'tank'], difficulty: 0.3, tier: 1 },
+  { id: 'fermentation', field: 'environment', name: 'Fermentation', nouns: ['Digester', 'Ferment Works', 'Biogas Plant'], facilities: ['Digester Plant', 'Biogas Works', 'Ferment Works'], theory: 'Microbial Conversion', prefers: { fertility: 0.6, energy: 0.6, renewable: 0.5 }, gives: ['bio', 'biofilm'], build: 'powerGen', mod: 'garbage', modules: ['sphere', 'tank'], difficulty: 0.3, tier: 1 },
   // ── Water ──
   { id: 'membranes', field: 'water', name: 'Membrane filtration', nouns: ['Filter Works', 'Membrane Plant'], facilities: ['Filter Works', 'Membrane Plant'], theory: 'Selective Permeability', prefers: { porosity: 0.8, purity: 0.6 }, gives: ['membrane'], build: 'water', mod: 'waterUse', modules: ['tank', 'basin'], difficulty: 0.3, tier: 1 },
   { id: 'bio_treatment', field: 'water', name: 'Biological treatment', nouns: ['Reed Beds', 'Treatment Works', 'Bio-Reactor'], facilities: ['Reed Beds', 'Treatment Works', 'Bio-Reactor'], theory: 'Biofilm Digestion', prefers: { fertility: 0.6, porosity: 0.6, renewable: 0.4 }, gives: ['biofilm'], build: 'sewage', modules: ['basin', 'tank'], difficulty: 0.25, tier: 1 },

@@ -2,7 +2,7 @@ import { Rng } from '../../core/rng';
 import type { ServiceCategory, ServiceKind } from '../services/ServiceTypes';
 import { type ArchSpec, FIELD_ACCENT, composeArch, validateArch } from './Architecture';
 import {
-  COMPONENT_LABEL, type ComponentKind, FIELD_BY_ID, FIELDS, FUNCTION_LABEL, type FieldId, type FunctionKind, MODIFIER_LABEL, type ModifierKind,
+  COMPONENT_LABEL, type ComponentKind, FIELD_BY_ID, FIELDS, FUNCTION_LABEL, type FieldId, LIVE_FIELDS, isLiveField, type FunctionKind, MODIFIER_LABEL, type ModifierKind,
   PRINCIPLES, PRINCIPLE_BY_ID, type Principle, RESOURCE_BY_ID, type ResourceDef, TAG_NAMES, fit,
 } from './Knowledge';
 import type { Brief, TrialSite } from './Briefs';
@@ -236,7 +236,9 @@ const pairKey = (p: string, r: string) => `${p}|${r}`;
 
 /** Fields a centre works in: its specialization and two secondary ones. */
 export function reach(c: CenterInfo): FieldId[] {
-  return [c.field, ...c.secondary];
+  // Only the utility fields are researched now.
+  const live = [c.field, ...c.secondary].filter(isLiveField);
+  return live.length ? live : [...LIVE_FIELDS];
 }
 
 /** Methods the civilization knows enough to attempt. */

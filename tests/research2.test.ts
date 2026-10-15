@@ -235,20 +235,27 @@ describe('long-term goals', () => {
     expect(r.renameDesign(d.id, '   ')).toBe(false);
   });
 
-  it('discoveries make new policies possible', () => {
+  it('utility discoveries make new policies possible; others unlock with the city or its architects', () => {
     const { city } = twoLabs(14);
     const pol = city.policies;
-    expect(pol.lockReason('congestionPricing')).toContain('transport');
-    expect(pol.set('congestionPricing', true)).toBe(false);
-    const p = PRINCIPLE_BY_ID.get('pavements')!;
-    const plan: Plan = { id: 'pv', centerId: 1, title: '', summary: '', field: 'transport', principle: p.id, resource: 'granite', basis: [], kind: 'study', cost: 1, monthly: 1, days: 1, power: 0, risk: 0, prospects: [], clues: [] };
-    city.research.adopt(makeDiscovery(city.research.civ(), plan, { outcome: 'success', quality: 0.3, chance: 0.7, direction: 'theory', field: 'transport', principle: p.id }, info, city.research.nextIds()));
+    // A water discovery opens water metering.
+    if (!city.research.discoveries.some((d) => d.field === 'water')) {
+      expect(pol.lockReason('waterMetering')).toContain('water');
+      expect(pol.set('waterMetering', true)).toBe(false);
+      const p = PRINCIPLE_BY_ID.get('conservation')!;
+      const plan: Plan = { id: 'wm', centerId: 1, title: '', summary: '', field: 'water', principle: p.id, resource: 'groundwater', basis: [], kind: 'study', cost: 1, monthly: 1, days: 1, power: 0, risk: 0, prospects: [], clues: [] };
+      city.research.adopt(makeDiscovery(city.research.civ(), plan, { outcome: 'success', quality: 0.3, chance: 0.7, direction: 'theory', field: 'water', principle: p.id }, info, city.research.nextIds()));
+    }
+    expect(pol.lockReason('waterMetering')).toBeUndefined();
+    // Congestion pricing no longer waits for transport research: it comes with a bigger city.
     expect(pol.lockReason('congestionPricing')).toBeUndefined();
     const cap = city.research.mods.roadCapacity;
     expect(pol.set('congestionPricing', true)).toBe(true);
     expect(city.research.mods.roadCapacity).toBeGreaterThan(cap);
     pol.set('congestionPricing', false);
     expect(city.research.mods.roadCapacity).toBeCloseTo(cap, 6);
+    // The green building code comes from the Design Studio.
+    expect(pol.lockReason('greenBuildingCode')).toContain('Design Studio');
   });
 
   it('everything new is saved and restored exactly', () => {

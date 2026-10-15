@@ -1,6 +1,6 @@
 import type { ServiceKind } from '../services/ServiceTypes';
 import type { Design, Discovery } from './Generate';
-import { FIELD_BY_ID, FIELDS, type FieldId } from './Knowledge';
+import { FIELD_BY_ID, type FieldId, LIVE_FIELD_DEFS } from './Knowledge';
 
 /**
  * Long-term goals for a civilization's science: milestones (with lasting
@@ -40,7 +40,7 @@ export const MILESTONES: MilestoneDef[] = [
   { id: 'iterate', title: 'Second generation', goal: 'Develop a Mark II of a design', reward: 'Design iterations run 20% faster', progress: (s) => [Math.min(1, s.iterations), 1] },
   { id: 'breakthrough3', title: 'Golden age', goal: 'Three breakthroughs', reward: '+1 resident happiness (civic pride)', progress: (s) => [Math.min(3, s.breakthroughs), 3] },
   { id: 'retrofit', title: 'Science at work', goal: 'Complete a retrofit programme', reward: 'Retrofits cost 15% less', progress: (s) => [Math.min(1, s.retrofits), 1] },
-  ...FIELDS.map((f): MilestoneDef => ({
+  ...LIVE_FIELD_DEFS.map((f): MilestoneDef => ({
     id: `field:${f.id}`, field: f.id, title: `${f.name}: established`, goal: `Three discoveries in ${f.name.toLowerCase()}`,
     reward: `+5% success on ${f.name.toLowerCase()} experiments`, progress: (s) => [Math.min(3, perField(s, f.id)), 3],
   })),

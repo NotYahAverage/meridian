@@ -130,8 +130,8 @@ export const SERVICE_TYPES: ServiceType[] = [
     cost: 110_000, upkeep: 3_200, radius: 1_500, capacity: 5_000, w: 48, d: 44, jobs: 55, pollution: 0.6, unlockPopulation: 4_000,
   }),
   svc({
-    id: 'research_center', name: 'Research Center', kind: 'research', category: 'services', style: 'lab:energy',
-    description: 'Laboratories where your scientists run experiments. Each centre takes its specialization from what surrounds it, and discoveries can give the city new methods, materials and buildings no other city has.',
+    id: 'research_center', name: 'Utility Lab', kind: 'research', category: 'services', style: 'lab:energy',
+    description: 'Engineers who research the city’s utilities: power, water and waste. Each lab takes its specialization from what surrounds it, and its discoveries can give the city power stations, water works and cleaner ways to run them that no other city has. (Buildings and styles are designed in the Design Studio.)',
     cost: 45_000, upkeep: 1_600, w: 44, d: 40, jobs: 40, unlockPopulation: 500,
   }),
   // ── Parks ───────────────────────────────────────────────────────────────

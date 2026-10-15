@@ -5,7 +5,7 @@ import { projectEconomy } from '../sim/CitySim';
 import { DAYS_PER_MONTH } from '../sim/constants';
 import type { Decision, DecisionOption, Design, Discovery, Plan } from '../sim/research/Generate';
 import { availablePrinciples, describeEffect } from '../sim/research/Generate';
-import { FIELD_BY_ID, FIELDS, type FieldId, FUNCTION_LABEL, PRINCIPLES, PRINCIPLE_BY_ID, RESOURCE_BY_ID, TAG_NAMES } from '../sim/research/Knowledge';
+import { FIELD_BY_ID, FIELDS, type FieldId, FUNCTION_LABEL, LIVE_FIELDS, PRINCIPLES, PRINCIPLE_BY_ID, RESOURCE_BY_ID, TAG_NAMES } from '../sim/research/Knowledge';
 import { POLICIES } from '../sim/policies/Policies';
 import { MASTERY_NAMES, MASTERY_STEPS, MILESTONES, masteryLevel } from '../sim/research/Progress';
 import { AUTO_DECIDE_DAYS, type Center, ITERATE_AFTER_DAYS, REFRESH_DAYS, type RetrofitOffer, UPGRADE_COST } from '../sim/research/Research';
@@ -103,7 +103,7 @@ export class ResearchDialog extends Modal {
   private logKind: 'all' | 'found' | 'setback' | 'milestone' = 'all';
 
   constructor(game: Game) {
-    super(game, 'Research', 'research-modal');
+    super(game, 'Utility Labs', 'research-modal');
   }
 
   open(opts: { tab?: Tab; centreId?: number; discoveryId?: string; designId?: string } = {}): void {
@@ -142,12 +142,16 @@ export class ResearchDialog extends Modal {
     const r = city.research;
     this.seen = r.version;
     const tabs: [Tab, string, number][] = [
-      ['centres', 'Research centres', r.centers.size],
+      ['centres', 'Labs', r.centers.size],
       ['web', 'Knowledge web', r.milestones.size],
       ['discoveries', 'Discoveries', r.discoveries.length],
       ['buildings', 'Buildings', r.designs.size],
       ['history', 'Experiment log', r.records.length],
     ];
+    // Research is a side branch now: the city's buildings and styles come from the Design Studio.
+    b.append(h('div', { class: 'rs-side' }, icon('utilities', 16),
+      h('span', null, 'Utility labs research the city’s power, water and waste. Buildings and styles are designed in the Design Studio.'),
+      h('button', { class: 'btn small', onclick: () => { this.close(); this.game.ui.studio.open(); } }, icon('brush', 13), 'Design Studio')));
     if (r.centers.size) b.append(this.controls());
     b.append(
       h('div', { class: 'rs-tabs', role: 'tablist' },
@@ -214,9 +218,9 @@ export class ResearchDialog extends Modal {
       b.append(
         h('div', { class: 'rs-empty' },
           icon('flask', 30),
-          h('div', { class: 'rs-empty-title' }, 'No research centre yet'),
-          h('div', null, 'Build a Research Center (Services). What surrounds it decides what it specializes in: next to factories it studies industry, by the water it studies water, beside power plants it studies energy. Discoveries can give your city new methods, materials, policies and buildings that no other city has.'),
-          h('button', { class: 'btn primary', onclick: () => this.placeCentre() }, icon('build', 14), `Build a Research Center (${formatMoney(SERVICE_BY_ID.get('research_center')!.cost)})`),
+          h('div', { class: 'rs-empty-title' }, 'No utility lab yet'),
+          h('div', null, 'Build a Utility Lab (Services). What surrounds it decides what it studies: beside power plants it studies energy, by the water it studies water and sanitation, in smoggy districts it studies cleaner air and waste. Discoveries can give your city power stations, water works and cleaner ways to run them that no other city has.'),
+          h('button', { class: 'btn primary', onclick: () => this.placeCentre() }, icon('build', 14), `Build a Utility Lab (${formatMoney(SERVICE_BY_ID.get('research_center')!.cost)})`),
         ),
       );
       return;
@@ -504,12 +508,14 @@ export class ResearchDialog extends Modal {
     if (folded.length) b.append(h('details', { class: 'rs-details' }, h('summary', null, `${folded.length} more milestones`), h('div', { class: 'rs-milestones' }, ...folded.map(card))));
     // Mastery by centre.
     const centres = [...r.centers.values()];
+    // The utility fields, and any other a centre gained experience in before research narrowed.
+    const shownFields = FIELDS.filter((f) => LIVE_FIELDS.includes(f.id) || centres.some((c) => (c.mastery?.[f.id] ?? 0) > 0));
     if (centres.length) {
       b.append(h('div', { class: 'section-title' }, 'Experience by centre'));
       b.append(h('div', { class: 'rs-mtable' },
-        h('div', { class: 'rs-mrow head' }, h('span', null, ''), ...FIELDS.map((f) => h('span', { style: `color:${fieldColor(f.id)}`, 'data-tip': f.name }, f.name.split(' ')[0]))),
+        h('div', { class: 'rs-mrow head' }, h('span', null, ''), ...shownFields.map((f) => h('span', { style: `color:${fieldColor(f.id)}`, 'data-tip': f.name }, f.name.split(' ')[0]))),
         ...centres.map((c) => h('div', { class: 'rs-mrow' }, h('span', null, c.name),
-          ...FIELDS.map((f) => {
+          ...shownFields.map((f) => {
             const l = r.masteryOf(c, f.id);
             return h('span', { 'data-tip': `${MASTERY_NAMES[l]} · ${c.mastery?.[f.id] ?? 0} experience` }, h('span', { class: 'rs-dots' }, ...[1, 2, 3].map((k) => h('i', { class: k <= l ? 'on' : '', style: `--c:${fieldColor(f.id)}` }))));
           }))),
@@ -528,7 +534,9 @@ export class ResearchDialog extends Modal {
     const open = new Set(availablePrinciples(civ).map((p) => p.id));
     const studied = new Set(r.discoveries.map((d) => d.principle));
     let rows = 1;
-    FIELDS.forEach((f, col) => {
+    // The utility fields, and any other the city made discoveries in before research narrowed.
+    const cols = FIELDS.filter((f) => LIVE_FIELDS.includes(f.id) || r.discoveries.some((d) => d.field === f.id));
+    cols.forEach((f, col) => {
       const x = col * colW + 8;
       nodes.push(svg('text', { x: x + nodeW / 2, y: 18, 'text-anchor': 'middle', class: 'web-head', fill: hexCss(f.color) }, trim(f.name, 22)));
       const found = r.discoveries.filter((d) => d.field === f.id).sort((a, b) => a.day - b.day);
@@ -588,7 +596,7 @@ export class ResearchDialog extends Modal {
         if (fr) link(to, fr, 'opened');
       }
     }
-    const width = FIELDS.length * colW + 8;
+    const width = cols.length * colW + 8;
     const height = top + rows * rowH + 10;
     return svg('svg', { class: 'rs-web', width, height, viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': 'Knowledge web' }, ...edges, ...nodes);
   }
@@ -752,7 +760,7 @@ export class ResearchDialog extends Modal {
       h('div', { class: 'rs-design-pic' }, img),
       h('div', { class: 'rs-design-body' },
         name,
-        h('div', { class: 'rs-disc-class' }, `${FUNCTION_LABEL[d.fn]} · ${disc && disc.name !== d.name ? `from ${disc.name}` : `designed at ${disc?.centerName ?? 'your research centre'}`}${built ? ` · ${built} built` : ''}`),
+        h('div', { class: 'rs-disc-class' }, `${FUNCTION_LABEL[d.fn]} · ${disc && disc.name !== d.name ? `from ${disc.name}` : `designed at ${disc?.centerName ?? 'your utility lab'}`}${built ? ` · ${built} built` : ''}`),
         h('div', { class: 'rs-disc-desc' }, d.description),
         rowsEl(designRows(d, cost)),
         h('div', { class: 'rs-traits' }, ...d.traits.slice(0, 8).map((t) => h('span', null, t))),

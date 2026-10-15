@@ -747,7 +747,8 @@ export function tipBox(title: string, desc: string, rows: [string, string][]): H
 function serviceTip(st: ServiceType, cost = st.cost): HTMLElement {
   const rows: [string, string][] = [['Cost', formatMoney(cost)], ['Upkeep', `${formatMoney(st.upkeep)}/month`]];
   if (st.storage) rows.push(['Storage', `up to ${st.storage} MW`]);
-  if (st.designId) rows.push(['Origin', 'Designed by your researchers']);
+  if (st.designId) rows.push(['Origin', 'Designed by your utility labs']);
+  if (st.look) rows.push(['Origin', 'The signature building of a movement']);
   if (st.pollution < 0) rows.push(['Air cleaning', `${Math.round(-st.pollution * 100)}%`]);
   if (st.radius) rows.push(['Coverage', `${st.radius} m radius`]);
   if (st.capacity && st.kind !== 'garbage') rows.push(['Serves', `${formatInt(st.capacity)} residents`]);
