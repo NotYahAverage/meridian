@@ -126,6 +126,19 @@ export interface Trial {
   history: number[];
   reactions: Reaction[];
   verdict?: Verdict;
+  /** What the player did with the verdict. */
+  decision?: Decision;
+  /** The trial this one revises. */
+  parent?: number;
+}
+
+export interface Decision {
+  kind: 'adopted' | 'refined' | 'scrapped';
+  day: number;
+  /** Adopted: the style's movement id. */
+  styleId?: number;
+  /** Refined: the revised sketch. */
+  sketchId?: string;
 }
 
 export const GRADE_LABEL: Record<Grade, string> = { loved: 'Loved', liked: 'Liked', mixed: 'Mixed feelings', disliked: 'Disliked', hated: 'Hated' };
@@ -292,6 +305,31 @@ export function assess(c: Concept, s: Site): Factor[] {
   if (f.has('windCrown')) add('hum', 'neighbours', -0.2, 0.25);
   if (f.has('ornament')) add('tone', 'neighbours', 0.1);
   if (s.familiarity < 0.4) add('clash', 'neighbours', -0.1, 0.3);
+  return out;
+}
+
+/** The things people complained about most in a trial, most first. */
+export function complaints(t: Trial): { key: string; aspect: AspectId }[] {
+  const n = new Map<string, { key: string; aspect: AspectId; count: number }>();
+  for (const re of t.reactions) {
+    if (re.mood >= -0.1 || re.blame || re.month === 0 || re.key === 'ignored') continue;
+    const e = n.get(re.key) ?? { key: re.key, aspect: re.aspect, count: 0 };
+    e.count++;
+    n.set(re.key, e);
+  }
+  return [...n.values()].sort((a, b) => b.count - a.count).map(({ key, aspect }) => ({ key, aspect }));
+}
+
+/** A revised design: people notice whether their complaints about the first one were answered. */
+export function followUp(parent: Trial, factors: Factor[]): Factor[] {
+  const out: Factor[] = [];
+  const seen = new Set<AspectId>();
+  for (const c of complaints(parent).slice(0, 3)) {
+    if (seen.has(c.aspect) || c.key === 'empty' || c.key === 'emptyWork' || c.key === 'unhappy') continue;
+    seen.add(c.aspect);
+    const still = factors.some((f) => f.key === c.key && f.w < 0);
+    out.push(still ? { key: 'ignored', aspect: c.aspect, w: -0.2, spread: 0.1 } : { key: 'listened', aspect: c.aspect, w: 0.3, spread: 0.1 });
+  }
   return out;
 }
 
@@ -472,6 +510,12 @@ const LINES: Record<string, Lines> = {
   utility: { neg: [['resident', 'No power since Tuesday. Hard to judge a building in the dark.'], ['resident', 'The taps are dry again. It’s not the building, but still.'], ['worker', 'We sent everyone home: no power again.'], ['worker', 'No water in the building today.']] },
   garbage: { neg: [['resident', 'The bins haven’t been emptied for a week.'], ['resident', 'The rubbish is piling up by the door. Not the architect’s fault, I know.'], ['worker', 'Nobody has collected our rubbish for days.']] },
   smog: { neg: [['resident', 'You can taste the factory smoke on the balcony.'], ['resident', 'We keep the windows shut because of the smog.'], ['worker', 'The air outside is thick with smoke.']] },
+  listened: {
+    pos: [['neighbour', 'They actually listened to us this time.'], ['critic', 'The second attempt fixes what was wrong with the first. A rare thing.'], ['resident', 'Much better than the first one. Someone read the complaints.'], ['passer', 'Version two, and it’s better.']],
+  },
+  ignored: {
+    neg: [['neighbour', 'They built it again and changed nothing we complained about.'], ['critic', 'A second attempt with all the old faults.'], ['neighbour', 'Same problems as the first one. Did anyone read our letters?']],
+  },
   happy: { pos: [['resident', 'Honestly? Best place I’ve lived in this city.'], ['resident', 'We moved in for a year. We’re not leaving.'], ['worker', 'Best office I’ve worked in.']] },
   unhappy: { neg: [['resident', 'It looked good in the drawings. Living here is another story.'], ['resident', 'We’re thinking of moving out.'], ['worker', 'Nobody wants to work here.']] },
 };

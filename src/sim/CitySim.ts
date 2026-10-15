@@ -564,8 +564,8 @@ function dailyBuildings(city: City): void {
     if (p & Problem.NoWorkers) h -= 12;
     if (p & Problem.NoGoods) h -= 10;
     h += rm.happiness;
-    // Living in a prototype: a good design makes people happier, a bad one less so.
-    if (b.typeId === 'proto') h += city.design.moodBonus(b);
+    // Living in a prototype or an adopted style: a well-liked design makes people happier, a disliked one less so.
+    h += city.design.moodBonus(b);
     b.happiness = lerp(b.happiness, clamp(h, 0, 100), 0.35);
 
     // Business efficiency.

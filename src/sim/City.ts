@@ -54,7 +54,7 @@ export type CityEvents = {
   achievement: { id: string; title: string };
   scenario: { id: string; result: 'won' | 'lost' };
   news: Edition;
-  design: { type: 'idea'; id: string } | { type: 'reaction'; trial: number; reaction: Reaction } | { type: 'trial'; trial: number; what: 'placed' | 'opened' | 'month' | 'verdict' | 'gone' };
+  design: { type: 'idea'; id: string } | { type: 'reaction'; trial: number; reaction: Reaction } | { type: 'trial'; trial: number; what: 'placed' | 'opened' | 'month' | 'verdict' | 'gone' | 'adopted' | 'scrapped' };
   research: { type: 'discovery' | 'decision' | 'failure' | 'milestone' | 'retrofit'; centerId: number; discoveryId?: string; recordId?: string; outcome?: string; milestoneId?: string };
 };
 

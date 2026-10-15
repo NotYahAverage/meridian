@@ -150,10 +150,10 @@ export class Inspector {
         const col = trial.approval >= 58 ? 'var(--good)' : trial.approval >= 45 ? 'var(--warn)' : 'var(--bad)';
         body.append(
           h('div', { class: 'insp-trial' },
-            h('div', { class: 'insp-trial-head' }, icon('flask', 13), h('b', null, 'Prototype'), h('span', { class: 'muted' }, trial.verdict ? `Verdict: ${GRADE_LABEL[trial.verdict.grade]}` : city.design.stageOf(trial))),
+            h('div', { class: 'insp-trial-head' }, icon('flask', 13), h('b', null, 'Prototype'), h('span', { class: 'muted' }, trial.verdict && !trial.decision ? `Verdict: ${GRADE_LABEL[trial.verdict.grade]}` : city.design.stageOf(trial))),
             open ? h('div', { class: 'kv' }, h('span', null, `${trial.approval}% approve`), meter(trial.approval / 100, col)) : null,
             last ? h('div', { class: 'insp-trial-quote' }, `“${last.text}”`, h('span', { class: 'muted' }, ` — ${last.who}`)) : null,
-            h('div', { class: 'btn-row' }, h('button', { class: 'btn small primary', onclick: () => this.game.ui.studio.open({ tab: 'prototypes', trialId: trial.id }) }, icon('brush', 13), trial.verdict ? 'Read the verdict' : 'Follow the trial')),
+            h('div', { class: 'btn-row' }, h('button', { class: 'btn small primary', onclick: () => this.game.ui.studio.open({ tab: 'prototypes', trialId: trial.id }) }, icon('brush', 13), trial.decision ? 'See the trial' : trial.verdict ? 'Read the verdict' : 'Follow the trial')),
           ),
         );
       }
@@ -183,6 +183,8 @@ export class Inspector {
         body.append(h('div', { class: 'kv' }, h('span', null, 'Land value'), meter(b.landValue, 'var(--accent)')));
         if (b.state === BuildingState.Active) body.append(kv('Tax revenue', `${formatMoney(city.economy.buildingTax(b, city.landValue.at(b.cx, b.cz)))}/month`));
         body.append(kv('Pollution', formatPct(city.landValue.pollutionAt(b.cx, b.cz))), kv('Floors', `${b.floors}`), kv('Age', `${b.age} days`));
+        const style = !trial && b.movement ? city.design.style(b.movement) : undefined;
+        if (style) body.append(h('div', { class: 'kv' }, h('span', null, 'Style'), h('button', { class: 'rs-link', onclick: () => this.game.ui.studio.open({ tab: 'styles' }) }, style.name)));
         const local = b.district ? city.policies.localTo(b.district).filter((id) => !city.policies.has(id)) : [];
         if (local.length) body.append(kv('District policies', local.map((id) => POLICY_BY_ID.get(id)!.name).join(', ')));
         if (b.level < 3 && b.state === BuildingState.Active && !trial) {

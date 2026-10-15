@@ -53,7 +53,7 @@ export class ReactionBubbles {
     if (show) {
       const dist = g.cam.distance;
       for (const t of city.design.trials) {
-        if (t.state === 'gone') continue;
+        if (t.state === 'gone' || t.decision?.kind === 'scrapped') continue;
         const b = city.buildings.get(t.buildingId);
         if (!b) continue;
         const done = t.state === 'done';
@@ -88,7 +88,7 @@ export class ReactionBubbles {
       this.badges.set(t.id, el);
     }
     const open = t.openDay >= 0;
-    const stage = t.state === 'done' && t.verdict ? `Verdict: ${GRADE_LABEL[t.verdict.grade]}` : city.design.stageOf(t);
+    const stage = t.state === 'done' && t.verdict && !t.decision ? `Verdict: ${GRADE_LABEL[t.verdict.grade]} · your call` : city.design.stageOf(t);
     const key = `${t.name}|${stage}|${t.approval}|${open}`;
     if (el.dataset.key !== key) {
       el.dataset.key = key;

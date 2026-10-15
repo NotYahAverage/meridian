@@ -333,11 +333,11 @@ function groundProblem(city: City, o: OBB): string | undefined {
 }
 
 /** Roads and service buildings block a lot; zoned buildings in the way are listed to be replaced. */
-function overlapProblem(city: City, o: OBB, conflicts: Building[]): string | undefined {
+function overlapProblem(city: City, o: OBB, conflicts: Building[], replacing = 0): string | undefined {
   if (!city.spawner.clearOfRoads(o, 0.4)) return 'Overlaps a road';
   const [minX, minZ, maxX, maxZ] = obbBounds(o);
   for (const b of city.buildings.queryRect(minX, minZ, maxX, maxZ)) {
-    if (!obbIntersects(o, lotOBB(b), -0.3)) continue;
+    if (b.id === replacing || !obbIntersects(o, lotOBB(b), -0.3)) continue;
     if (b.kind === 'service' || b.typeId === 'proto') return 'Overlaps another building';
     conflicts.push(b);
   }
@@ -391,8 +391,8 @@ export interface PrototypePreview {
   spec: ProtoSpec;
 }
 
-/** Where a design from the sketchbook would go, facing the nearest road. */
-export function previewPrototype(city: City, sketchId: string, x: number, z: number, flip = false): PrototypePreview {
+/** Where a design from the sketchbook would go, facing the nearest road (optionally in place of a building). */
+export function previewPrototype(city: City, sketchId: string, x: number, z: number, flip = false, replacing = 0): PrototypePreview {
   const sk = city.design.sketches.find((k) => k.id === sketchId);
   if (!sk) throw new Error(`Unknown sketch ${sketchId}`);
   const c = sk.concept;
@@ -421,7 +421,7 @@ export function previewPrototype(city: City, sketchId: string, x: number, z: num
     res.error = 'The high-rise ban doesn\'t allow a building this tall here';
     return res;
   }
-  const problem = groundProblem(city, f.obb) ?? overlapProblem(city, f.obb, res.conflicts);
+  const problem = groundProblem(city, f.obb) ?? overlapProblem(city, f.obb, res.conflicts, replacing);
   if (problem) {
     res.error = problem;
     return res;
@@ -435,12 +435,13 @@ export function previewPrototype(city: City, sketchId: string, x: number, z: num
 }
 
 /** Builds a design from the sketchbook as a prototype; its trial starts when it opens. */
-export function placePrototype(city: City, sketchId: string, x: number, z: number, flip = false): CommandResult & { building?: Building } {
-  const pv = previewPrototype(city, sketchId, x, z, flip);
+export function placePrototype(city: City, sketchId: string, x: number, z: number, flip = false, replacing = 0): CommandResult & { building?: Building } {
+  const pv = previewPrototype(city, sketchId, x, z, flip, replacing);
   if (!pv.valid || !pv.frame) return err(pv.error ?? 'Cannot place here');
   const sk = city.design.sketches.find((k) => k.id === sketchId)!;
   const { spec } = pv;
   if (!city.economy.spend(spec.cost)) return err('Not enough money');
+  if (replacing && city.buildings.get(replacing)) city.removeBuilding(replacing, 'replace');
   for (const c of pv.conflicts) city.removeBuilding(c.id, 'replace');
   const f = pv.frame;
   const c = sk.concept;
@@ -470,6 +471,17 @@ export function placePrototype(city: City, sketchId: string, x: number, z: numbe
   city.design.startTrial(sk, b, spec.cost);
   city.events.emit('built', { x: b.cx, z: b.cz, kind: 'service' });
   return { ok: true, cost: spec.cost, building: b };
+}
+
+/** Rebuilds a revised design on the lot of the prototype it revises. */
+export function rebuildPrototype(city: City, sketchId: string, trialId: number): CommandResult & { building?: Building } {
+  const t = city.design.trial(trialId);
+  const old = t ? city.buildings.get(t.buildingId) : undefined;
+  if (!t || !old) return err('The earlier prototype is gone: build the new one somewhere else');
+  if (t.state === 'building' || t.state === 'testing') return err('Wait for the verdict before rebuilding it');
+  // Its frontage point, so the new building faces the same street on the same side.
+  const ca = Math.cos(old.angle), sa = Math.sin(old.angle);
+  return placePrototype(city, sketchId, old.cx + old.hd * sa * 0.98, old.cz - old.hd * ca * 0.98, false, old.id);
 }
 
 export function bulldozeBuilding(city: City, id: number): CommandResult {

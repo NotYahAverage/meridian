@@ -1,7 +1,10 @@
 import { formatInt, formatMoney } from '../core/math';
 import type { Game } from '../game/Game';
 import type { Chip, Concept, DesignInput } from '../sim/design/Concept';
-import { ASPECTS, GRADE_LABEL, MAX_ACTIVE_TRIALS, type Trial, protoSpec } from '../sim/design/Trials';
+import { ASPECTS, GRADE_LABEL, MAX_ACTIVE_TRIALS, type Trial, complaints, protoSpec } from '../sim/design/Trials';
+import { PUSH_LEVELS, globalShare, moodOf, nextRevision, reachOf, styleName } from '../sim/design/Styles';
+import { rebuildPrototype } from '../sim/CityCommands';
+import { Clock } from '../sim/Clock';
 import type { PrototypeTool } from '../tools/PrototypeTool';
 import { CATEGORY_LABEL, IDEAS, IDEA_BY_ID, type IdeaCategory } from '../sim/design/Ideas';
 import { hashStr } from '../sim/research/Generate';
@@ -21,6 +24,11 @@ const EXAMPLES = [
 
 const CAT_ORDER: IdeaCategory[] = ['use', 'height', 'material', 'roof', 'feature', 'character'];
 
+type Tab = 'design' | 'prototypes' | 'styles' | 'ideas';
+
+/** Buildings in an adopted style lit up on the map. */
+const STYLE_HIGHLIGHT = 6;
+
 /** How many yaw steps the preview turns through (each is cached). */
 const YAWS = 12;
 
@@ -32,7 +40,9 @@ const YAWS = 12;
 export class DesignStudio extends Modal {
   private input: DesignInput = { text: '', added: [], removed: [] };
   private concept: Concept | null = null;
-  private tab: 'design' | 'prototypes' | 'ideas' = 'design';
+  private tab: Tab = 'design';
+  /** The trial whose design is being revised (0 when not refining). */
+  private refining = 0;
   /** A trial to scroll to when the prototypes tab opens. */
   private focusTrial = 0;
   private yawStep = 2;
@@ -57,16 +67,29 @@ export class DesignStudio extends Modal {
     super(game, 'Design Studio', 'design-modal');
   }
 
-  open(opts: { sketchId?: string; tab?: 'design' | 'prototypes' | 'ideas'; trialId?: number } = {}): void {
+  open(opts: { sketchId?: string; tab?: Tab; trialId?: number; refineTrialId?: number } = {}): void {
     if (opts.tab) this.tab = opts.tab;
     this.focusTrial = opts.trialId ?? 0;
-    const sk = opts.sketchId ? this.game.city?.design.sketches.find((s) => s.id === opts.sketchId) : undefined;
+    const design = this.game.city?.design;
+    const sk = opts.sketchId ? design?.sketches.find((s) => s.id === opts.sketchId) : undefined;
     if (sk) {
       this.input = structuredClone(sk.input);
       this.name = sk.name;
       this.nameEdited = true;
       this.tab = 'design';
+      this.refining = 0;
     }
+    // Refining: the tested design on the drawing board, with what people said about it.
+    const rt = opts.refineTrialId ? design?.trial(opts.refineTrialId) : undefined;
+    const rsk = rt ? design?.sketches.find((s) => s.id === rt.sketchId) : undefined;
+    if (rt && rsk) {
+      this.input = structuredClone(rsk.input);
+      this.name = nextRevision(rt.name);
+      this.nameEdited = true;
+      this.tab = 'design';
+      this.refining = rt.id;
+    }
+    this.game.world?.buildings.clearHighlights(STYLE_HIGHLIGHT);
     this.render();
     super.open();
     if (this.tab === 'design') setTimeout(() => this.els.text?.focus(), 30);
@@ -76,7 +99,7 @@ export class DesignStudio extends Modal {
     const city = this.game.city;
     if (!this.isOpen || !city || city.design.version === this.seen) return;
     // Don't rebuild a list under the pointer (keeps its buttons clickable); try again next frame.
-    if (this.tab === 'prototypes' && this.body.matches(':hover')) return;
+    if ((this.tab === 'prototypes' || this.tab === 'styles') && this.body.matches(':hover')) return;
     this.seen = city.design.version;
     if (this.tab === 'design') this.refresh();
     else this.render();
@@ -93,8 +116,13 @@ export class DesignStudio extends Modal {
     b.append(h('div', { class: 'rs-tabs', role: 'tablist' },
       h('button', { class: `ci-tab${this.tab === 'design' ? ' active' : ''}`, role: 'tab', onclick: () => { this.tab = 'design'; this.render(); } }, 'Design'),
       h('button', { class: `ci-tab${this.tab === 'prototypes' ? ' active' : ''}`, role: 'tab', onclick: () => { this.tab = 'prototypes'; this.render(); } }, 'Prototypes', city.design.trials.length ? h('span', { class: 'rs-count' }, `${city.design.activeTrials().length}/${MAX_ACTIVE_TRIALS}`) : null),
+      h('button', { class: `ci-tab${this.tab === 'styles' ? ' active' : ''}`, role: 'tab', onclick: () => { this.tab = 'styles'; this.render(); } }, 'City style', city.design.styles.length ? h('span', { class: 'rs-count' }, `${city.design.styles.length}`) : null),
       h('button', { class: `ci-tab${this.tab === 'ideas' ? ' active' : ''}`, role: 'tab', onclick: () => { this.tab = 'ideas'; this.render(); } }, 'Ideas', h('span', { class: 'rs-count' }, `${known}/${IDEAS.length}`)),
     ));
+    if (this.tab === 'styles') {
+      this.renderStyles(b);
+      return;
+    }
     if (this.tab === 'ideas') {
       this.renderIdeas(b);
       return;
@@ -150,7 +178,8 @@ export class DesignStudio extends Modal {
     b.append(
       h('div', { class: 'ds-wrap' },
         h('div', { class: 'ds-left' },
-          h('label', { class: 'ds-label' }, 'Describe a building in your own words'),
+          this.refineBanner(),
+          h('label', { class: 'ds-label' }, this.refining ? 'Change what you want to change' : 'Describe a building in your own words'),
           text,
           h('div', { class: 'ds-try' }, h('span', null, 'Try:'), ...EXAMPLES.slice(0, 4).map((ex) => h('button', { class: 'rs-link', onclick: () => { this.input = { text: ex, added: [], removed: [] }; this.nameEdited = false; text.value = ex; this.refresh(); } }, ex))),
           h('div', { class: 'ds-section' }, 'What your architects understood'),
@@ -166,15 +195,39 @@ export class DesignStudio extends Modal {
           name,
           this.els.desc,
           this.els.stats,
-          h('div', { class: 'ds-actions' },
-            h('button', { class: 'btn', onclick: () => { this.input = { text: '', added: [], removed: [] }; this.name = ''; this.nameEdited = false; text.value = ''; this.refresh(); text.focus(); } }, 'Start over'),
-            h('button', { class: 'btn', onclick: () => this.save() }, icon('save', 14), 'Save to sketchbook'),
-            h('button', { class: 'btn primary ds-build', onclick: () => this.build() }, icon('build', 14), 'Build prototype'),
-          ),
+          this.actions(text),
         ),
       ),
     );
     this.refresh();
+  }
+
+  /** What people said about the design being refined, and what the architects suggest. */
+  private refineBanner(): HTMLElement | null {
+    const city = this.game.city!;
+    const t = this.refining ? city.design.trial(this.refining) : undefined;
+    const v = t?.verdict;
+    if (!t || !v) return null;
+    const worst = complaints(t).slice(0, 2).map((c) => t.reactions.filter((r) => r.key === c.key && r.mood < 0).sort((a, b) => a.mood - b.mood)[0]).filter((r) => !!r);
+    return h('div', { class: 'ds-refine' },
+      h('div', { class: 'ds-refine-head' }, icon('brush', 14), h('b', null, `Refining ${t.name}`), h('span', { class: 'rs-muted' }, `${GRADE_LABEL[v.grade]} · ${v.approval}% approved`),
+        h('button', { class: 'icon-btn small', 'aria-label': 'Stop refining', 'data-tip': 'Stop refining', onclick: () => { this.refining = 0; this.render(); } }, icon('close', 13))),
+      worst.length ? h('div', { class: 'tr-quotes' }, ...worst.map((r) => this.quote(r))) : null,
+      ...v.advice.map((a) => h('div', { class: 'tr-advice-item' }, icon('info', 12), a)),
+      h('div', { class: 'hint small' }, 'Change the description or the cards, then build the revised version. It is tested for a month less, and people will notice what you fixed.'),
+    );
+  }
+
+  private actions(text: HTMLTextAreaElement): HTMLElement {
+    const city = this.game.city!;
+    const t = this.refining ? city.design.trial(this.refining) : undefined;
+    const inPlace = !!t && t.state === 'done' && !!city.buildings.get(t.buildingId);
+    return h('div', { class: 'ds-actions' },
+      h('button', { class: 'btn', onclick: () => { this.input = { text: '', added: [], removed: [] }; this.name = ''; this.nameEdited = false; this.refining = 0; text.value = ''; this.render(); this.els.text?.focus(); } }, 'Start over'),
+      h('button', { class: 'btn', onclick: () => this.save() }, icon('save', 14), 'Save to sketchbook'),
+      inPlace ? h('button', { class: 'btn ds-rebuild', 'data-tip': `Replace ${t!.name} with the new version on the same lot`, onclick: () => this.rebuild() }, icon('upgrade', 14), 'Rebuild on its lot') : null,
+      h('button', { class: 'btn primary ds-build', onclick: () => this.build() }, icon('build', 14), t ? 'Build revised prototype' : 'Build prototype'),
+    );
   }
 
   private mentions(id: string): boolean {
@@ -342,10 +395,47 @@ export class DesignStudio extends Modal {
       this.game.toastError('Describe a building first');
       return;
     }
-    const sk = city.design.saveSketch(this.input, this.name);
+    const sk = this.sketchOnBoard();
     this.game.play('good');
-    this.game.ui.toasts.push({ severity: 'good', icon: 'save', title: 'Saved to the sketchbook', text: sk.name });
+    this.game.ui.toasts.push({ severity: 'good', icon: 'save', title: sk.refines ? 'Revision saved to the sketchbook' : 'Saved to the sketchbook', text: sk.name });
     this.renderSketches();
+  }
+
+  /** The design on the drawing board as a sketch: the same one already saved, or a new one (a revision when refining). */
+  private sketchOnBoard() {
+    const city = this.game.city!;
+    const same = city.design.sketches.find((k) => JSON.stringify(k.input) === JSON.stringify(this.input) && k.name === (this.name.trim() || k.concept.name) && (k.refines ?? 0) === this.refining);
+    return same ?? city.design.saveSketch(this.input, this.name, this.refining || undefined);
+  }
+
+  /** Replaces the prototype being refined with the new version, on the same lot. */
+  private rebuild(): void {
+    const city = this.game.city;
+    const t = city && this.refining ? city.design.trial(this.refining) : undefined;
+    if (!city || !t) return;
+    if (!this.input.text.trim() && !this.input.added.length) {
+      this.game.toastError('Describe a building first');
+      return;
+    }
+    if (!city.design.canStartTrial()) {
+      this.game.toastError(`Your architects can test ${MAX_ACTIVE_TRIALS} prototypes at a time`);
+      return;
+    }
+    const sk = this.sketchOnBoard();
+    const res = rebuildPrototype(city, sk.id, t.id);
+    if (!res.ok) {
+      this.game.audio.play('error');
+      this.game.toastError(res.error ?? 'Cannot rebuild it there');
+      return;
+    }
+    this.game.audio.play('build');
+    this.game.flashMoney(-(res.cost ?? 0));
+    const b = res.building!;
+    this.refining = 0;
+    this.close();
+    this.game.world?.effects.burst(b.cx, b.y, b.cz, Math.max(b.hw, b.hd));
+    this.game.flyTo(b.cx, b.cz, 220);
+    this.game.select({ kind: 'building', id: b.id });
   }
 
   /** Builds a design as a prototype: the one on the drawing board (saved first) or one from the sketchbook. */
@@ -359,8 +449,7 @@ export class DesignStudio extends Modal {
         return;
       }
       // The same design already in the sketchbook is reused rather than saved twice.
-      const same = city.design.sketches.find((k) => JSON.stringify(k.input) === JSON.stringify(this.input) && k.name === (this.name.trim() || k.concept.name));
-      id = (same ?? city.design.saveSketch(this.input, this.name)).id;
+      id = this.sketchOnBoard().id;
     }
     if (!city.design.canStartTrial()) {
       this.game.toastError(`Your architects can test ${MAX_ACTIVE_TRIALS} prototypes at a time`);
@@ -371,6 +460,7 @@ export class DesignStudio extends Modal {
       this.game.toastError(`Not enough money: ${sk.name} costs ${formatMoney(protoSpec(sk.concept).cost)}`);
       return;
     }
+    this.refining = 0;
     this.close();
     this.game.setTool('prototype', (t: PrototypeTool) => t.configure(sk.id));
     this.game.ui.toasts.push({ severity: 'info', icon: 'build', title: `Choose a lot for ${sk.name}`, text: 'Click beside a road to build it. R flips it to the other side of the street; Esc cancels.' });
@@ -391,7 +481,7 @@ export class DesignStudio extends Modal {
       const ready = this.game.thumbs.request(`sketch:${sk.id}`, { kind: 'building', style: c.kind, w: c.w, d: c.d, floors: c.floors, level: c.level, seed: 4242, look: c.look }, (u) => (img.src = u));
       if (ready) img.src = ready;
       el.append(h('div', { class: 'ds-sketch' },
-        h('button', { class: 'ds-sketch-open', onclick: () => this.open({ sketchId: sk.id }), 'data-tip': sk.input.text || 'Open this design' }, img, h('b', null, sk.name), h('span', null, c.description)),
+        h('button', { class: `ds-sketch-open${sk.scrapped ? ' scrapped' : ''}`, onclick: () => this.open({ sketchId: sk.id }), 'data-tip': sk.input.text || 'Open this design' }, img, h('b', null, sk.name, sk.scrapped ? h('span', { class: 'ds-tag' }, 'scrapped') : sk.rev ? h('span', { class: 'ds-tag' }, `revision ${sk.rev}`) : null), h('span', null, c.description)),
         h('div', { class: 'ds-sketch-acts' },
           h('button', { class: 'icon-btn small', 'aria-label': `Build ${sk.name}`, 'data-tip': `Build as a prototype (${formatMoney(protoSpec(c).cost)})`, onclick: () => this.build(sk.id) }, icon('build', 13)),
           h('button', { class: 'icon-btn small', 'aria-label': 'Delete design', 'data-tip': 'Delete', onclick: () => { city.design.deleteSketch(sk.id); this.renderSketches(); } }, icon('trash', 13)),
@@ -483,12 +573,146 @@ export class DesignStudio extends Modal {
         h('div', { class: 'tr-verdict-text' }, v.summary),
         v.quotes.length ? h('div', { class: 'tr-quotes' }, ...v.quotes.map((r) => this.quote(r))) : null,
         v.advice.length ? h('div', { class: 'tr-advice' }, h('div', { class: 'ds-section' }, 'Your architects suggest'), ...v.advice.map((a) => h('div', { class: 'tr-advice-item' }, icon('info', 12), a))) : null,
+        t.decision ? this.decided(t) : this.decide(t),
       ));
     }
     if (t.state !== 'gone') card.append(meter, aspects);
     if (said.length && !v) card.append(h('div', { class: 'ds-section' }, 'What people are saying'), quotes);
     else if (!said.length && t.state !== 'gone') card.append(h('div', { class: 'hint small' }, 'Nobody has said anything yet.'));
     return card;
+  }
+
+  /** Adopt, refine or scrap. */
+  private decide(t: Trial): HTMLElement {
+    const city = this.game.city!;
+    const v = t.verdict!;
+    const b = city.buildings.get(t.buildingId);
+    const street = (b && city.roads.segments.get(b.segId)?.name) || 'its street';
+    const rec = v.approval >= 58 ? 'adopt' : v.approval >= 38 ? 'refine' : 'scrap';
+    const choice = (id: string, ic: string, label: string, text: string, onclick: () => void) =>
+      h('button', { class: `tr-choice${rec === id ? ' rec' : ''}`, 'data-choice': id, onclick }, h('span', { class: 'tr-choice-head' }, icon(ic, 15), h('b', null, label), rec === id ? h('span', { class: 'ds-tag' }, 'suggested') : null), h('span', { class: 'tr-choice-text' }, text));
+    return h('div', { class: 'tr-decide' },
+      h('div', { class: 'ds-section' }, 'What now?'),
+      h('div', { class: 'tr-choices' },
+        choice('adopt', 'check', 'Adopt', `Your city starts building in the ${styleName(t.name)}. It spreads from ${street} ${v.approval >= 58 ? 'as people warm to it' : 'slowly, as people didn’t take to it'}.`, () => void this.adopt(t)),
+        choice('refine', 'brush', 'Refine', 'Change it with what people said and test it again, for a month less.', () => this.open({ refineTrialId: t.id })),
+        choice('scrap', 'trash', 'Scrap', 'Shelve the design. Keep the building as a one-off, or demolish it.', () => void this.scrap(t)),
+      ),
+    );
+  }
+
+  private async adopt(t: Trial): Promise<void> {
+    const city = this.game.city!;
+    const v = t.verdict!;
+    if (v.approval < 45 && !(await this.game.ui.confirm('Adopt it anyway?', `Only ${v.approval}% of people approved of ${t.name}. Adopted, it will spread slowly, and the people living in it will be a little less happy.`, 'Adopt anyway'))) return;
+    if (!city.design.adopt(t.id)) return;
+    this.game.audio.play('milestone');
+    this.focusTrial = t.id;
+    this.render();
+  }
+
+  private async scrap(t: Trial): Promise<void> {
+    const city = this.game.city!;
+    const standing = !!city.buildings.get(t.buildingId);
+    const buttons: [string, string, string][] = standing ? [['cancel', 'Cancel', ''], ['demolish', 'Scrap and demolish', 'danger'], ['keep', 'Scrap, keep the building', 'primary']] : [['cancel', 'Cancel', ''], ['keep', 'Scrap it', 'primary']];
+    const choice = await this.game.ui.choose(`Scrap ${t.name}?`, standing ? 'The design goes back in the sketchbook, marked scrapped. The prototype can stay as a one-off, or be demolished.' : 'The design goes back in the sketchbook, marked scrapped.', buttons);
+    if (choice !== 'keep' && choice !== 'demolish') return;
+    city.design.scrap(t.id, choice === 'demolish');
+    this.game.play(choice === 'demolish' ? 'bulldoze' : 'click');
+    this.focusTrial = t.id;
+    this.render();
+  }
+
+  /** What was decided. */
+  private decided(t: Trial): HTMLElement {
+    const city = this.game.city!;
+    const d = t.decision!;
+    const when = Clock.monthLabel(Math.floor(d.day / 30));
+    if (d.kind === 'adopted') {
+      const st = city.design.style(d.styleId ?? -1);
+      const n = st ? city.design.styleCounts().get(st.id) ?? 0 : 0;
+      return h('div', { class: 'tr-decided good' }, icon('check', 14), h('span', null, `Adopted in ${when} as the `, h('b', null, st?.name ?? 'city’s style'), `. ${n} building${n === 1 ? '' : 's'} so far.`),
+        h('button', { class: 'btn small', onclick: () => { this.tab = 'styles'; this.render(); } }, 'City style'));
+    }
+    if (d.kind === 'refined') {
+      const sk = city.design.sketches.find((k) => k.id === d.sketchId);
+      const next = city.design.trials.find((x) => x.sketchId === d.sketchId);
+      return h('div', { class: 'tr-decided' }, icon('brush', 14), h('span', null, `Refined in ${when} as `, h('b', null, sk?.name ?? 'a new version'), next ? '.' : ', not built yet.'),
+        next ? h('button', { class: 'btn small', onclick: () => { this.focusTrial = next.id; this.render(); } }, 'Its trial') : sk ? h('button', { class: 'btn small', onclick: () => this.open({ sketchId: sk.id }) }, 'Open') : null);
+    }
+    return h('div', { class: 'tr-decided bad' }, icon('trash', 14), h('span', null, `Scrapped in ${when}.`));
+  }
+
+  /** The city's styles: its own way of building and the designs it adopted, spreading. */
+  private renderStyles(b: HTMLElement): void {
+    const city = this.game.city!;
+    const d = city.design;
+    const day = city.clock.day;
+    b.append(h('div', { class: 'hint' }, 'Adopted designs become styles. Each spreads outward from the street where it was tested: new buildings nearby take it up, and owners renovate older ones in it. The better people liked it, the faster it spreads and the happier the people living in it are.'));
+    const counts = d.styleCounts();
+    const blend = city.style.blend();
+    const share = (id: number) => blend.find((e) => e.movement.id === id)?.share ?? 0;
+    const list = h('div', { class: 'st-list' });
+    const local = city.style.movements[0];
+    list.append(h('div', { class: 'st-card local' },
+      h('div', { class: 'st-swatch' }, icon('home', 22)),
+      h('div', { class: 'st-main' },
+        h('b', null, 'The city’s own way of building'),
+        h('span', { class: 'rs-muted' }, local?.manifesto ?? 'How your builders build when nobody tells them otherwise.'),
+        h('div', { class: 'st-stats' }, this.stat('Buildings', `${counts.get(0) ?? 0}`), this.stat('New building elsewhere', `${Math.round(share(0) * 100)}%`)),
+      ),
+    ));
+    if (!d.styles.length) {
+      list.append(h('div', { class: 'tr-empty' }, h('div', null, 'No adopted styles yet. Adopt a well-liked prototype to start one.'),
+        h('button', { class: 'btn', onclick: () => { this.tab = 'prototypes'; this.render(); } }, icon('flask', 14), 'Prototypes')));
+    }
+    for (const st of [...d.styles].reverse()) {
+      const t = d.trial(st.trialId);
+      const img = h('img', { alt: '', draggable: 'false' }) as HTMLImageElement;
+      if (t) {
+        const c = t.concept;
+        const ready = this.game.thumbs.request(`trial:${t.id}`, { kind: 'building', style: c.kind, w: c.w, d: c.d, floors: c.floors, level: c.level, seed: 4242, look: c.look }, (u) => (img.src = u));
+        if (ready) img.src = ready;
+      }
+      const mood = moodOf(st);
+      const n = counts.get(st.id) ?? 0;
+      list.append(h('div', { class: `st-card${st.push === 0 ? ' retired' : ''}`, 'data-style': String(st.id) },
+        img,
+        h('div', { class: 'st-main' },
+          h('b', null, st.name),
+          h('span', { class: 'rs-muted' }, `From ${t?.name ?? 'a prototype'}${st.street ? ` on ${st.street}` : ''}, adopted ${Clock.monthLabel(Math.floor(st.day / 30))} with ${st.approval}% approval.`),
+          h('div', { class: 'st-stats' },
+            this.stat('Buildings', `${n}`, st.renovated ? `${st.renovated} renovated` : undefined),
+            this.stat('Reaches', st.push ? `${Math.round(reachOf(st, day) / 10) * 10} m` : '—', 'from where it began'),
+            this.stat('New building elsewhere', `${Math.round(globalShare(st, day) * 100)}%`),
+            this.stat('Residents’ mood', `${mood >= 0 ? '+' : ''}${mood.toFixed(1)}`, mood >= 0 ? 'happier living in it' : 'less happy living in it'),
+          ),
+          h('div', { class: 'st-controls' },
+            h('div', { class: 'rs-seg', role: 'group', 'aria-label': `How much to build in the ${st.name}` }, ...PUSH_LEVELS.map(([v, label]) => h('button', { class: `rs-seg-btn${st.push === v ? ' active' : ''}`, 'data-push': String(v), onclick: () => { d.setPush(st.id, v); this.game.play('click'); this.render(); } }, label))),
+            h('button', { class: 'btn small', onclick: () => this.showStyle(st.id) }, icon('eye', 13), 'Show on map'),
+          ),
+        ),
+      ));
+    }
+    b.append(list);
+  }
+
+  private stat(label: string, value: string, tip?: string): HTMLElement {
+    return h('div', { class: 'st-stat', 'data-tip': tip ?? '' }, h('span', null, label), h('b', null, value));
+  }
+
+  /** Lights up every building in a style and flies to where it began. */
+  private showStyle(id: number): void {
+    const city = this.game.city!;
+    const st = city.design.style(id);
+    const w = this.game.world;
+    if (!st || !w) return;
+    w.buildings.clearHighlights(STYLE_HIGHLIGHT);
+    const ids = [...city.buildings.all.values()].filter((b) => b.movement === id).map((b) => b.id);
+    w.buildings.setHighlight(ids, STYLE_HIGHLIGHT);
+    this.close();
+    this.game.flyTo(st.x, st.z, Math.min(900, Math.max(260, reachOf(st, city.clock.day) * 1.4)));
+    this.game.ui.toasts.push({ severity: 'info', icon: 'eye', title: `The ${st.name}`, text: `${ids.length} building${ids.length === 1 ? '' : 's'} highlighted. They stay lit until you open the studio again.` });
   }
 
   private quote(r: Trial['reactions'][number]): HTMLElement {

@@ -61,17 +61,43 @@ export class CityStyle {
     return out.sort((a, b) => b.share - a.share);
   }
 
-  /** The movement a new (or rebuilt) building follows: drawn from the blend, deterministic per building. */
-  pick(b: Pick<Building, 'seed' | 'id'>): number {
-    const blend = this.blend();
+  /**
+   * The movement a new (or rebuilt) building follows, deterministic per
+   * building: near where an adopted design was tested, that style is likely;
+   * elsewhere the city's blend decides, among the movements that build this
+   * kind of building.
+   */
+  pick(b: Pick<Building, 'seed' | 'id' | 'style' | 'cx' | 'cz'>): number {
+    let u = hashStr(this.city.research.civSeed, 'pick', b.seed, b.id) / 4294967296;
+    const design = this.city.design;
+    if (design) {
+      let acc = 0;
+      for (const e of design.spreadAt(b.cx, b.cz, b.style)) {
+        acc += e.chance;
+        if (u < acc) return e.id;
+      }
+      // Rescale what is left of the draw for the blend.
+      if (acc > 0) u = (u - acc) / Math.max(1e-6, 1 - acc);
+    }
+    const blend = this.blend().filter((e) => !design || design.buildsKind(e.movement.id, b.style));
     if (blend.length <= 1) return blend[0]?.movement.id ?? 0;
-    const u = hashStr(this.city.research.civSeed, 'pick', b.seed, b.id) / 4294967296;
+    let total = 0;
+    for (const e of blend) total += e.share;
     let acc = 0;
     for (const e of blend) {
-      acc += e.share;
+      acc += e.share / total;
       if (u < acc) return e.movement.id;
     }
     return blend[blend.length - 1].movement.id;
+  }
+
+  /** A design the city has adopted becomes a movement, drawn exactly as designed. */
+  adopt(look: Movement, name: string, short: string, manifesto: string, weight = 0): Movement {
+    const m: Movement = { ...structuredClone(look), id: this.movements.length, name, short, kind: 'A style born from a prototype', manifesto, local: false, founded: this.city.clock.day, explicit: true };
+    this.movements.push(m);
+    this.weights.set(m.id, weight);
+    this.version++;
+    return m;
   }
 
   /** A new movement forms at a position on the axes. */

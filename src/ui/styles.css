@@ -1048,7 +1048,8 @@ canvas { touch-action: none; /* map */ }
 .ds-axis span:last-child { text-align: right; }
 .ds-axis-track { position: relative; height: 4px; border-radius: 2px; background: var(--panel-3); }
 .ds-axis-track i { position: absolute; top: -3px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: var(--accent); transition: left 0.25s; }
-.ds-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.ds-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+.ds-actions .btn, .st-controls .rs-seg-btn { white-space: nowrap; }
 .ds-sketches { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 8px; margin-top: 6px; }
 .ds-sketch { display: flex; gap: 6px; align-items: flex-start; padding: 6px; border-radius: var(--radius-sm); background: var(--panel-2); border: 1px solid var(--line); }
 .ds-sketch-open { flex: 1; min-width: 0; display: grid; grid-template-columns: 96px 1fr; grid-template-rows: auto 1fr; gap: 2px 8px; border: none; background: transparent; color: var(--text); text-align: left; cursor: pointer; padding: 0; }
@@ -1153,3 +1154,43 @@ canvas { touch-action: none; /* map */ }
 .insp-trial-head svg { color: var(--accent-strong); }
 .insp-trial-head .muted { margin-left: auto; font-size: 11.5px; }
 .insp-trial-quote { font-size: 12px; line-height: 1.4; color: var(--text-2); }
+
+/* Refining a design */
+.ds-refine { display: grid; gap: 6px; padding: 10px 12px; border-radius: var(--radius); background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.ds-refine-head { display: flex; gap: 8px; align-items: center; }
+.ds-refine-head svg { color: var(--accent-strong); }
+.ds-refine-head .icon-btn { margin-left: auto; }
+.ds-tag { display: inline-block; margin-left: 6px; padding: 1px 6px; border-radius: 8px; background: var(--panel-3); color: var(--muted); font-size: 10.5px; font-weight: 600; vertical-align: 1px; }
+.ds-sketch-open.scrapped img { filter: grayscale(1); opacity: 0.6; }
+
+/* What to do with a verdict */
+.tr-decide { display: grid; gap: 6px; }
+.tr-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.tr-choice { display: grid; gap: 4px; align-content: start; padding: 9px 11px; border-radius: var(--radius-sm); border: 1px solid var(--line-strong); background: var(--panel-2); color: var(--text-2); font: inherit; text-align: left; cursor: pointer; }
+.tr-choice:hover { border-color: var(--accent); color: var(--text); }
+.tr-choice.rec { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: var(--accent-soft); }
+.tr-choice-head { display: flex; gap: 6px; align-items: center; color: var(--text); font-size: 13.5px; }
+.tr-choice-head svg { color: var(--accent-strong); }
+.tr-choice-text { font-size: 12px; line-height: 1.4; }
+.tr-decided { display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--panel-2); font-size: 12.5px; color: var(--text-2); }
+.tr-decided > span { flex: 1; }
+.tr-decided svg { color: var(--muted); flex: none; }
+.tr-decided.good svg { color: var(--good); }
+.tr-decided.bad svg { color: var(--bad); }
+@media (max-width: 1100px) { .tr-choices { grid-template-columns: 1fr; } }
+
+/* The city's styles */
+.st-list { display: grid; gap: 10px; margin-top: 10px; }
+.st-card { display: grid; grid-template-columns: 132px 1fr; gap: 12px; padding: 12px 14px; border-radius: var(--radius); background: var(--panel-2); border: 1px solid var(--line); }
+.st-card img, .st-swatch { width: 132px; height: 90px; object-fit: cover; border-radius: var(--radius-sm); background: #141a23; }
+.st-swatch { display: grid; place-items: center; color: var(--muted); }
+.st-card.retired { opacity: 0.6; }
+.st-main { display: grid; gap: 6px; min-width: 0; align-content: start; }
+.st-main > b { font-size: 15px; }
+.st-main .rs-muted { font-size: 12px; line-height: 1.4; }
+.st-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 14px; }
+.st-stat { display: grid; gap: 1px; }
+.st-stat span { font-size: 11px; color: var(--muted); }
+.st-stat b { font-size: 14px; font-variant-numeric: tabular-nums; }
+.st-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+@media (max-width: 1100px) { .st-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .st-card { grid-template-columns: 96px 1fr; } .st-card img, .st-swatch { width: 96px; height: 66px; } }

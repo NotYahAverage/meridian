@@ -10,8 +10,9 @@ import { BuildingState, Zone, isResidential, zoneBase } from '../types';
 import { type CityFacts, IDEAS, IDEA_BY_ID } from './Ideas';
 import { type Concept, type DesignContext, type DesignInput, compileConcept } from './Concept';
 import {
-  GRADE_LABEL, MAX_ACTIVE_TRIALS, type Reaction, type Speaker, type Trial, absorb, approvalOf, assess, capReactions, emptyScores, liveFactors, makeReaction, makeVerdict, openingScores, speaksToday, surveySite,
+  type Factor, GRADE_LABEL, MAX_ACTIVE_TRIALS, type Reaction, type Site, type Speaker, type Trial, absorb, approvalOf, assess, capReactions, emptyScores, followUp, liveFactors, makeReaction, makeVerdict, openingScores, speaksToday, surveySite,
 } from './Trials';
+import { type AdoptedStyle, globalShare, kindsFor, localChance, moodOf, reachOf, renovationsDue, saturation, styleName } from './Styles';
 
 /** A design saved to the sketchbook. */
 export interface Sketch {
@@ -21,6 +22,12 @@ export interface Sketch {
   /** The design as it was compiled when saved (kept exactly, never regenerated). */
   concept: Concept;
   day: number;
+  /** A revision of the design tested in this trial. */
+  refines?: number;
+  /** 1 for a first design, 2 for its first revision… */
+  rev?: number;
+  /** Shelved after its trial. */
+  scrapped?: boolean;
 }
 
 export interface LearnedIdea {
@@ -35,6 +42,7 @@ export interface DesignSave {
   counter: number;
   trials?: Trial[];
   trialCounter?: number;
+  styles?: AdoptedStyle[];
   storm: boolean;
   powerShort: boolean;
   smogMonths: number;
@@ -51,6 +59,9 @@ export class DesignLab {
   sketches: Sketch[] = [];
   /** Prototypes built from the sketchbook, newest last (kept after their verdict). */
   trials: Trial[] = [];
+  /** Adopted designs the city now builds in. */
+  styles: AdoptedStyle[] = [];
+  private styleById = new Map<number, AdoptedStyle>();
   version = 0;
   private counter = 1;
   private trialCounter = 1;
@@ -156,7 +167,10 @@ export class DesignLab {
       }
     }
     if (out.length) this.version++;
-    if (!quiet) this.dailyTrials();
+    if (!quiet) {
+      this.dailyTrials();
+      if (this.city.clock.day > 0 && this.city.clock.day % 30 === 0) this.monthlyStyles();
+    }
     return out;
   }
 
@@ -185,11 +199,16 @@ export class DesignLab {
     return this.trialOf(buildingId)?.concept.look;
   }
 
-  /** How residents' happiness is touched by living in a prototype (0 for other buildings). */
+  /** How happiness is touched by living or working in a prototype or an adopted style (0 elsewhere). */
   moodBonus(b: Building): number {
-    const t = b.typeId === 'proto' ? this.trialOf(b.id) : undefined;
-    if (!t || t.openDay < 0) return 0;
-    return t.scores.home * 10 + ((t.approval - 50) / 50) * 4;
+    if (b.typeId === 'proto') {
+      const t = this.trialOf(b.id);
+      if (!t || t.openDay < 0) return 0;
+      if (t.state === 'done' && t.verdict) return ((t.verdict.approval - 50) / 50) * 6;
+      return t.scores.home * 10 + ((t.approval - 50) / 50) * 4;
+    }
+    const st = b.movement ? this.styleById.get(b.movement) : undefined;
+    return st ? moodOf(st) : 0;
   }
 
   /** A sketch has been built on a lot: its trial begins once construction ends. */
@@ -199,8 +218,13 @@ export class DesignLab {
       id: this.trialCounter++, sketchId: sketch.id, name: sketch.name, concept: c, buildingId: b.id, x: b.cx, z: b.cz, cost,
       placedDay: this.city.clock.day, openDay: -1, months: c.ambition, state: 'building', site: null, factors: [], scores: emptyScores(), approval: 50, history: [], reactions: [],
     };
+    // A revision builds on what the first trial learned: it is tested for a month less.
+    if (sketch.refines && this.trial(sketch.refines)) {
+      t.parent = sketch.refines;
+      t.months = Math.max(1, c.ambition - 1);
+    }
     t.site = surveySite(this.city, b, c.look.axes);
-    t.factors = assess(c, t.site);
+    t.factors = this.factorsFor(t, t.site);
     this.trials.push(t);
     // Word gets around as soon as the hoardings go up.
     const r = new Rng(hashStr(t.id, 'plans', this.city.research.civSeed));
@@ -210,6 +234,13 @@ export class DesignLab {
     this.city.events.emit('design', { type: 'trial', trial: t.id, what: 'placed' });
     this.version++;
     return t;
+  }
+
+  /** What people react to: the design and its site, and for a revision whether their complaints were answered. */
+  private factorsFor(t: Trial, site: Site): Factor[] {
+    const f = assess(t.concept, site);
+    const parent = t.parent ? this.trial(t.parent) : undefined;
+    return parent ? [...f, ...followUp(parent, f)] : f;
   }
 
   private speaker(b: Building | undefined): Speaker {
@@ -254,7 +285,7 @@ export class DesignLab {
         t.state = 'testing';
         t.openDay = day;
         t.site = surveySite(city, b, t.concept.look.axes);
-        t.factors = assess(t.concept, t.site);
+        t.factors = this.factorsFor(t, t.site);
         t.scores = openingScores(t.factors);
         t.approval = approvalOf(t.scores, t.factors);
         city.emitNotice({ severity: 'good', icon: 'build', title: `${t.name} is open`, text: `The prototype is finished. Its residents and neighbours will be heard for ${t.months} month${t.months > 1 ? 's' : ''}.`, x: b.cx, z: b.cz });
@@ -279,7 +310,7 @@ export class DesignLab {
         else {
           // The neighbourhood changes: look again.
           t.site = surveySite(city, b, t.concept.look.axes);
-          t.factors = assess(t.concept, t.site);
+          t.factors = this.factorsFor(t, t.site);
           const prev = t.history[t.history.length - 2];
           const trend = prev === undefined ? '' : t.approval > prev + 2 ? `, up from ${prev}%` : t.approval < prev - 2 ? `, down from ${prev}%` : '';
           city.emitNotice({ severity: t.approval >= 50 ? 'info' : 'warning', icon: 'people', title: `${t.name}: month ${month} of ${t.months}`, text: `${t.approval}% approve${trend}.`, x: b.cx, z: b.cz }, `trial-${t.id}`, 24 * 5);
@@ -296,6 +327,8 @@ export class DesignLab {
     t.verdict = makeVerdict(t, city.clock.day, isResidential(b.zone), abandoned, cutShort);
     t.state = 'done';
     const v = t.verdict;
+    const first = t.parent ? this.trial(t.parent)?.verdict : undefined;
+    if (first) v.summary += v.approval > first.approval + 2 ? ` Up from ${first.approval}% for the earlier version.` : v.approval < first.approval - 2 ? ` Down from ${first.approval}% for the earlier version.` : ` About the same as the earlier version (${first.approval}%).`;
     const tone = v.grade === 'loved' || v.grade === 'liked' ? 'good' : v.grade === 'mixed' ? 'neutral' : 'bad';
     city.emitNotice({ severity: tone === 'good' ? 'good' : tone === 'bad' ? 'warning' : 'info', icon: 'milestone', title: `Verdict on ${t.name}: ${GRADE_LABEL[v.grade]}`, text: `${v.approval}% approve. ${v.summary}`, x: b.cx, z: b.cz, quiet: true });
     const head: Record<string, string> = { loved: `${t.name} wins the city over`, liked: `Thumbs up for ${t.name}`, mixed: `${t.name} divides opinion`, disliked: `${t.name} fails to impress`, hated: `Residents turn on ${t.name}` };
@@ -313,6 +346,10 @@ export class DesignLab {
     }
     if (t.state === 'testing') return `Testing · month ${Math.min(t.months, Math.floor((this.city.clock.day - t.openDay) / 30) + 1)} of ${t.months}`;
     if (t.state === 'gone') return 'Demolished before the verdict';
+    const d = t.decision;
+    if (d?.kind === 'adopted') return `Adopted as the ${this.styleById.get(d.styleId ?? -1)?.name ?? 'city’s style'}`;
+    if (d?.kind === 'refined') return `Refined as ${this.sketches.find((k) => k.id === d.sketchId)?.name ?? 'a new version'}`;
+    if (d?.kind === 'scrapped') return 'Scrapped';
     return `Verdict in ${Clock.monthLabel(Math.floor((t.verdict?.day ?? 0) / 30))}`;
   }
 
@@ -323,13 +360,148 @@ export class DesignLab {
     this.version++;
   }
 
-  saveSketch(input: DesignInput, name?: string): Sketch {
+  /** Saves a design; a revision of a tested design records the refinement on its trial. */
+  saveSketch(input: DesignInput, name?: string, refines?: number): Sketch {
     const concept = this.compile(input);
     if (name?.trim()) concept.name = name.trim().slice(0, 48);
     const sk: Sketch = { id: `s${this.counter++}`, name: concept.name, input: structuredClone(input), concept, day: this.city.clock.day };
+    const t = refines ? this.trial(refines) : undefined;
+    if (t) {
+      sk.refines = t.id;
+      sk.rev = (this.sketches.find((k) => k.id === t.sketchId)?.rev ?? 1) + 1;
+      if (t.state === 'done' && !t.decision) t.decision = { kind: 'refined', day: this.city.clock.day, sketchId: sk.id };
+    }
     this.sketches.push(sk);
     this.version++;
     return sk;
+  }
+
+  // -- Decisions and styles ------------------------------------------------------
+
+  /** The city adopts a tested design: it becomes a style that spreads from where it was tested. */
+  adopt(trialId: number): AdoptedStyle | null {
+    const t = this.trial(trialId);
+    if (!t || t.state !== 'done' || !t.verdict || t.decision) return null;
+    const city = this.city;
+    const name = styleName(t.name);
+    const b = city.buildings.get(t.buildingId);
+    const street = (b && city.roads.segments.get(b.segId)?.name) || '';
+    const m = city.style.adopt(t.concept.look, name, name.replace(/ style$/, ''), `${t.concept.description} ${t.verdict.summary}`);
+    const st: AdoptedStyle = { id: m.id, trialId: t.id, name, x: t.x, z: t.z, street, day: city.clock.day, approval: t.verdict.approval, kinds: kindsFor(t.concept.use), push: 1, renovated: 0 };
+    this.styles.push(st);
+    this.styleById.set(st.id, st);
+    t.decision = { kind: 'adopted', day: city.clock.day, styleId: st.id };
+    city.emitNotice({ severity: 'good', icon: 'build', title: `The ${name} is adopted`, text: `New buildings${street ? ` around ${street}` : ''} will start to follow it, and it will spread as people warm to it.`, x: t.x, z: t.z });
+    city.events.emit('design', { type: 'trial', trial: t.id, what: 'adopted' });
+    this.version++;
+    return st;
+  }
+
+  /** Shelves a tested design; the prototype stays unless it is demolished too. */
+  scrap(trialId: number, demolish = false): boolean {
+    const t = this.trial(trialId);
+    if (!t || t.state !== 'done' || t.decision) return false;
+    t.decision = { kind: 'scrapped', day: this.city.clock.day };
+    const sk = this.sketches.find((k) => k.id === t.sketchId);
+    if (sk) sk.scrapped = true;
+    if (demolish && t.buildingId) this.city.removeBuilding(t.buildingId, 'bulldoze');
+    this.city.events.emit('design', { type: 'trial', trial: t.id, what: 'scrapped' });
+    this.version++;
+    return true;
+  }
+
+  style(id: number): AdoptedStyle | undefined {
+    return this.styleById.get(id);
+  }
+
+  /** Encourage, discourage or retire a style (0 retired … 1.5 encouraged). */
+  setPush(id: number, push: number): void {
+    const st = this.styleById.get(id);
+    if (!st) return;
+    st.push = Math.max(0, Math.min(1.5, push));
+    this.updateWeights();
+    this.version++;
+  }
+
+  /** Adopted styles a new building at a point might take up, with their chances. */
+  spreadAt(x: number, z: number, kind: string): { id: number; chance: number }[] {
+    if (!this.styles.length) return [];
+    const day = this.city.clock.day;
+    const out: { id: number; chance: number }[] = [];
+    let total = 0;
+    for (const st of this.styles) {
+      if (!st.kinds.includes(kind)) continue;
+      const c = localChance(st, Math.hypot(x - st.x, z - st.z), day);
+      if (c <= 0) continue;
+      out.push({ id: st.id, chance: c });
+      total += c;
+    }
+    // Where styles overlap they share the street: never more than nine in ten new buildings.
+    if (total > 0.9) for (const e of out) e.chance *= 0.9 / total;
+    return out;
+  }
+
+  /** Whether a movement builds this kind of building (adopted styles keep to their own kinds). */
+  buildsKind(movementId: number, kind: string): boolean {
+    const st = this.styleById.get(movementId);
+    return !st || (st.push > 0 && st.kinds.includes(kind));
+  }
+
+  /** Each style's share of new building across the city follows how far it has caught on. */
+  private updateWeights(): void {
+    const day = this.city.clock.day;
+    const shares = this.styles.map((st) => globalShare(st, day));
+    const total = Math.min(0.8, shares.reduce((a, b) => a + b, 0));
+    this.styles.forEach((st, i) => this.city.style.setWeight(st.id, shares[i] > 0 ? shares[i] / Math.max(0.2, 1 - total) : 0));
+  }
+
+  /** Monthly: styles catch on, and owners near where they started renovate in them. */
+  private monthlyStyles(): void {
+    if (!this.styles.length) return;
+    const city = this.city;
+    const day = city.clock.day;
+    this.updateWeights();
+    for (const st of this.styles) {
+      const due = renovationsDue(st);
+      if (!due) continue;
+      const reach = reachOf(st, day);
+      const r = new Rng(hashStr(st.id, day, city.research.civSeed));
+      const cands: { b: Building; d: number }[] = [];
+      let inReach = 0, inStyle = 0;
+      for (const b of city.buildings.queryRadius(st.x, st.z, reach)) {
+        if (b.kind !== 'zoned' || b.typeId === 'proto' || !st.kinds.includes(b.style)) continue;
+        const d = Math.hypot(b.cx - st.x, b.cz - st.z);
+        if (d > reach) continue;
+        inReach++;
+        if (b.movement === st.id) {
+          inStyle++;
+          continue;
+        }
+        if (b.state !== BuildingState.Active || b.progress < 1 || b.age < 90) continue;
+        cands.push({ b, d: d * (0.6 + 0.8 * r.next()) });
+      }
+      // Not everyone renovates: past its share of the neighbourhood, a style stops converting.
+      const room = Math.max(0, Math.floor(saturation(st) * inReach) - inStyle);
+      cands.sort((a, b) => a.d - b.d);
+      const done = cands.slice(0, Math.min(due, room));
+      for (const { b } of done) city.style.restyle(b, st.id);
+      if (!done.length) continue;
+      st.renovated += done.length;
+      const seg = city.roads.segments.get(done[0].b.segId);
+      city.emitNotice({ severity: 'info', icon: 'build', title: `The ${st.name} is spreading`, text: `${done.length} building${done.length > 1 ? 's' : ''}${seg?.name ? ` on ${seg.name}` : ''} ${done.length > 1 ? 'were' : 'was'} renovated in it. It now reaches about ${Math.round(reach / 10) * 10} m from where it began.`, x: done[0].b.cx, z: done[0].b.cz }, `style-${st.id}`, 24 * 55);
+    }
+    this.version++;
+  }
+
+  /** Buildings standing in each adopted style (and in none: the city's own way of building). */
+  styleCounts(): Map<number, number> {
+    const out = new Map<number, number>();
+    for (const b of this.city.buildings.all.values()) {
+      if (b.kind !== 'zoned' || b.typeId === 'proto') continue;
+      const id = this.styleById.has(b.movement) ? b.movement : 0;
+      out.set(id, (out.get(id) ?? 0) + 1);
+    }
+    return out;
   }
 
   deleteSketch(id: string): void {
@@ -338,7 +510,7 @@ export class DesignLab {
   }
 
   serialize(): DesignSave {
-    return structuredClone({ v: 1 as const, learned: [...this.learned.entries()], sketches: this.sketches, counter: this.counter, trials: this.trials, trialCounter: this.trialCounter, storm: this.storm, powerShort: this.powerShort, smogMonths: this.smogMonths });
+    return structuredClone({ v: 1 as const, learned: [...this.learned.entries()], sketches: this.sketches, counter: this.counter, trials: this.trials, trialCounter: this.trialCounter, styles: this.styles, storm: this.storm, powerShort: this.powerShort, smogMonths: this.smogMonths });
   }
 
   load(d: DesignSave | undefined): void {
@@ -354,6 +526,8 @@ export class DesignLab {
     this.counter = data.counter;
     this.trials = data.trials ?? [];
     this.trialCounter = data.trialCounter ?? this.trials.length + 1;
+    this.styles = data.styles ?? [];
+    this.styleById = new Map(this.styles.map((st) => [st.id, st]));
     this.storm = data.storm;
     this.powerShort = data.powerShort;
     this.smogMonths = data.smogMonths;
