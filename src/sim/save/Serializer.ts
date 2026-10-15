@@ -1,3 +1,4 @@
+import type { PeopleSave } from '../design/People';
 import { decodeFloat32, decodeInt32, decodeUint8, encodeTyped, rleDecode, rleEncode } from '../../core/encoding';
 import type { StyleSave } from '../style/CityStyle';
 import type { DesignSave } from '../design/DesignLab';
@@ -86,6 +87,8 @@ export interface SaveData {
     alive: string;
     happiness: string;
     moveInTick: string;
+    /** Taste groups (missing in older saves). */
+    taste?: string;
   };
   economy: {
     money: number;
@@ -125,6 +128,7 @@ export interface SaveData {
   style?: StyleSave;
   /** Ideas learned and designs in the sketchbook. */
   design?: DesignSave;
+  people?: PeopleSave;
 }
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -182,6 +186,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
     alive: encodeTyped(pop.alive, n),
     happiness: encodeTyped(pop.happiness, n),
     moveInTick: encodeTyped(pop.moveInTick, n),
+    taste: encodeTyped(pop.taste, n),
   };
   yield;
   const zones = rleEncode(city.zones.zone);
@@ -252,6 +257,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
     research: city.research.serialize(),
     style: city.style.serialize(),
     design: city.design.serialize(),
+    people: city.people.serialize(),
   };
 }
 
@@ -365,6 +371,9 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
   pop.alive.set(decodeUint8(p.alive));
   pop.happiness.set(decodeFloat32(p.happiness));
   pop.moveInTick.set(decodeInt32(p.moveInTick));
+  // Saves from before taste groups: assigned when the people load.
+  if (p.taste) pop.taste.set(decodeUint8(p.taste));
+  else pop.taste.fill(255, 0, p.count);
   pop.recount();
 
   // Economy
@@ -412,6 +421,7 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
   }
   // Last: an older city learns what its history already shows.
   city.design.load(data.design);
+  city.people.load(data.people);
   return city;
 }
 

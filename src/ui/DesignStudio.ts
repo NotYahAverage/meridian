@@ -5,6 +5,8 @@ import { ASPECTS, GRADE_LABEL, MAX_ACTIVE_TRIALS, type Trial, complaints, protoS
 import { PUSH_LEVELS, globalShare, moodOf, nextRevision, reachOf, styleName } from '../sim/design/Styles';
 import { rebuildPrototype } from '../sim/CityCommands';
 import { Clock } from '../sim/Clock';
+import { GROUPS, GROUP_BY_ID, type GroupId, approvalFromScore, likeOf, predictGroups, tastesOf } from '../sim/design/Tastes';
+import { STAGE_LABEL, type Petition } from '../sim/design/People';
 import type { PrototypeTool } from '../tools/PrototypeTool';
 import { CATEGORY_LABEL, IDEAS, IDEA_BY_ID, type IdeaCategory } from '../sim/design/Ideas';
 import { hashStr } from '../sim/research/Generate';
@@ -24,7 +26,7 @@ const EXAMPLES = [
 
 const CAT_ORDER: IdeaCategory[] = ['use', 'height', 'material', 'roof', 'feature', 'character'];
 
-type Tab = 'design' | 'prototypes' | 'styles' | 'ideas';
+type Tab = 'design' | 'prototypes' | 'styles' | 'people' | 'ideas';
 
 /** Buildings in an adopted style lit up on the map. */
 const STYLE_HIGHLIGHT = 6;
@@ -97,10 +99,12 @@ export class DesignStudio extends Modal {
 
   update(): void {
     const city = this.game.city;
-    if (!this.isOpen || !city || city.design.version === this.seen) return;
+    if (!this.isOpen || !city) return;
     // Don't rebuild a list under the pointer (keeps its buttons clickable); try again next frame.
-    if ((this.tab === 'prototypes' || this.tab === 'styles') && this.body.matches(':hover')) return;
-    this.seen = city.design.version;
+    const version = city.design.version + city.people.version * 100_000;
+    if (version === this.seen) return;
+    if ((this.tab === 'prototypes' || this.tab === 'styles' || this.tab === 'people') && this.body.matches(':hover')) return;
+    this.seen = version;
     if (this.tab === 'design') this.refresh();
     else this.render();
   }
@@ -111,14 +115,20 @@ export class DesignStudio extends Modal {
     this.els = {};
     const city = this.game.city;
     if (!city) return;
-    this.seen = city.design.version;
+    this.seen = city.design.version + city.people.version * 100_000;
     const known = city.design.learned.size;
+    const openPetitions = city.people.petitions.filter((p) => p.state === 'open').length;
     b.append(h('div', { class: 'rs-tabs', role: 'tablist' },
       h('button', { class: `ci-tab${this.tab === 'design' ? ' active' : ''}`, role: 'tab', onclick: () => { this.tab = 'design'; this.render(); } }, 'Design'),
       h('button', { class: `ci-tab${this.tab === 'prototypes' ? ' active' : ''}`, role: 'tab', onclick: () => { this.tab = 'prototypes'; this.render(); } }, 'Prototypes', city.design.trials.length ? h('span', { class: 'rs-count' }, `${city.design.activeTrials().length}/${MAX_ACTIVE_TRIALS}`) : null),
       h('button', { class: `ci-tab${this.tab === 'styles' ? ' active' : ''}`, role: 'tab', onclick: () => { this.tab = 'styles'; this.render(); } }, 'City style', city.design.styles.length ? h('span', { class: 'rs-count' }, `${city.design.styles.length}`) : null),
+      h('button', { class: `ci-tab${this.tab === 'people' ? ' active' : ''}`, role: 'tab', onclick: () => { this.tab = 'people'; this.render(); } }, 'People', openPetitions ? h('span', { class: 'rs-count warn' }, `${openPetitions}`) : null),
       h('button', { class: `ci-tab${this.tab === 'ideas' ? ' active' : ''}`, role: 'tab', onclick: () => { this.tab = 'ideas'; this.render(); } }, 'Ideas', h('span', { class: 'rs-count' }, `${known}/${IDEAS.length}`)),
     ));
+    if (this.tab === 'people') {
+      this.renderPeople(b);
+      return;
+    }
     if (this.tab === 'styles') {
       this.renderStyles(b);
       return;
@@ -303,6 +313,11 @@ export class DesignStudio extends Modal {
         h('span', null, 'Windows'), h('b', null, WINDOW_TYPES[c.look.windows[0]] ?? '—'),
         h('span', null, 'Prototype'), h('b', null, `${formatMoney(spec.cost)} · tested for ${c.ambition} month${c.ambition === 1 ? '' : 's'}`),
       ),
+      h('div', { class: 'ds-who' }, h('span', { class: 'ds-who-label' }, 'Who’ll like it'), ...predictGroups(c).map((p) => {
+        const g = GROUP_BY_ID.get(p.id)!;
+        const mood = p.score > 0.15 ? 'pos' : p.score < -0.15 ? 'neg' : 'meh';
+        return h('span', { class: `ds-who-chip ${mood}`, style: `--g:${g.color}`, 'data-tip': `${g.name} (${Math.round(city.people.share(g.id) * 100)}% of households): likely ${approvalFromScore(p.score)}% approval` }, h('i', null), g.short, h('b', null, mood === 'pos' ? '▲' : mood === 'neg' ? '▼' : '•'));
+      })),
       h('div', { class: 'ds-axes' }, ...AXES.map((a) => {
         const v = ax[a.id];
         return h('div', { class: 'ds-axis', 'data-tip': `${a.low} ↔ ${a.high}` },
@@ -571,6 +586,7 @@ export class DesignStudio extends Modal {
       card.append(h('div', { class: `tr-verdict grade-${v.grade}` },
         h('div', { class: 'tr-verdict-head' }, icon('milestone', 16), h('b', null, `Verdict: ${GRADE_LABEL[v.grade]}`), h('span', { class: 'rs-muted' }, `${v.approval}% approve`)),
         h('div', { class: 'tr-verdict-text' }, v.summary),
+        v.byGroup ? this.byGroup(v.byGroup) : null,
         v.quotes.length ? h('div', { class: 'tr-quotes' }, ...v.quotes.map((r) => this.quote(r))) : null,
         v.advice.length ? h('div', { class: 'tr-advice' }, h('div', { class: 'ds-section' }, 'Your architects suggest'), ...v.advice.map((a) => h('div', { class: 'tr-advice-item' }, icon('info', 12), a))) : null,
         t.decision ? this.decided(t) : this.decide(t),
@@ -687,6 +703,12 @@ export class DesignStudio extends Modal {
             this.stat('New building elsewhere', `${Math.round(globalShare(st, day) * 100)}%`),
             this.stat('Residents’ mood', `${mood >= 0 ? '+' : ''}${mood.toFixed(1)}`, mood >= 0 ? 'happier living in it' : 'less happy living in it'),
           ),
+          h('div', { class: 'st-likes' }, ...GROUPS.map((g) => {
+            const m = city.style.get(st.id);
+            const like = m ? likeOf(g, m) : 0;
+            const mood = like > 0.15 ? 'pos' : like < -0.15 ? 'neg' : 'meh';
+            return h('span', { class: `ds-who-chip ${mood}`, style: `--g:${g.color}`, 'data-tip': `${g.name}: ${mood === 'pos' ? 'likes it' : mood === 'neg' ? 'dislikes it' : 'doesn’t mind it'}` }, h('i', null), g.short, h('b', null, mood === 'pos' ? '▲' : mood === 'neg' ? '▼' : '•'));
+          })),
           h('div', { class: 'st-controls' },
             h('div', { class: 'rs-seg', role: 'group', 'aria-label': `How much to build in the ${st.name}` }, ...PUSH_LEVELS.map(([v, label]) => h('button', { class: `rs-seg-btn${st.push === v ? ' active' : ''}`, 'data-push': String(v), onclick: () => { d.setPush(st.id, v); this.game.play('click'); this.render(); } }, label))),
             h('button', { class: 'btn small', onclick: () => this.showStyle(st.id) }, icon('eye', 13), 'Show on map'),
@@ -695,6 +717,91 @@ export class DesignStudio extends Modal {
       ));
     }
     b.append(list);
+  }
+
+  /** Approval within each taste group. */
+  private byGroup(by: Partial<Record<GroupId, number>>): HTMLElement {
+    return h('div', { class: 'tr-groups' }, ...GROUPS.filter((g) => by[g.id] !== undefined).map((g) => {
+      const a = by[g.id]!;
+      return h('div', { class: 'tr-group', 'data-tip': `${g.name}: ${a}% approve` },
+        h('span', { class: 'grp-tag', style: `--g:${g.color}` }, h('i', null), g.short),
+        h('div', { class: 'tr-bar' }, h('i', { style: `width:${a}%;background:${a >= 58 ? 'var(--good)' : a >= 45 ? 'var(--warn)' : 'var(--bad)'}` })),
+        h('b', null, `${a}%`),
+      );
+    }));
+  }
+
+  /** The taste groups: who they are, how they feel, what moves them, and their petitions. */
+  private renderPeople(b: HTMLElement): void {
+    const city = this.game.city!;
+    const people = city.people;
+    const shares = people.shares();
+    b.append(h('div', { class: 'hint' }, 'Every household belongs to one of six taste groups, each with its own idea of a good building. Build what a group likes and more of them move here; ignore them and they grumble, petition, protest, and in the end move away.'));
+    const live = people.petitions.filter((p) => p.state === 'open' || p.state === 'promised');
+    if (live.length) {
+      b.append(h('div', { class: 'ds-section' }, 'Petitions'));
+      b.append(h('div', { class: 'pp-petitions' }, ...live.map((p) => this.petitionCard(p))));
+    }
+    for (const p of people.protests) {
+      const g = GROUP_BY_ID.get(p.group)!;
+      b.append(h('div', { class: 'pp-protest', style: `--g:${g.color}` }, icon('people', 15), h('span', null, h('b', null, `${g.name} is protesting: “${p.sign}”`), ` ${p.why} Until ${Clock.monthLabel(Math.floor(p.until / 30))}.`),
+        h('button', { class: 'btn small', onclick: () => { this.close(); this.game.flyTo(p.x, p.z, 260); } }, icon('compass', 13), 'Show')));
+    }
+    const grid = h('div', { class: 'pp-grid' });
+    GROUPS.forEach((g, i) => {
+      const st = people.state.get(g.id)!;
+      const mood = Math.round(st.mood);
+      const col = mood >= 58 ? 'var(--good)' : mood >= 40 ? 'var(--warn)' : 'var(--bad)';
+      const t = tastesOf(g);
+      const hist = [...st.history.slice(-11), mood];
+      const max = 100;
+      const spark = h('div', { class: 'pp-spark', 'data-tip': 'Mood, month by month' }, ...hist.map((v) => h('i', { style: `height:${Math.max(6, (v / max) * 100)}%;background:${v >= 58 ? 'var(--good)' : v >= 40 ? 'var(--warn)' : 'var(--bad)'}` })));
+      grid.append(h('div', { class: `pp-card stage-${st.stage}`, style: `--g:${g.color}`, 'data-group': g.id },
+        h('div', { class: 'pp-head' },
+          h('div', { class: 'pp-emblem' }, icon(g.icon, 18)),
+          h('div', { class: 'pp-titles' }, h('b', null, g.name), h('span', { class: 'rs-muted' }, `${Math.round(shares[i] * 100)}% of households · ${g.members}`)),
+          h('span', { class: `pp-stage ${st.stage}` }, STAGE_LABEL[st.stage]),
+        ),
+        h('div', { class: 'pp-mood' }, h('div', { class: 'tr-big', style: `color:${col}` }, `${mood}`), h('div', { class: 'tr-meter-main' }, h('div', { class: 'tr-bar' }, h('i', { style: `width:${mood}%;background:${col}` })), h('div', { class: 'tr-sub' }, 'mood')), spark),
+        h('div', { class: 'pp-blurb' }, g.blurb),
+        h('div', { class: 'pp-tastes' },
+          h('span', { class: 'pp-tl' }, 'Likes'), ...t.likes.map((x) => h('span', { class: 'pp-taste pos' }, x)),
+        ),
+        h('div', { class: 'pp-tastes' },
+          h('span', { class: 'pp-tl' }, 'Dislikes'), ...t.dislikes.map((x) => h('span', { class: 'pp-taste neg' }, x)),
+        ),
+        h('div', { class: 'pp-drivers' }, ...people.driversOf(g.id).slice(0, 4).map((d) => h('div', { class: `pp-driver ${d.value >= 0 ? 'pos' : 'neg'}` }, h('span', null, d.why), h('b', null, `${d.value >= 0 ? '+' : '−'}${Math.abs(d.value).toFixed(0)}`)))),
+        st.left || st.joined ? h('div', { class: 'rs-muted pp-moves' }, [st.joined ? `${st.joined} households moved here for the city` : '', st.left ? `${st.left} households moved away` : ''].filter(Boolean).join(' · ')) : null,
+      ));
+    });
+    b.append(grid);
+    const past = people.petitions.filter((p) => p.state !== 'open' && p.state !== 'promised').slice(-6).reverse();
+    if (past.length) {
+      b.append(h('div', { class: 'ds-section' }, 'Earlier petitions'));
+      b.append(h('div', { class: 'pp-past' }, ...past.map((p) => {
+        const g = GROUP_BY_ID.get(p.group)!;
+        const what: Record<string, string> = { kept: 'Promise kept', broken: 'Promise broken', refused: 'Refused', lapsed: 'Never answered' };
+        return h('div', { class: `pp-past-row ${p.state}` }, h('span', { class: 'grp-tag', style: `--g:${g.color}` }, h('i', null), g.short), h('span', null, p.text), h('b', null, what[p.state] ?? p.state));
+      })));
+    }
+  }
+
+  private petitionCard(p: Petition): HTMLElement {
+    const city = this.game.city!;
+    const g = GROUP_BY_ID.get(p.group)!;
+    const day = city.clock.day;
+    const done = p.state === 'promised' && city.people.fulfilled(p);
+    return h('div', { class: `pp-petition ${p.state}`, style: `--g:${g.color}`, 'data-petition': String(p.id) },
+      h('div', { class: 'pp-petition-head' }, h('div', { class: 'pp-emblem' }, icon(g.icon, 16)), h('b', null, g.name), h('span', { class: 'rs-muted' }, p.state === 'open' ? `asks you · ${Math.max(0, 30 - (day - p.day))} days to answer` : `you promised · ${Math.max(0, (p.deadline ?? day) - day)} days left`)),
+      h('div', { class: 'pp-petition-text' }, `“${p.text}”`),
+      h('div', { class: 'rs-muted' }, `Why: ${p.why.charAt(0).toLowerCase()}${p.why.slice(1)}.`),
+      p.state === 'open'
+        ? h('div', { class: 'btn-row' },
+          h('button', { class: 'btn primary', 'data-answer': 'promise', onclick: () => { city.people.answer(p.id, true); this.game.play('good'); this.render(); } }, icon('check', 14), 'Promise'),
+          h('button', { class: 'btn', 'data-answer': 'refuse', onclick: () => { city.people.answer(p.id, false); this.game.play('click'); this.render(); } }, icon('close', 14), 'Refuse'),
+          h('span', { class: 'rs-muted' }, 'Keep a promise and they’ll remember it; break one and they’ll march.'))
+        : h('div', { class: 'rs-muted' }, done ? 'Done: they will see it shortly.' : p.demand.kind === 'design' ? 'Design something they would like (the studio shows who will like it) and build it as a prototype.' : p.demand.kind === 'retire' ? 'Discourage or retire the style under City style.' : p.demand.kind === 'park' ? 'Build a new park.' : `Lower the tax in the Budget panel.`),
+    );
   }
 
   private stat(label: string, value: string, tip?: string): HTMLElement {
@@ -717,9 +824,10 @@ export class DesignStudio extends Modal {
 
   private quote(r: Trial['reactions'][number]): HTMLElement {
     const mood = r.mood >= 0.15 ? 'pos' : r.mood <= -0.15 ? 'neg' : 'meh';
+    const g = r.group ? GROUP_BY_ID.get(r.group) : undefined;
     return h('div', { class: `tr-quote ${mood}${r.blame ? ' blame' : ''}`, 'data-tip': r.blame ? 'Not the design’s fault, so it counts for little' : '' },
       h('div', { class: 'tr-quote-text' }, `“${r.text}”`),
-      h('div', { class: 'tr-quote-who' }, r.who),
+      h('div', { class: 'tr-quote-who' }, r.who, g ? h('span', { class: 'grp-tag', style: `--g:${g.color}` }, h('i', null), g.short) : null),
     );
   }
 

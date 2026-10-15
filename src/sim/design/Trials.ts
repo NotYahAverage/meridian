@@ -6,6 +6,7 @@ import type { City } from '../City';
 import type { Axes, FeatureId } from '../style/Movements';
 import { Problem, Zone, isResidential } from '../types';
 import type { Concept } from './Concept';
+import type { GroupId } from './Tastes';
 
 /**
  * Prototype trials: a design from the sketchbook built on a real lot and
@@ -51,6 +52,8 @@ export interface Reaction {
   aspect: AspectId;
   /** What it was about (a factor key). */
   key: string;
+  /** The taste group the speaker belongs to (none for the paper's critic). */
+  group?: GroupId;
   /** Not the design's fault (power cuts, smog…): it counts for little. */
   blame?: 'city';
 }
@@ -96,7 +99,19 @@ export interface Verdict {
   abandoned?: boolean;
   /** The building was lost (fire, demolition) part-way through. */
   cutShort?: boolean;
+  /** Approval within each taste group. */
+  byGroup?: Partial<Record<GroupId, number>>;
 }
+
+/** A taste group as a pool of speakers: how many of them there are and what they feel strongly about. */
+export interface Voices {
+  id: GroupId;
+  share: number;
+  keys: Record<string, number>;
+}
+
+/** Voices that belong to one group whatever the speaker's taste. */
+const VOICE_GROUP: Partial<Record<Voice, GroupId>> = { green: 'green', agent: 'business', shop: 'business' };
 
 export type TrialState = 'building' | 'testing' | 'done' | 'gone';
 
@@ -572,7 +587,7 @@ function gauss(r: Rng): number {
 }
 
 /** One person's reaction: picks what they talk about and how they feel about it. */
-export function makeReaction(t: Trial, factors: Factor[], r: Rng, day: number, sp: Speaker, residential: boolean): Reaction | null {
+export function makeReaction(t: Trial, factors: Factor[], r: Rng, day: number, sp: Speaker, residential: boolean, voices?: Voices[]): Reaction | null {
   if (!factors.length) return null;
   const month = t.openDay < 0 ? 0 : Math.floor((day - t.openDay) / 30) + 1;
   // First impressions are about looks and the street; later, about living there and what it costs.
@@ -582,23 +597,37 @@ export function makeReaction(t: Trial, factors: Factor[], r: Rng, day: number, s
   // Something not said lately: lines are compared by their opening words (names and floors vary).
   const opening = (s: string) => s.split(' ').slice(0, 4).join(' ');
   const recent = new Set(t.reactions.slice(-14).map((x) => opening(x.text)));
-  let fac: Factor | undefined, mood = 0, pool: Line[] = [];
+  let fac: Factor | undefined, mood = 0, pool: Line[] = [], group: GroupId | undefined;
   for (let attempt = 0; attempt < 4; attempt++) {
     const f = r.weighted(factors, weight)!;
-    const m = clamp(f.w + (f.spread ?? 0) * gauss(r) * 0.9 + gauss(r) * 0.06, -1, 1);
+    // Who speaks up: people who feel strongly about it, in proportion to how many of them live here.
+    const v = voices?.length ? r.weighted(voices, (g) => g.share * (0.4 + Math.abs(g.keys[f.key] ?? 0) * 2.5)) : undefined;
+    const m = clamp(f.w + 0.8 * (v?.keys[f.key] ?? 0) + (f.spread ?? 0) * gauss(r) * 0.9 + gauss(r) * 0.06, -1, 1);
     const lines = LINES[f.key] ?? {};
-    let p = (m >= 0 ? lines.pos : lines.neg)?.filter(fits) ?? [];
+    // Lines from a voice that belongs to another group don't suit this speaker.
+    const suits = (l: Line) => fits(l) && (!v || !VOICE_GROUP[l[0]] || VOICE_GROUP[l[0]] === v.id);
+    let p = (m >= 0 ? lines.pos : lines.neg)?.filter(suits) ?? [];
+    if (!p.length) p = ((m >= 0 ? GENERIC[f.aspect].pos : GENERIC[f.aspect].neg) ?? []).filter(suits);
     if (!p.length) p = ((m >= 0 ? GENERIC[f.aspect].pos : GENERIC[f.aspect].neg) ?? []).filter(fits);
     const fresh = p.filter((l) => !recent.has(opening(l[1])));
     if (!fac || fresh.length) {
       fac = f;
       mood = m;
       pool = fresh.length ? fresh : p;
+      group = v?.id;
     }
     if (fresh.length) break;
   }
-  if (!fac || !pool.length) return null;
+  if (!fac) return null;
+  // Never the same thing twice running: a general remark instead, or nothing today.
+  const last = t.reactions[t.reactions.length - 1];
+  const notLast = (l: Line) => !last || opening(l[1]) !== opening(last.text);
+  pool = pool.filter(notLast);
+  if (!pool.length) pool = ((mood >= 0 ? GENERIC[fac.aspect].pos : GENERIC[fac.aspect].neg) ?? []).filter((l) => fits(l) && notLast(l));
+  if (!pool.length) return null;
   const [voice, text] = r.pick(pool);
+  if (voice === 'critic') group = undefined;
+  else if (VOICE_GROUP[voice]) group = VOICE_GROUP[voice];
   const floor = r.int(1, Math.max(1, t.concept.floors));
   return {
     day,
@@ -609,6 +638,7 @@ export function makeReaction(t: Trial, factors: Factor[], r: Rng, day: number, s
     mood: Math.round(mood * 100) / 100,
     aspect: fac.aspect,
     key: fac.key,
+    ...(group ? { group } : {}),
     ...(fac.blame ? { blame: fac.blame } : {}),
   };
 }

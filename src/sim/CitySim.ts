@@ -414,6 +414,7 @@ function daily(city: City): void {
   city.achievements.check();
   city.research.daily();
   city.design.daily();
+  city.people.daily();
   city.terrain.regrow(9);
   city.nature.grow(city.clock.day);
   dailyBuildings(city);
@@ -566,6 +567,8 @@ function dailyBuildings(city: City): void {
     h += rm.happiness;
     // Living in a prototype or an adopted style: a well-liked design makes people happier, a disliked one less so.
     h += city.design.moodBonus(b);
+    // How the taste groups feel about the city, and protests nearby.
+    h += city.people.moodBonus(b);
     b.happiness = lerp(b.happiness, clamp(h, 0, 100), 0.35);
 
     // Business efficiency.
@@ -753,6 +756,7 @@ export function demandInputs(city: City): DemandInputs {
     university: universities(city).length > 0,
     port: [...city.buildings.all.values()].some((b) => b.typeId === 'cargo_port' && b.state === BuildingState.Active),
     policy: city.policies.demandBonus(),
+    reputation: city.people.reputation(),
   };
 }
 

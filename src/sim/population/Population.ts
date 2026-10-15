@@ -16,6 +16,8 @@ export class Population {
   alive = new Uint8Array(0);
   happiness = new Float32Array(0);
   moveInTick = new Int32Array(0);
+  /** Taste group (index into GROUPS; 255 until assigned). */
+  taste = new Uint8Array(0);
   private free: number[] = [];
 
   // Running totals.
@@ -45,6 +47,7 @@ export class Population {
     this.alive = g(this.alive, Uint8Array);
     this.happiness = g(this.happiness, Float32Array);
     this.moveInTick = g(this.moveInTick, Int32Array);
+    this.taste = g(this.taste, Uint8Array);
     this.capacity = cap;
   }
 
@@ -65,6 +68,7 @@ export class Population {
     this.alive[i] = 1;
     this.happiness[i] = 60;
     this.moveInTick[i] = tick;
+    this.taste[i] = 255;
     this.households++;
     this.residents += size;
     this.workerCount += this.workers[i];

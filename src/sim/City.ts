@@ -33,6 +33,8 @@ import { LAND_TILE, Land } from './world/Land';
 import { Research } from './research/Research';
 import { CityStyle } from './style/CityStyle';
 import { DesignLab } from './design/DesignLab';
+import { People, type Stage } from './design/People';
+import type { GroupId } from './design/Tastes';
 import type { Reaction } from './design/Trials';
 import { conformTerrain } from './world/TerrainConform';
 import { Disasters } from './world/Disasters';
@@ -55,6 +57,12 @@ export type CityEvents = {
   scenario: { id: string; result: 'won' | 'lost' };
   news: Edition;
   design: { type: 'idea'; id: string } | { type: 'reaction'; trial: number; reaction: Reaction } | { type: 'trial'; trial: number; what: 'placed' | 'opened' | 'month' | 'verdict' | 'gone' | 'adopted' | 'scrapped' };
+  people:
+    | { type: 'stage'; group: GroupId; stage: Stage }
+    | { type: 'petition'; group: GroupId; petition: number }
+    | { type: 'promise'; group: GroupId; petition: number; kept: boolean }
+    | { type: 'protest'; group: GroupId; protest: number }
+    | { type: 'leaving'; group: GroupId; households: number };
   research: { type: 'discovery' | 'decision' | 'failure' | 'milestone' | 'retrofit'; centerId: number; discoveryId?: string; recordId?: string; outcome?: string; milestoneId?: string };
 };
 
@@ -105,6 +113,8 @@ export class City {
   readonly style: CityStyle;
   /** The city's architects: ideas they know and designs in the sketchbook. */
   readonly design: DesignLab;
+  /** The taste groups residents belong to, and how they feel about the city. */
+  readonly people: People;
   /** Traffic demand being added up over several ticks (see tickCity). */
   demandJob: Generator<void, TripDemand[], void> | null = null;
   /** Periodic coverage and land-value refreshes in progress (a slice per tick). */
@@ -183,6 +193,7 @@ export class City {
     this.research = new Research(this, (opts.civSeed ?? Math.floor(Math.random() * 0xffffffff)) >>> 0);
     this.style = new CityStyle(this, this.research.civSeed);
     this.design = new DesignLab(this);
+    this.people = new People(this);
     this.terrain = new Terrain(opts.seed, opts.preset, { flat: opts.flatTerrain, base: opts.terrainBase });
     this.terrain.landCheck = (x, z) => this.land.ownsPoint(x, z);
     this.nature = new Nature(this.terrain, opts.seed);
@@ -427,6 +438,7 @@ export class City {
 
   addHousehold(home: Building, size: number, workers: number, educated: number): number {
     const i = this.population.add(home.id, size, workers, educated, home.level, this.clock.tick);
+    this.population.taste[i] = this.people.groupForNewcomer(i, this.clock.tick);
     home.households++;
     home.residents += size;
     return i;

@@ -267,6 +267,14 @@ export class Game {
           if (t?.verdict) this.ui.toasts.push({ severity: t.verdict.approval >= 58 ? 'good' : t.verdict.approval >= 45 ? 'info' : 'warning', icon: 'milestone', title: `The verdict on ${t.name}`, text: t.verdict.summary, onClick: () => this.ui.studio.open({ tab: 'prototypes', trialId: t.id }), tip: 'Click to read the verdict' });
         }
       }),
+      city.events.on('people', (e) => {
+        if (this.state !== 'playing') return;
+        if (e.type === 'petition') {
+          const p = city.people.petitions.find((x) => x.id === e.petition);
+          this.play('notify');
+          if (p) this.ui.toasts.push({ severity: 'warning', icon: 'people', title: 'A petition needs an answer', text: `“${p.text}”`, onClick: () => this.ui.studio.open({ tab: 'people' }), tip: 'Click to answer' });
+        }
+      }),
       city.events.on('news', (ed) => {
         if (this.state === 'playing') this.ui.newsToast(ed);
       }),

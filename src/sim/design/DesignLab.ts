@@ -10,8 +10,9 @@ import { BuildingState, Zone, isResidential, zoneBase } from '../types';
 import { type CityFacts, IDEAS, IDEA_BY_ID } from './Ideas';
 import { type Concept, type DesignContext, type DesignInput, compileConcept } from './Concept';
 import {
-  type Factor, GRADE_LABEL, MAX_ACTIVE_TRIALS, type Reaction, type Site, type Speaker, type Trial, absorb, approvalOf, assess, capReactions, emptyScores, followUp, liveFactors, makeReaction, makeVerdict, openingScores, speaksToday, surveySite,
+  type Factor, GRADE_LABEL, MAX_ACTIVE_TRIALS, type Reaction, type Site, type Speaker, type Trial, type Voices, absorb, approvalOf, assess, capReactions, emptyScores, followUp, liveFactors, makeReaction, makeVerdict, openingScores, speaksToday, surveySite,
 } from './Trials';
+import { GROUPS, approvalFromScore, groupScore } from './Tastes';
 import { type AdoptedStyle, globalShare, kindsFor, localChance, moodOf, reachOf, renovationsDue, saturation, styleName } from './Styles';
 
 /** A design saved to the sketchbook. */
@@ -229,7 +230,7 @@ export class DesignLab {
     // Word gets around as soon as the hoardings go up.
     const r = new Rng(hashStr(t.id, 'plans', this.city.research.civSeed));
     const early = t.factors.filter((f) => f.aspect === 'neighbours' || f.aspect === 'looks');
-    const re = makeReaction(t, early.length ? early : t.factors, r, this.city.clock.day, this.speaker(b), isResidential(b.zone));
+    const re = makeReaction(t, early.length ? early : t.factors, r, this.city.clock.day, this.speaker(b), isResidential(b.zone), this.voices());
     if (re) this.say(t, re, false);
     this.city.events.emit('design', { type: 'trial', trial: t.id, what: 'placed' });
     this.version++;
@@ -241,6 +242,14 @@ export class DesignLab {
     const f = assess(t.concept, site);
     const parent = t.parent ? this.trial(t.parent) : undefined;
     return parent ? [...f, ...followUp(parent, f)] : f;
+  }
+
+  /** The taste groups as speakers, in proportion to how many of each live in the city. */
+  private voices(): Voices[] | undefined {
+    const people = this.city.people;
+    if (!people) return undefined;
+    const shares = people.shares();
+    return GROUPS.map((g, i) => ({ id: g.id, share: shares[i], keys: g.keys }));
   }
 
   private speaker(b: Building | undefined): Speaker {
@@ -300,7 +309,7 @@ export class DesignLab {
       const k = day - t.openDay;
       if (speaksToday(t, day)) {
         const r = new Rng(hashStr(t.id, day, this.city.research.civSeed));
-        const re = makeReaction(t, [...t.factors, ...liveFactors(b, day, t.openDay, city.landValue.pollutionAt(b.cx, b.cz), city.stats.happiness)], r, day, this.speaker(b), residential);
+        const re = makeReaction(t, [...t.factors, ...liveFactors(b, day, t.openDay, city.landValue.pollutionAt(b.cx, b.cz), city.stats.happiness)], r, day, this.speaker(b), residential, this.voices());
         if (re) this.say(t, re);
       }
       if (k > 0 && k % 30 === 0) {
@@ -327,6 +336,14 @@ export class DesignLab {
     t.verdict = makeVerdict(t, city.clock.day, isResidential(b.zone), abandoned, cutShort);
     t.state = 'done';
     const v = t.verdict;
+    // Each group's view: what its members said, steadied by what the building is.
+    v.byGroup = {};
+    for (const g of GROUPS) {
+      const said = t.reactions.filter((r) => r.group === g.id && r.month > 0 && !r.blame);
+      const mean = said.length ? said.reduce((a, r) => a + r.mood, 0) / said.length : 0;
+      const score = (said.length * mean + 2 * groupScore(g, t.factors, t.concept.look)) / (said.length + 2);
+      v.byGroup[g.id] = approvalFromScore(score);
+    }
     const first = t.parent ? this.trial(t.parent)?.verdict : undefined;
     if (first) v.summary += v.approval > first.approval + 2 ? ` Up from ${first.approval}% for the earlier version.` : v.approval < first.approval - 2 ? ` Down from ${first.approval}% for the earlier version.` : ` About the same as the earlier version (${first.approval}%).`;
     const tone = v.grade === 'loved' || v.grade === 'liked' ? 'good' : v.grade === 'mixed' ? 'neutral' : 'bad';
@@ -391,6 +408,7 @@ export class DesignLab {
     this.styles.push(st);
     this.styleById.set(st.id, st);
     t.decision = { kind: 'adopted', day: city.clock.day, styleId: st.id };
+    city.people?.onAdopt(m);
     city.emitNotice({ severity: 'good', icon: 'build', title: `The ${name} is adopted`, text: `New buildings${street ? ` around ${street}` : ''} will start to follow it, and it will spread as people warm to it.`, x: t.x, z: t.z });
     city.events.emit('design', { type: 'trial', trial: t.id, what: 'adopted' });
     this.version++;
@@ -404,6 +422,7 @@ export class DesignLab {
     t.decision = { kind: 'scrapped', day: this.city.clock.day };
     const sk = this.sketches.find((k) => k.id === t.sketchId);
     if (sk) sk.scrapped = true;
+    this.city.people?.onScrap(t.name, t.verdict?.byGroup ?? {});
     if (demolish && t.buildingId) this.city.removeBuilding(t.buildingId, 'bulldoze');
     this.city.events.emit('design', { type: 'trial', trial: t.id, what: 'scrapped' });
     this.version++;
@@ -418,7 +437,10 @@ export class DesignLab {
   setPush(id: number, push: number): void {
     const st = this.styleById.get(id);
     if (!st) return;
+    const before = st.push;
     st.push = Math.max(0, Math.min(1.5, push));
+    const m = this.city.style.get(id);
+    if (m) this.city.people?.onPush(m, before, st.push);
     this.updateWeights();
     this.version++;
   }

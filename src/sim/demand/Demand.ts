@@ -44,6 +44,8 @@ export interface DemandInputs {
   officeUnlocked: boolean;
   /** Demand adjustments from city policies. */
   policy?: { commercial: number; industrial: number };
+  /** How the taste groups feel about the city: happy groups draw their kind, unhappy ones put people off. */
+  reputation?: { value: number; text: string };
   /** An operating airport draws business to the city. */
   airport?: boolean;
   /** An operating university supplies graduates. */
@@ -116,6 +118,8 @@ export class Demand {
       add('residential', 'City services', (inp.serviceScore - 0.35) * 40, `Homes have ${pct(inp.serviceScore)} police, fire, health, school and garbage coverage on average`, 'Build services where the coverage layers show gaps, and raise their funding in the Budget if they are full.', 'services');
     if (inp.population > 100)
       add('residential', 'Happiness', (inp.happiness - 55) * 0.45, `Residents are ${Math.round(inp.happiness)}% happy (55% is neutral)`, 'Click unhappy homes to see why. Common causes are missing services, pollution, noise, traffic and high taxes.', 'happiness');
+    if (inp.reputation && Math.abs(inp.reputation.value) >= 1 && inp.population > 50)
+      add('residential', 'Reputation', inp.reputation.value, inp.reputation.text, 'Build in styles your residents like, and answer their petitions. See People in the Design Studio.');
     tax('residential');
     traffic('residential', 0.75, 35);
     add('residential', 'Land value', (inp.avgLandValue - 0.35) * 25, `Average land value is ${pct(inp.avgLandValue)}`, 'Parks, plazas and good services raise land value. Keep industry and highways away from homes.', 'landValue');

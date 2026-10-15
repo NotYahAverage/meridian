@@ -1,5 +1,7 @@
 import type { Game } from '../game/Game';
 import { GRADE_LABEL, type Reaction, type Trial } from '../sim/design/Trials';
+import { GROUP_BY_ID } from '../sim/design/Tastes';
+import { icon } from './icons';
 import { h } from './dom';
 
 /** Seconds a speech bubble stays up. */
@@ -25,6 +27,7 @@ export class ReactionBubbles {
   private badges = new Map<number, HTMLElement>();
   private bubbles = new Map<number, Bubble>();
   private queue = new Map<number, Reaction[]>();
+  private protestEls = new Map<number, HTMLElement>();
 
   constructor(private game: Game) {}
 
@@ -33,6 +36,7 @@ export class ReactionBubbles {
     this.badges.clear();
     this.bubbles.clear();
     this.queue.clear();
+    this.protestEls.clear();
   }
 
   /** Someone said something about a prototype. */
@@ -66,6 +70,31 @@ export class ReactionBubbles {
         badge.style.transform = `translate(${Math.round(p.x)}px, ${Math.round(p.y)}px) translate(-50%, -100%)`;
         this.bubble(t, dt, p.x, p.y - badge.offsetHeight - 8);
       }
+    }
+    // Protests: a crowd with a placard where they gather.
+    const marching = new Set<number>();
+    if (show) {
+      for (const p of city.people.protests) {
+        if (g.cam.distance > 2600) break;
+        const pos = g.worldToScreen(p.x, city.terrain.heightAt(p.x, p.z) + 18, p.z);
+        if (!pos.visible) continue;
+        marching.add(p.id);
+        let el = this.protestEls.get(p.id);
+        if (!el) {
+          const grp = GROUP_BY_ID.get(p.group)!;
+          el = h('button', { class: 'proto-protest', style: `--g:${grp.color}`, onclick: () => this.game.ui.studio.open({ tab: 'people' }) },
+            h('span', { class: 'proto-protest-sign' }, `“${p.sign}”`),
+            h('span', { class: 'proto-protest-who' }, icon('people', 12), `${grp.name} protest`));
+          this.el.appendChild(el);
+          this.protestEls.set(p.id, el);
+        }
+        el.style.transform = `translate(${Math.round(pos.x)}px, ${Math.round(pos.y)}px) translate(-50%, -100%)`;
+      }
+    }
+    for (const [id, el] of this.protestEls) {
+      if (marching.has(id)) continue;
+      el.remove();
+      this.protestEls.delete(id);
     }
     for (const [id, el] of this.badges) {
       if (seen.has(id)) continue;
