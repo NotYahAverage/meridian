@@ -1,0 +1,47 @@
+# Builds the Mac app on GitHub's Macs whenever a version tag (v0.3.0…) is pushed,
+# attaches it to that version's GitHub release and pushes it to itch.io.
+# The Windows version is built and released from the developer's PC (npm run desktop:release).
+name: Release (Mac)
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build the game
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build the Mac app and attach it to the release
+        working-directory: desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Not signed with an Apple Developer ID (yet): players approve it once in Privacy & Security.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          npm ci
+          npx electron-builder --mac --publish always
+
+      - name: Push to itch.io
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: |
+          VERSION=$(node -p "require('./desktop/package.json').version")
+          curl -sL -o butler.zip https://broth.itch.zone/butler/darwin-amd64/LATEST/archive/default
+          unzip -q butler.zip -d butler
+          chmod +x butler/butler
+          ./butler/butler push desktop/release/mac-universal notyahaverage/meridian:mac --userversion "$VERSION"
