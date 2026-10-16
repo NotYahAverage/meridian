@@ -12,8 +12,10 @@ export interface TripContext {
   population: Population;
   /** A point on the road network at the outside connection, if any. */
   outsidePoint(): RoutePoint | null;
-  /** Fraction of a worker's commute made by car (the rest uses transit). */
+  /** Fraction of a worker's commute made by car (the rest walk or use transit). */
   carShare?(i: number, k: number): number;
+  /** Fraction of a home's shopping trips made by car (the rest walk). */
+  shopCarShare?(home: Building): number;
 }
 
 export interface TripSample {
@@ -220,7 +222,8 @@ export class TripGenerator {
       this.shops.nearest(b.cx, b.cz, 900, 2, near);
       if (!near.length) continue;
       const n = near.length;
-      for (let k = 0; k < n; k++) add(this.pt(b), this.pt(near[k]), (b.households * TRIP_RATES.shopPerHousehold) / n);
+      const car = this.ctx.shopCarShare ? this.ctx.shopCarShare(b) : 1;
+      for (let k = 0; k < n; k++) add(this.pt(b), this.pt(near[k]), (b.households * TRIP_RATES.shopPerHousehold * car) / n);
     }
     const edge = this.ctx.outsidePoint();
     if (edge) {

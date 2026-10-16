@@ -117,6 +117,7 @@ export function tickCity(city: City): void {
   moveIn(city);
   matchJobs(city, 350);
   city.traffic.step(14);
+  city.mobility.tick();
   checkGoals(city);
   const hour = city.clock.hour;
   city.disasters.tickHour();
@@ -354,8 +355,9 @@ function matchJobs(city: City, budget: number): void {
         }
         if (w.zone === Zone.Office && !educated) continue;
         if (compOf(w.segId) !== comp) continue;
-        let d = (w.cx - home.cx) ** 2 + (w.cz - home.cz) ** 2;
-        if (educated && w.zone === Zone.Office) d *= 0.5;
+        // How long it takes to get there (straight-line distance until the travel times are in).
+        let d = city.mobility.minutesBetween(home, w) ?? Math.hypot(w.cx - home.cx, w.cz - home.cz) / 350 + 5;
+        if (educated && w.zone === Zone.Office) d *= 0.7;
         if (d < bestD) {
           bestD = d;
           best = w;
@@ -417,6 +419,7 @@ function daily(city: City): void {
   city.research.daily();
   city.design.daily();
   city.people.daily();
+  city.mobility.daily();
   city.terrain.regrow(9);
   city.nature.grow(city.clock.day);
   dailyBuildings(city);
@@ -469,6 +472,10 @@ function dailyBuildings(city: City): void {
   const garbageScale = (b: Building) => (pol.in('recycling', b.district) ? 0.7 : 1) * rm.garbage;
   const crimeThreshold = (b: Building) => (pol.in('neighborhoodWatch', b.district) ? 0.04 : 0.12);
   const parkWeight = (b: Building) => (pol.in('parkRangers', b.district) ? 17 : 13);
+  // How people get around: each home's own commute, parks within a walk, shops' customers, access to jobs.
+  const mob = city.mobility;
+  const mobEffect = mob.effect;
+  const perShopJob = mob.stats?.visitsPerShopJob ?? 0;
   const transitMood = pol.has('freeTransit') ? 1.5 : 0;
   const policyMood = (b: Building) => (pol.in('neighborhoodWatch', b.district) ? 2 : 0) + transitMood + (pol.in('highRiseBan', b.district) ? 3 : 0);
   // Garbage collection capacity.
@@ -504,7 +511,12 @@ function dailyBuildings(city: City): void {
     }
     if (b.state === BuildingState.Construction) continue;
     b.age++;
-    const lv = lvMap.value[ci];
+    let lv = lvMap.value[ci];
+    // Places with more jobs within easy reach than the city's average are worth more, and less where it's further.
+    if (mobEffect > 0 && b.kind === 'zoned' && mob.stats && mob.stats.jobAccess > 0) {
+      const access = mob.jobAccess(b);
+      if (access !== null) lv = clamp(lv + mobEffect * 0.1 * clamp(access / mob.stats.jobAccess - 1, -1, 1), 0, 1);
+    }
     b.landValue = lv;
     if (b.kind === 'service') {
       b.problems = b.segId ? 0 : Problem.NoRoad;
@@ -545,17 +557,26 @@ function dailyBuildings(city: City): void {
     if (residential) {
       h = 52;
       h += 12 * grids.police[ci] + 10 * grids.health[ci] + 9 * grids.education[ci];
-      h += 6 * grids.fire[ci] + parkWeight(b) * grids.park[ci] + policyMood(b);
+      const parks = mobEffect > 0 ? mob.parkAccess(b) : null;
+      h += 6 * grids.fire[ci] + parkWeight(b) * (parks === null ? grids.park[ci] : lerp(grids.park[ci], parks, mobEffect)) + policyMood(b);
       h += (lv - 0.35) * 30;
       h -= lvMap.pollution[ci] * 38 + lvMap.noise[ci] * 16;
       h -= (tax.residential - 9) * 1.6;
-      h -= Math.max(0, city.traffic.avgTripMinutes - 16) * 0.7;
+      // Long commutes wear people down: once known, each home's own (eased in for older cities).
+      const cityWide = Math.max(0, city.traffic.avgTripMinutes - 16) * 0.7;
+      const own = mobEffect > 0 ? mob.commuteOf(b) : null;
+      h -= own === null ? cityWide : lerp(cityWide, Math.max(0, own - 18) * 0.6 - (own < 10 ? 2 : 0), mobEffect);
       h -= Math.max(0, stats.unemployment - 0.1) * 70;
     } else {
       h = 56 + (lv - 0.35) * 20 + 8 * grids.police[ci] + 6 * grids.fire[ci];
       const cat = zoneBase(b.zone) === Zone.Commercial ? 'commercial' : zoneBase(b.zone) === Zone.Industrial ? 'industrial' : 'office';
       h -= (tax[cat] - 9) * 1.6;
       h -= Math.max(0, ratio - 1) * 22;
+      // Shops live on their customers: busy, walkable streets do well, out-of-the-way ones struggle.
+      if (cat === 'commercial' && mobEffect > 0 && perShopJob > 0) {
+        const c = mob.customers(b);
+        if (c) h += mobEffect * clamp((c.visits / Math.max(1, b.workers) / perShopJob - 1) * 9, -12, 8);
+      }
     }
     if (p & Problem.NoPower) h -= 28;
     if (p & Problem.NoWater) h -= 28;
@@ -759,6 +780,7 @@ export function demandInputs(city: City): DemandInputs {
     port: [...city.buildings.all.values()].some((b) => b.typeId === 'cargo_port' && b.state === BuildingState.Active),
     policy: city.policies.demandBonus(),
     reputation: city.people.reputation(),
+    commute: city.mobility.stats && city.mobility.effect > 0 ? { minutes: city.mobility.stats.avgCommute, effect: city.mobility.effect } : undefined,
   };
 }
 

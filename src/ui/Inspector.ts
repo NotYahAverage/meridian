@@ -115,6 +115,17 @@ const ROLE_TEXT: Record<Citizen['role'], string> = {
   carer: 'Looks after the home',
 };
 
+/** How a home's commuters travel, biggest share first ("62% drive · 30% walk"). */
+function modeText(m: { walk: number; transit: number; car: number }): string {
+  const parts: [number, string][] = [[m.car, 'drive'], [m.walk, 'walk'], [m.transit, 'bus or metro']];
+  return parts.filter(([v]) => v >= 0.01).sort((a, b) => b[0] - a[0]).map(([v, w]) => `${Math.round(v * 100)}% ${w}`).join(' · ');
+}
+
+/** Access to jobs compared with the city's average. */
+function accessWord(r: number): string {
+  return r > 1.25 ? 'Many (well above average)' : r > 1.05 ? 'Above average' : r > 0.95 ? 'Average' : r > 0.75 ? 'Below average' : 'Few (well below average)';
+}
+
 const kv = (k: string, v: string | HTMLElement) => h('div', { class: 'kv' }, h('span', null, k), typeof v === 'string' ? h('b', null, v) : v);
 
 /** Right-hand panel describing the selected building or road. */
@@ -293,8 +304,24 @@ export class Inspector {
             employed += (pop.job[i * 2] ? 1 : 0) + (pop.job[i * 2 + 1] ? 1 : 0);
           }
           if (workers) body.append(kv('Employed', `${employed} / ${workers}`));
+          // How people here get around.
+          const mob = city.mobility;
+          const commute = mob.commuteOf(b);
+          const modes = mob.modesOf(b);
+          if (commute !== null && modes) body.append(kv('Commute', `${Math.round(commute)} min`), kv('Getting to work', modeText(modes)));
+          const access = mob.jobAccess(b);
+          const avg = mob.stats?.jobAccess ?? 0;
+          if (access !== null && avg > 0) body.append(kv('Jobs within reach', accessWord(access / avg)));
+          const parks = mob.parkAccess(b);
+          if (parks !== null) body.append(kv('Parks within a walk', parks > 0.6 ? 'Plenty' : parks > 0.3 ? 'Some' : parks > 0.05 ? 'A few' : 'None'));
         } else {
           body.append(kv('Workers', `${b.workers} / ${b.jobs}`), kv('Efficiency', formatPct(b.efficiency)));
+          const c = city.mobility.customers(b);
+          const per = city.mobility.stats?.visitsPerShopJob ?? 0;
+          if (c && per > 0) {
+            const r = c.visits / Math.max(1, b.workers) / per;
+            body.append(kv('Customers', `${formatInt(Math.round(c.visits))}/day · ${formatPct(c.walk)} on foot`), kv('Trade', r > 1.3 ? 'Busy' : r > 0.8 ? 'Steady' : r > 0.45 ? 'Quiet' : 'Struggling'));
+          }
         }
         body.append(h('div', { class: 'kv' }, h('span', null, 'Happiness'), meter(b.happiness / 100, b.happiness > 60 ? 'var(--good)' : b.happiness > 35 ? 'var(--warn)' : 'var(--bad)')));
         body.append(h('div', { class: 'kv' }, h('span', null, 'Land value'), meter(b.landValue, 'var(--accent)')));
@@ -325,6 +352,11 @@ export class Inspector {
         body.append(h('div', { class: 'btn-row' }, h('button', { class: `btn ${a?.pending ? 'primary' : ''}`, onclick: () => this.game.ui.research.open({ tab: 'centres', centreId: centre.id }) }, icon('flask', 14), a?.pending ? 'Decide…' : 'Lab work…')));
       } else if (st) {
         const status = city.coverage.status.get(b.id);
+        const pv = st.kind === 'park' || st.kind === 'landmark' ? city.mobility.parkVisits(b) : null;
+        if (pv) {
+          const load = pv.visits / pv.capacity;
+          body.append(kv('Visitors', `${formatInt(Math.round(pv.visits))}/day`), kv('Crowding', load > 1 ? `Crowded (${Math.round(load * 100)}% of comfortable)` : `${Math.round(load * 100)}% of comfortable`));
+        }
         if (st.designId) {
           const d = city.research.designs.get(st.designId);
           if (d) body.append(h('div', { class: 'hint small' }, `Designed by your researchers. ${d.description}`), h('div', { class: 'btn-row' }, h('button', { class: 'btn small', onclick: () => this.game.ui.research.open({ discoveryId: d.discoveryId }) }, icon('flask', 13), 'The discovery behind it')));

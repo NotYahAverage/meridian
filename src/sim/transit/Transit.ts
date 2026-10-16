@@ -342,6 +342,24 @@ export class Transit {
     return Math.min(1200, line.loopSeconds / Math.max(1, line.buses) / 2);
   }
 
+  /** Working bus and metro lines as a commuter sees them: where they stop, how long the rides take, the wait and the comfort. */
+  rideOptions(): { points: { x: number; z: number }[]; times: number[]; loopSeconds: number; wait: number; penalty: number; walkRadius: number }[] {
+    const out: ReturnType<Transit['rideOptions']> = [];
+    for (const line of this.lines.values()) {
+      if (line.problem || line.buses <= 0 || !line.times.length) continue;
+      const points = line.stops.map((id) => this.stops.get(id)).filter((s): s is BusStop => !!s);
+      if (points.length !== line.stops.length) continue;
+      out.push({ points, times: line.times, loopSeconds: line.loopSeconds, wait: this.waitSeconds(line), penalty: 0.3, walkRadius: BUS.walkRadius });
+    }
+    for (const line of this.metro.lines.values()) {
+      if (line.problem || line.trains <= 0 || !line.times.length) continue;
+      const pts = line.stations.map((id) => this.metro.station(id));
+      if (pts.some((b) => !b)) continue;
+      out.push({ points: pts.map((b) => ({ x: b!.cx, z: b!.cz })), times: line.times, loopSeconds: line.loopSeconds, wait: this.metro.waitSeconds(line), penalty: 0.05, walkRadius: METRO.walkRadius });
+    }
+    return out;
+  }
+
   // ── Ridership ─────────────────────────────────────────────────────────────
 
   /** Daily mode choice for commuters (bus or metro). Fills `share` and line rider counts. */

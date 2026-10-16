@@ -63,7 +63,7 @@ export class StatsPanel extends Panel {
   readonly id = 'stats';
   private charts: HTMLCanvasElement[] = [];
   private live: Record<string, HTMLElement> = {};
-  private tab: 'overview' | 'services' | 'zones' = 'overview';
+  private tab: 'overview' | 'moving' | 'services' | 'zones' = 'overview';
 
   constructor(game: Game) {
     super(game, 'City Statistics', 'stats');
@@ -73,7 +73,7 @@ export class StatsPanel extends Panel {
     const b = this.body;
     b.innerHTML = '';
     const tabs = h('div', { class: 'tabs' });
-    for (const [id, label] of [['overview', 'Overview'], ['services', 'Services'], ['zones', 'Land use']] as const) {
+    for (const [id, label] of [['overview', 'Overview'], ['moving', 'Getting around'], ['services', 'Services'], ['zones', 'Land use']] as const) {
       tabs.appendChild(h('button', { class: `tab${this.tab === id ? ' active' : ''}`, onclick: () => { this.tab = id; this.render(); } }, label));
     }
     b.appendChild(tabs);
@@ -116,6 +116,8 @@ export class StatsPanel extends Panel {
         h('div', { class: 'section-title' }, 'Transit riders per day'), c4,
       );
       this.charts = [c1, c2, c3, c4];
+    } else if (this.tab === 'moving') {
+      this.renderMoving(b);
     } else if (this.tab === 'services') {
       for (const k of COVERAGE_KINDS) {
         const v = city.coverage.averageFor(k, city.buildings);
@@ -158,6 +160,71 @@ export class StatsPanel extends Panel {
       b.append(h('div', { class: 'section-title' }, 'Building levels'), row('Level 1', formatInt(levels[0])), row('Level 2', formatInt(levels[1])), row('Level 3', formatInt(levels[2])));
     }
     this.update();
+  }
+
+  /** How people get to work, to the shops and to the parks, and where it's hardest. */
+  private renderMoving(b: HTMLElement): void {
+    const city = this.game.city!;
+    const mob = city.mobility;
+    const st = mob.stats;
+    if (!st) {
+      b.append(h('div', { class: 'hint' }, 'Working out how people get around\u2026 (it takes a few hours of game time, longer in a big city).'));
+      return;
+    }
+    const pct = (v: number) => `${Math.round(v * 100)}%`;
+    const show = (x: number, z: number) => h('button', { class: 'btn small', onclick: () => this.game.cam.jumpTo({ x, z, distance: 280, pitch: 0.9, yaw: this.game.cam.goal.yaw }) }, icon('eye', 13), 'Show');
+    b.append(
+      h('div', { class: 'section-title' }, 'Getting to work'),
+      h('div', { class: 'mode-bar' },
+        h('i', { class: 'm-walk', style: `width:${st.walk * 100}%` }),
+        h('i', { class: 'm-transit', style: `width:${st.transit * 100}%` }),
+        h('i', { class: 'm-car', style: `width:${st.car * 100}%` }),
+      ),
+      h('div', { class: 'legend' }, h('span', { class: 'lg m-walk' }, `On foot ${pct(st.walk)}`), h('span', { class: 'lg m-transit' }, `Bus & metro ${pct(st.transit)}`), h('span', { class: 'lg m-car' }, `Car ${pct(st.car)}`)),
+      row('Average commute', `${st.avgCommute.toFixed(1)} min`),
+      row('Commutes over 45 min', pct(st.longCommutes)),
+      row('Commuters', formatInt(st.commuters)),
+    );
+    if (mob.phase < 1) b.append(h('div', { class: 'hint small' }, `This city was founded before commutes, parks and shop customers were worked out street by street; they count for ${pct(mob.phase)} so far, rising to the full effect over a game year.`));
+    b.append(
+      h('div', { class: 'section-title' }, 'Shops and parks'),
+      row('Shopping trips', `${formatInt(Math.round(st.shopVisits))}/day · ${pct(st.shopOnFoot)} on foot`),
+      row('Park visits', `${formatInt(Math.round(st.parkVisits))}/day`),
+      row('Crowded parks', formatInt(st.crowdedParks)),
+    );
+    // Where commutes are longest.
+    const zones = mob.zones().filter((z) => z.households > 0 && z.commute > 0).sort((a, z) => z.commute - a.commute).slice(0, 5);
+    if (zones.length) {
+      b.append(h('div', { class: 'section-title' }, 'Longest commutes'));
+      for (const z of zones) {
+        const seg = city.roads.nearestSegment(z.x, z.z, 200);
+        b.append(h('div', { class: 'kv' }, h('span', null, seg?.seg.name || 'Unnamed road'), h('b', null, `${Math.round(z.commute)} min · ${formatInt(z.households)} homes`), show(z.x, z.z)));
+      }
+    }
+    // The busiest roads.
+    // Each street once, at its worst stretch.
+    const seen = new Set<string>();
+    const roads = [...city.traffic.volume.keys()]
+      .map((id) => ({ id, r: city.traffic.ratio(id) }))
+      .filter((x) => x.r > 0.5)
+      .sort((a, z) => z.r - a.r)
+      .filter((x) => {
+        const name = city.roads.segments.get(x.id)?.name || `#${x.id}`;
+        if (seen.has(name)) return false;
+        seen.add(name);
+        return true;
+      })
+      .slice(0, 5);
+    if (roads.length) {
+      b.append(h('div', { class: 'section-title' }, 'Busiest roads'));
+      for (const x of roads) {
+        const seg = city.roads.segments.get(x.id);
+        if (!seg) continue;
+        const mid = (seg.poly.count >> 1) * 2;
+        b.append(h('div', { class: 'kv' }, h('span', null, seg.name || 'Unnamed road'), h('b', null, `${Math.round(x.r * 100)}% of capacity`), show(seg.poly.pts[mid], seg.poly.pts[mid + 1])));
+      }
+    }
+    b.append(h('div', { class: 'hint small' }, 'Map layers show the same street by street: Commutes, Jobs in reach, Shop customers and Walking.'));
   }
 
   update(): void {
@@ -340,7 +407,7 @@ export class OverlaysPanel extends Panel {
 
 /** Key colour shown beside each layer in the list (matches the legend ramps). */
 const LAYER_COLOR: Partial<Record<OverlayId, string>> = {
-  traffic: '#e0703a', landValue: '#4fbf72', happiness: '#d9b84a', districts: '#8f87e8', transit: '#3fb0d0', walking: '#46e178', pollution: '#a8743c', noise: '#e0874a',
+  traffic: '#e0703a', landValue: '#4fbf72', happiness: '#d9b84a', districts: '#8f87e8', transit: '#3fb0d0', walking: '#46e178', commute: '#e0b04a', access: '#5fc79a', shoppers: '#d9845a', pollution: '#a8743c', noise: '#e0874a',
   power: '#d9c24a', water: '#4a9be0', police: '#3c82ff', fire: '#ff5a3c', health: '#ff6eaa', education: '#aa6eff', garbage: '#aabe3c', park: '#3cd26e',
 };
 

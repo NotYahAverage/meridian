@@ -30,7 +30,10 @@ export type OverlayId =
   | 'happiness'
   | 'districts'
   | 'transit'
-  | 'walking';
+  | 'walking'
+  | 'commute'
+  | 'shoppers'
+  | 'access';
 
 export const OVERLAYS: { id: OverlayId; label: string; group: string; legend: [string, string] }[] = [
   { id: 'traffic', label: 'Traffic', group: 'City', legend: ['Free flowing', 'Gridlock'] },
@@ -39,6 +42,9 @@ export const OVERLAYS: { id: OverlayId; label: string; group: string; legend: [s
   { id: 'districts', label: 'Districts', group: 'City', legend: ['', ''] },
   { id: 'transit', label: 'Public Transit', group: 'City', legend: ['Far from a stop', 'Short walk'] },
   { id: 'walking', label: 'Walking', group: 'City', legend: ['5 min on foot', '15 min'] },
+  { id: 'commute', label: 'Commutes', group: 'City', legend: ['Long', 'Short'] },
+  { id: 'access', label: 'Jobs in reach', group: 'City', legend: ['Few', 'Many'] },
+  { id: 'shoppers', label: 'Shop customers', group: 'City', legend: ['Quiet', 'Busy'] },
   { id: 'pollution', label: 'Pollution', group: 'Environment', legend: ['Clean', 'Polluted'] },
   { id: 'noise', label: 'Noise', group: 'Environment', legend: ['Quiet', 'Loud'] },
   { id: 'power', label: 'Electricity', group: 'Utilities', legend: ['No power', 'Powered'] },
@@ -90,7 +96,7 @@ export class Overlays {
   set(mode: OverlayId): void {
     this.mode = mode;
     this.timer = 0;
-    const bldMode = mode === 'power' || mode === 'water' || mode === 'happiness';
+    const bldMode = mode === 'power' || mode === 'water' || mode === 'happiness' || mode === 'commute' || mode === 'shoppers';
     this.buildings.uniforms.uBldOverlay.value = bldMode ? 1 : 0;
     this.buildings.overlayValue = bldMode ? this.buildingValue(mode) : null;
     this.roads.uniforms.uTrafficOverlay.value = mode === 'traffic' ? 1 : 0;
@@ -103,6 +109,25 @@ export class Overlays {
   }
 
   private buildingValue(mode: OverlayId): (b: Building) => number {
+    const mob = this.city.mobility;
+    if (mode === 'commute') {
+      // Homes by their commute: green under ten minutes, red past half an hour.
+      return (b) => {
+        if (b.kind !== 'zoned' || b.state !== BuildingState.Active || !isResidential(b.zone)) return 0;
+        const c = mob.commuteOf(b);
+        return c === null ? 0 : 1 + Math.round((1 - Math.max(0, Math.min(1, (c - 8) / 25))) * 254);
+      };
+    }
+    if (mode === 'shoppers') {
+      // Shops by customers per worker, against the city's average.
+      return (b) => {
+        const c = b.state === BuildingState.Active ? mob.customers(b) : null;
+        const per = mob.stats?.visitsPerShopJob ?? 0;
+        if (!c || per <= 0) return 0;
+        const r = c.visits / Math.max(1, b.workers) / per;
+        return 1 + Math.round(Math.max(0, Math.min(1, (r - 0.3) / 1.4)) * 254);
+      };
+    }
     if (mode === 'happiness') {
       return (b) => (b.kind === 'zoned' && b.state === BuildingState.Active ? 1 + Math.round((b.happiness / 100) * 254) : 0);
     }
@@ -137,6 +162,11 @@ export class Overlays {
       return;
     }
     if (this.mode === 'power' || this.mode === 'water' || this.mode === 'happiness') return;
+    if (this.mode === 'commute' || this.mode === 'shoppers') {
+      // Their numbers change as the city's travel times are refreshed.
+      this.buildings.updateState(0, true);
+      return;
+    }
     this.writeGrid();
   }
 
@@ -178,7 +208,32 @@ export class Overlays {
     const n = GRID_RES * GRID_RES;
     const lv = this.city.landValue;
     const mode = this.mode;
-    if (mode === 'transit') {
+    if (mode === 'access') {
+      // Each neighbourhood's access to jobs, against the city's average.
+      out.fill(0);
+      const avg = this.city.mobility.stats?.jobAccess ?? 0;
+      const R = 112;
+      if (avg > 0) {
+        for (const z of this.city.mobility.zones()) {
+          const [r, g, b] = ramp((z.jobs / avg - 0.5) / 1.0);
+          const ix0 = Math.max(0, Math.floor((z.x - R) / GRID_CELL)), ix1 = Math.min(GRID_RES - 1, Math.floor((z.x + R) / GRID_CELL));
+          const iz0 = Math.max(0, Math.floor((z.z - R) / GRID_CELL)), iz1 = Math.min(GRID_RES - 1, Math.floor((z.z + R) / GRID_CELL));
+          for (let iz = iz0; iz <= iz1; iz++) {
+            for (let ix = ix0; ix <= ix1; ix++) {
+              const d = Math.hypot((ix + 0.5) * GRID_CELL - z.x, (iz + 0.5) * GRID_CELL - z.z);
+              if (d > R) continue;
+              const o = (iz * GRID_RES + ix) * 4;
+              const a = Math.round(190 * (1 - (d / R) ** 3));
+              if (a <= out[o + 3]) continue;
+              out[o] = r;
+              out[o + 1] = g;
+              out[o + 2] = b;
+              out[o + 3] = a;
+            }
+          }
+        }
+      }
+    } else if (mode === 'transit') {
       // Walking catchment of stops on working lines.
       out.fill(0);
       for (const st of this.city.transit.catchments()) {
@@ -321,6 +376,9 @@ export class Overlays {
       case 'water': return 'Buildings with water and sewage service (amber = only one).';
       case 'happiness': return 'How satisfied residents and businesses are.';
       case 'districts': return 'Named districts painted with the District tool.';
+      case 'commute': return 'Homes by how long their residents take to get to work, walking, riding or driving. Mix jobs and homes, add crossings and transit, or ease congestion to shorten them.';
+      case 'access': return 'How many jobs each neighbourhood can reach quickly (nearby jobs count most), against the city\u2019s average. Well-connected places are worth more.';
+      case 'shoppers': return 'Shops by customers per worker. Shops with homes within a walk, on streets people can reach, do best.';
       case 'walking': return 'Sidewalks and crossings; red edges are roads with no sidewalk, which people can’t walk along or cross. The shading shows how far you can walk from the cursor in 5, 10 and 15 minutes.';
       case 'transit': return 'Bus lines and how far people walk to a stop. Commuters ride when the bus is competitive with driving.';
       default: return 'Coverage from service buildings. Effectiveness drops when overloaded.';

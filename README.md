@@ -123,6 +123,15 @@ The **Goals** tab of City Info also tracks 16 achievements for the long game (br
   - coats in the cold and woolly hats when it freezes;
   - umbrellas in the rain;
   - school backpacks, and work or shopping bags.
+- **Getting around** is worked out from the real networks:
+  - **Zones and travel times:** buildings are grouped into zones (160 m squares, split wherever a road without sidewalks cuts through). Car times (with the current congestion), walking times (on the walking network) and bus and metro times between zones are refreshed a few zones per tick: within a day in a small town, about a week in a city of half a million.
+  - **How people travel:** every commuter chooses walking against driving or riding, with a minute on foot counting as more effort. Walkers and riders are taken out of the traffic model, so a walkable city has less traffic.
+  - **Commutes:** each home gets its own commute time, which replaces the city-wide average in happiness. Jobs are matched by travel time rather than straight-line distance.
+  - **Shops:** they get customers from the homes that can reach them, nearby and walkable ones most. Busy shops are happier and quiet ones struggle, and shopping trips on foot don't drive.
+  - **Parks:** they get visitors from homes within a 15-minute walk. A crowded park lifts moods less, and a park across a highway doesn't count.
+  - **Access to jobs:** neighbourhoods that reach more jobs quickly than the city's average are worth more, and long average commutes put new residents off (a "Commutes" demand factor).
+  
+  Cities from before this ease into it over a game year. City Statistics has a *Getting around* tab: how people commute, average and long commutes, shopping and park visits, the longest commutes and the busiest roads. The *Commutes*, *Jobs in reach* and *Shop customers* layers show it street by street, and homes, shops and parks say it in their panels.
 - **Zoning** is a 4 m grid that can only be painted near roads that allow zoning. Buildings grow on lots that face the road. The spawner packs lots next to their neighbours, checks every lot against roads, other buildings, zone coverage and slope, and then levels the terrain under it.
 - **Households** are stored as typed arrays: home, size, workers, education and two job slots. Job matching runs in batches and prefers nearby workplaces on the same connected road network. Office jobs need educated workers.
 - **Traffic** runs on two levels. A macro model routes aggregated trips (commutes, shopping, freight, visitors) along shortest-path trees, spread over several ticks, to get peak-hour volumes and congestion. A* routing then uses those congestion-weighted travel times. Visible cars are lane-based agents: they follow the car ahead, stop at red lights, yield at junctions and queue when the next lane is full. They drive slower on congested roads, so bad layouts show up visibly.

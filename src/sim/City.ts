@@ -24,6 +24,7 @@ import { TripGenerator } from './traffic/TripGenerator';
 import { Vehicles } from './traffic/Vehicles';
 import { LiveTraffic } from './traffic/LiveTraffic';
 import { Transit } from './transit/Transit';
+import { Mobility } from './mobility/Mobility';
 import { Pedestrians } from './walk/Pedestrians';
 import { WalkNetwork } from './walk/WalkNetwork';
 import { HIGH_RISE_CAP, Policies } from './policies/Policies';
@@ -129,6 +130,8 @@ export class City {
   readonly walk: WalkNetwork;
   /** People on foot near the camera (a view of the simulation, not part of it). */
   readonly pedestrians: Pedestrians;
+  /** How people get around: travel times, commutes, shop customers, park visits, access. */
+  readonly mobility: Mobility;
   readonly zones: ZoneMap;
   readonly buildings = new Buildings();
   readonly population = new Population();
@@ -223,11 +226,13 @@ export class City {
     this.signals = new Signals(this.layout);
     this.vehicles = new Vehicles(this.roads, this.layout, this.signals, this.terrain);
     this.transit = new Transit(this);
+    this.mobility = new Mobility(this);
     this.trips = new TripGenerator({
       buildings: this.buildings,
       population: this.population,
       outsidePoint: () => this.outsidePoint(),
-      carShare: (i, k) => this.transit.carShare(i, k),
+      carShare: (i, k) => this.mobility.carShare(i, k),
+      shopCarShare: (b) => this.mobility.shopCarShare(b),
     });
     this.live = new LiveTraffic(this);
     this.pedestrians = new Pedestrians(this);

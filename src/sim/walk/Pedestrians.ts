@@ -407,7 +407,9 @@ export class Pedestrians {
     const work = city.buildings.get(pop.job[hh * 2 + k]);
     if (!homeB || !work) return false;
     const [from, to] = home ? [work, homeB] : [homeB, work];
-    const path = this.pathBetween(from, to, MAX_WALK);
+    // As often as the simulation has them walking (once it knows).
+    const ws = city.mobility.walkShare(hh, k);
+    const path = ws === null || this.rng.next() < ws ? this.pathBetween(from, to, MAX_WALK) : null;
     if (path) return this.launch(path, hh, k, home ? Errand.Home : Errand.Work, from.id, to.id, prefill);
     // Too far to walk: commuters who take the bus walk to a stop near home.
     if (!home && this.rng.next() > city.transit.carShare(hh, k)) {

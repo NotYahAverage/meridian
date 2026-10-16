@@ -1307,3 +1307,15 @@ canvas { touch-action: none; /* map */ }
 /* Updates (desktop) */
 .mm-update { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
 .mm-update-text { font-size: 11.5px; color: var(--muted); }
+
+/* Getting around: how commuters travel. */
+.mode-bar { display: flex; height: 10px; border-radius: 5px; overflow: hidden; margin: 6px 0 4px; background: var(--panel-2, #1c2430); }
+.mode-bar i { display: block; height: 100%; }
+.m-walk { background: #4ade80; }
+.m-transit { background: #f472b6; }
+.m-car { background: #94a3b8; }
+.legend .lg.m-walk::before, .legend .lg.m-transit::before, .legend .lg.m-car::before { background: inherit; }
+.legend .lg.m-walk, .legend .lg.m-transit, .legend .lg.m-car { background: none; }
+.legend .lg.m-walk::before { background: #4ade80; }
+.legend .lg.m-transit::before { background: #f472b6; }
+.legend .lg.m-car::before { background: #94a3b8; }

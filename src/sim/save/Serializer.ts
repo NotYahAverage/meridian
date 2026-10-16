@@ -1,3 +1,4 @@
+import type { MobilitySave } from '../mobility/Mobility';
 import { registerLandmarks } from '../design/DesignLab';
 import type { PeopleSave } from '../design/People';
 import { decodeFloat32, decodeInt32, decodeUint8, encodeTyped, rleDecode, rleEncode } from '../../core/encoding';
@@ -130,6 +131,7 @@ export interface SaveData {
   /** Ideas learned and designs in the sketchbook. */
   design?: DesignSave;
   people?: PeopleSave;
+  mobility?: MobilitySave;
 }
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -259,6 +261,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
     style: city.style.serialize(),
     design: city.design.serialize(),
     people: city.people.serialize(),
+    mobility: city.mobility.serialize(),
   };
 }
 
@@ -427,6 +430,7 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
   city.research.retireFields();
   city.design.load(data.design);
   city.people.load(data.people);
+  city.mobility.load(data.mobility);
   return city;
 }
 
