@@ -117,6 +117,12 @@ The **Goals** tab of City Info also tracks 16 achievements for the long game (br
   - shopping, an afternoon in the park, a stroll, or out for lunch.
   
   They keep to the right, step around each other, wait at the kerb for the walk signal or a gap in traffic, stop at shop windows or for a chat, and go inside at the end. Buses let passengers off at stops. Click someone to see who they are and where they're going, and *Follow* them. Nothing they do feeds back into the simulation, so it never depends on where the camera is.
+
+  The figures are made in Blender, the same way as the vehicles. There's an adult, an adult in a dress, a child, and a simple figure for people far from the camera. Every part carries what it is (its colour slot, the limb it moves with, and the optional extra it belongs to), so walking, standing, chatting and sitting on the grass are animated in the vertex shader, with one draw call per body type. Each person's look comes from their seed:
+  - height, build, skin tone, hair colour and style (grey with age, a slight stoop when old) and outfit;
+  - coats in the cold and woolly hats when it freezes;
+  - umbrellas in the rain;
+  - school backpacks, and work or shopping bags.
 - **Zoning** is a 4 m grid that can only be painted near roads that allow zoning. Buildings grow on lots that face the road. The spawner packs lots next to their neighbours, checks every lot against roads, other buildings, zone coverage and slope, and then levels the terrain under it.
 - **Households** are stored as typed arrays: home, size, workers, education and two job slots. Job matching runs in batches and prefers nearby workplaces on the same connected road network. Office jobs need educated workers.
 - **Traffic** runs on two levels. A macro model routes aggregated trips (commutes, shopping, freight, visitors) along shortest-path trees, spread over several ticks, to get peak-hour volumes and congestion. A* routing then uses those congestion-weighted travel times. Visible cars are lane-based agents: they follow the car ahead, stop at red lights, yield at junctions and queue when the next lane is full. They drive slower on congested roads, so bad layouts show up visibly.

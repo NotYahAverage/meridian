@@ -1,78 +1,156 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { PedState, type Pedestrians } from '../../sim/walk/Pedestrians';
-import { Pool, createAssetMaterial, writeMatrix } from '../assets/AssetMaterials';
+import { bodySize } from '../../sim/population/Citizens';
+import { PauseWhy, PedState, type Pedestrians } from '../../sim/walk/Pedestrians';
+import type { AssetLibrary } from '../assets/AssetLibrary';
+import { writeMatrix } from '../assets/AssetMaterials';
+import { Body, type Look, type WeatherNow, lookFor, newLook } from './Appearance';
+import { ADULT_JOINTS, CHILD_JOINTS, type Joints, LO_JOINTS, POSE, createPeopleDepthMaterial, createPeopleMaterial } from './PeopleMaterial';
 
-const CLOTHES = [0x2d3a4a, 0x8a2b2b, 0xd9d4c7, 0x3f6d4e, 0x1d1f22, 0x6b5b95, 0xc98b3a, 0x4a7fb5, 0x9c9c9c, 0xe0b0a0, 0x7a4b2a, 0x2f5f6f, 0xb85c7a, 0x556b2f];
-const SKIN = [[0.95, 0.78, 0.65], [0.8, 0.6, 0.45], [0.55, 0.38, 0.27], [0.36, 0.25, 0.18]];
-/** People further than this from the camera aren't drawn. */
+/** People further than this from the camera aren't drawn; nearer than HI_DIST they get the detailed figures. */
 const DRAW_DIST = 520;
+const HI_DIST = 75;
+const ATTRS = ['aC0', 'aC1', 'aC2', 'aC3', 'aC4'] as const;
+/** The child model is built at 0.74 of adult height. */
+const CHILD_BASE = 0.74;
 
-function personGeometry(): THREE.BufferGeometry {
-  const parts: THREE.BufferGeometry[] = [];
-  const add = (g: THREE.BufferGeometry, col: number[], mat: number) => {
-    const n = g.getAttribute('position').count;
-    const c = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) c.set(col, i * 3);
-    g.setAttribute('color', new THREE.BufferAttribute(c, 3));
-    g.setAttribute('aMat', new THREE.BufferAttribute(new Float32Array(n).fill(mat), 1));
-    g.deleteAttribute('uv');
-    parts.push(g.index ? g.toNonIndexed() : g);
-  };
-  const body = new THREE.CapsuleGeometry(0.19, 0.62, 3, 8);
-  body.translate(0, 1.08, 0);
-  add(body, [1, 1, 1], 0);
-  const legs = new THREE.CylinderGeometry(0.15, 0.12, 0.78, 6);
-  legs.translate(0, 0.39, 0);
-  add(legs, [0.12, 0.13, 0.16], 1);
-  const head = new THREE.SphereGeometry(0.12, 8, 6);
-  head.translate(0, 1.62, 0);
-  add(head, SKIN[1], 1);
-  return mergeGeometries(parts)!;
-}
+/** Height and build of a person (shared with picking). */
+export const personSize = bodySize;
 
-const CLOTHES_LINEAR = CLOTHES.map((hex) => new THREE.Color().setHex(hex, THREE.SRGBColorSpace));
+/** One instanced draw call for one body type, growing as needed. */
+class Batch {
+  mesh!: THREE.InstancedMesh;
+  attrs: THREE.InstancedBufferAttribute[] = [];
+  cap = 0;
+  n = 0;
 
-/** Body height and build for a person of a given age (from their look seed). */
-export function personSize(age: number, look: number): { h: number; w: number } {
-  const v = ((look >>> 8) % 1000) / 1000;
-  const b = ((look >>> 18) % 1000) / 1000;
-  const h = age < 5 ? 0.52 + v * 0.06 : age < 13 ? 0.6 + (age - 5) * 0.035 + v * 0.05 : age < 17 ? 0.86 + v * 0.1 : 0.93 + v * 0.15 - (age > 75 ? 0.04 : 0);
-  return { h, w: h * (0.9 + b * 0.25) };
-}
-
-/** Draws the people on foot from the pedestrian simulation (one instanced draw call). */
-export class PedestrianRenderer {
-  readonly pool: Pool;
-
-  constructor() {
-    this.pool = new Pool(personGeometry(), createAssetMaterial('person'), 512, { colors: true, shadows: false });
+  constructor(
+    private group: THREE.Group,
+    private geo: THREE.BufferGeometry,
+    private mat: THREE.Material,
+    private depth: THREE.Material | null,
+    cap: number,
+  ) {
+    this.create(cap);
   }
 
-  update(ped: Pedestrians, camera: THREE.Vector3, camDist: number): void {
+  private create(cap: number): void {
+    if (this.mesh) {
+      this.group.remove(this.mesh);
+      this.mesh.dispose();
+    }
+    const g = this.geo.clone();
+    this.attrs = ATTRS.map((name) => {
+      const a = new THREE.InstancedBufferAttribute(new Float32Array(cap * 4), 4);
+      a.setUsage(THREE.DynamicDrawUsage);
+      g.setAttribute(name, a);
+      return a;
+    });
+    const m = new THREE.InstancedMesh(g, this.mat, cap);
+    m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    m.count = 0;
+    m.frustumCulled = false;
+    m.castShadow = !!this.depth;
+    m.receiveShadow = true;
+    if (this.depth) m.customDepthMaterial = this.depth;
+    this.mesh = m;
+    this.cap = cap;
+    this.group.add(m);
+  }
+
+  ensure(n: number): void {
+    if (n <= this.cap) return;
+    let cap = this.cap;
+    while (cap < n) cap *= 2;
+    this.create(cap);
+  }
+
+  commit(): void {
+    this.mesh.count = this.n;
+    this.mesh.instanceMatrix.needsUpdate = true;
+    for (const a of this.attrs) a.needsUpdate = true;
+  }
+}
+
+/** Draws the people on foot: detailed animated figures near the camera, simple ones further out. */
+export class PedestrianRenderer {
+  readonly group = new THREE.Group();
+  private batches: Batch[];
+  /** Each person's look, worked out once per person (and again when the weather turns). */
+  private cacheSerial = new Uint32Array(0);
+  private cacheLook: Look[] = [];
+  private weatherKey = -1;
+
+  constructor(assets: AssetLibrary) {
+    const make = (name: 'person_adult' | 'person_dress' | 'person_child' | 'person_lo', j: Joints, shadows: boolean, cap: number) =>
+      new Batch(this.group, assets.get(name), createPeopleMaterial(j), shadows ? createPeopleDepthMaterial(j) : null, cap);
+    this.batches = [make('person_adult', ADULT_JOINTS, true, 128), make('person_dress', ADULT_JOINTS, true, 64), make('person_child', CHILD_JOINTS, true, 64), make('person_lo', LO_JOINTS, false, 512)];
+  }
+
+  get visible(): boolean {
+    return this.group.visible;
+  }
+
+  update(ped: Pedestrians, camera: THREE.Vector3, camDist: number, weather: WeatherNow): void {
     const show = camDist < 560;
-    this.pool.mesh.visible = show;
+    this.group.visible = show;
     if (!show) return;
-    this.pool.ensure(ped.count + 8);
-    const m = this.pool.matrices;
-    const c = this.pool.colors!;
-    let n = 0;
-    const d2max = DRAW_DIST * DRAW_DIST;
+    if (this.cacheSerial.length !== ped.max) {
+      this.cacheSerial = new Uint32Array(ped.max);
+      this.cacheLook = Array.from({ length: ped.max }, () => newLook());
+    }
+    // Coats, hats and umbrellas follow the weather.
+    const key = (weather.rain > 0.18 ? 1 : 0) | (weather.temperature < 8 ? 2 : 0) | (weather.temperature < 3 ? 4 : 0) | (weather.temperature < 2 ? 8 : 0);
+    if (key !== this.weatherKey) {
+      this.weatherKey = key;
+      this.cacheSerial.fill(0);
+    }
+    for (const b of this.batches) {
+      b.ensure(ped.count + 8);
+      b.n = 0;
+    }
+    const hi2 = HI_DIST * HI_DIST, draw2 = DRAW_DIST * DRAW_DIST;
     for (let i = 0; i < ped.max; i++) {
       if (!ped.active[i] || ped.state[i] === PedState.Free) continue;
-      const x = ped.x[i], z = ped.z[i];
-      if ((x - camera.x) ** 2 + (z - camera.z) ** 2 > d2max) continue;
+      const x = ped.x[i], y = ped.y[i], z = ped.z[i];
+      const d2 = (x - camera.x) ** 2 + (y - camera.y) ** 2 + (z - camera.z) ** 2;
+      if (d2 > draw2) continue;
       const s = ped.scale[i];
       if (s < 0.02) continue;
-      const size = personSize(ped.age[i], ped.look[i]);
-      const bob = Math.abs(Math.sin(ped.stride[i])) * 0.05 * Math.min(1, ped.speed[i]);
-      writeMatrix(m, n * 16, x, ped.y[i] + bob, z, ped.heading[i], size.w * s, size.h * s, size.w * s);
-      const col = CLOTHES_LINEAR[ped.look[i] % CLOTHES_LINEAR.length];
-      c[n * 3] = col.r;
-      c[n * 3 + 1] = col.g;
-      c[n * 3 + 2] = col.b;
-      n++;
+      let look = this.cacheLook[i];
+      if (this.cacheSerial[i] !== ped.serial[i]) {
+        look = lookFor(ped.look[i], ped.age[i], ped.errand[i], weather, look);
+        this.cacheSerial[i] = ped.serial[i];
+      }
+      const batch = this.batches[d2 < hi2 ? look.body : 3];
+      const k = batch.n++;
+      const size = bodySize(ped.age[i], ped.look[i]);
+      const gs = (look.body === Body.Child && d2 < hi2 ? size.h / CHILD_BASE : size.h) * s;
+      writeMatrix(batch.mesh.instanceMatrix.array as Float32Array, k * 16, x, y, z, ped.heading[i], size.w * gs, gs, size.w * gs);
+      // What they're doing: walking, standing, chatting, sitting in the park.
+      const lead = ped.leader[i] >= 0 ? ped.leader[i] : i;
+      const sp = ped.speed[i];
+      let pose: number = POSE.stand;
+      let amp = 0;
+      if (sp > 0.15) {
+        pose = POSE.walk;
+        amp = Math.min(1.25, sp / 1.35);
+      } else if (ped.state[lead] === PedState.Pause && ped.pauseWhy[lead] === PauseWhy.Chat) pose = POSE.talk;
+      else if (ped.state[lead] === PedState.Linger && ((ped.look[i] >>> 5) % 10) < 6) pose = POSE.sit;
+      const a = batch.attrs;
+      const o = k * 4;
+      put(a[0].array as Float32Array, o, look.top, (look.lightShoes ? 1 : 0) + look.lean);
+      put(a[1].array as Float32Array, o, look.bottom, look.mask);
+      put(a[2].array as Float32Array, o, look.skin, pose);
+      put(a[3].array as Float32Array, o, look.hair, ped.stride[i] % (Math.PI * 2));
+      put(a[4].array as Float32Array, o, look.accent, amp);
     }
-    this.pool.commit(n);
+    for (const b of this.batches) b.commit();
   }
+}
+
+function put(arr: Float32Array, o: number, c: THREE.Color, w: number): void {
+  arr[o] = c.r;
+  arr[o + 1] = c.g;
+  arr[o + 2] = c.b;
+  arr[o + 3] = w;
 }

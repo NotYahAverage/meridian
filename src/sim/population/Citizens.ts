@@ -110,6 +110,14 @@ export function citizenOf(pop: Population, h: number, k: number): Citizen {
   };
 }
 
+/** Height (relative to a 1.75 m adult) and build of a person of a given age, from their look seed. */
+export function bodySize(age: number, look: number): { h: number; w: number } {
+  const v = ((look >>> 8) % 1000) / 1000;
+  const b = ((look >>> 18) % 1000) / 1000;
+  const h = age < 5 ? 0.55 + v * 0.06 : age < 13 ? 0.62 + (age - 5) * 0.035 + v * 0.05 : age < 17 ? 0.88 + v * 0.1 : 0.93 + v * 0.14 - (age > 75 ? 0.04 : 0);
+  return { h, w: 0.92 + b * 0.22 };
+}
+
 /** A stable seed for how a person looks (outfit, build). */
 export function lookOf(pop: Population, h: number, k: number): number {
   return mix(h, pop.moveInTick[h], k + 101);

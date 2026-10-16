@@ -75,7 +75,7 @@ export class WorldRenderer {
     this.buildings = new BuildingRenderer(city);
     this.props = new PropRenderer(city, assets, this.roads, this.buildings);
     this.vehicles = new VehicleRenderer(assets);
-    this.pedestrians = new PedestrianRenderer();
+    this.pedestrians = new PedestrianRenderer(assets);
     this.effects = new Effects(city);
     this.icons = new StatusIcons(city, this.buildings);
     this.ghost = new Ghost(city, this.roads.uniforms, this.buildings.uniforms);
@@ -99,7 +99,7 @@ export class WorldRenderer {
       this.buildings.group,
       this.props.group,
       this.vehicles.group,
-      this.pedestrians.pool.mesh,
+      this.pedestrians.group,
       this.effects.points,
       this.icons.mesh,
       this.ghost.group,
@@ -144,7 +144,7 @@ export class WorldRenderer {
     this.vehicles.update(city.vehicles, camera, focus);
     // People on foot live around the camera's focus; they only move while the game runs.
     city.pedestrians.update(simDt, focus, camera.position, camDist, env.hour);
-    this.pedestrians.update(city.pedestrians, camera.position, camDist);
+    this.pedestrians.update(city.pedestrians, camera.position, camDist, city.weather);
     this.effects.update(dt, this.labActivity(), camera.position, viewportH, camera.fov, simRunning);
     this.icons.update(dt, camDist, globalUniforms.uTime.value);
     this.ghost.update();
@@ -269,7 +269,7 @@ export class WorldRenderer {
   /** The person on foot under the cursor (nearest along the ray), if any. */
   pickPerson(ndc: THREE.Vector2, camera: THREE.Camera): number | null {
     const ped = this.city.pedestrians;
-    if (!this.pedestrians.pool.mesh.visible || !ped.count) return null;
+    if (!this.pedestrians.visible || !ped.count) return null;
     this.raycaster.setFromCamera(ndc, camera);
     const o = this.raycaster.ray.origin, d = this.raycaster.ray.direction;
     let best: number | null = null;

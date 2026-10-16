@@ -1,11 +1,12 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export const ASSET_NAMES = [
   'sedan', 'hatchback', 'suv', 'van', 'truck', 'garbage', 'firetruck', 'police', 'ambulance', 'bus', 'bus_stop',
   'oak', 'maple', 'pine', 'bush', 'tree_lod', 'pine_lod', 'streetlight', 'signal', 'crane', 'wind_tower', 'wind_rotor',
   'airliner', 'sailboat', 'motorboat', 'container_ship',
+  'person_adult', 'person_dress', 'person_child', 'person_lo',
 ] as const;
 export type AssetName = (typeof ASSET_NAMES)[number];
 
@@ -23,6 +24,12 @@ function materialKind(name: string): number {
 }
 
 const FOLIAGE: AssetName[] = ['oak', 'maple', 'bush'];
+const PEOPLE: AssetName[] = ['person_adult', 'person_dress', 'person_child', 'person_lo'];
+
+/** People parts: the colour slot, the limb it moves with, and the optional extra it belongs to (from `P_<slot>_<limb>_<option>`). */
+export const PERSON_SLOTS = ['top', 'bottom', 'skin', 'hair', 'shoes', 'accent', 'dark'];
+export const PERSON_LIMBS = ['torso', 'head', 'thighL', 'shinL', 'thighR', 'shinR', 'uarmL', 'farmL', 'uarmR', 'farmR'];
+export const PERSON_OPTIONS = ['none', 'hairShort', 'hairLong', 'hairBun', 'hat', 'bag', 'backpack', 'umbrella', 'coat'];
 
 /**
  * Loads the Blender-authored GLB models and converts each into a single
@@ -46,7 +53,7 @@ export class AssetLibrary {
       ASSET_NAMES.map(async (name) => {
         try {
           const gltf = await loader.loadAsync(`${base}assets/models/${name}.glb`);
-          const geo = this.convert(gltf.scene, FOLIAGE.includes(name));
+          const geo = PEOPLE.includes(name) ? convertPerson(gltf.scene) : this.convert(gltf.scene, FOLIAGE.includes(name));
           if (geo) {
             this.geos.set(name, geo);
             this.loadedFromFiles++;
@@ -112,6 +119,42 @@ export class AssetLibrary {
     merged?.computeBoundingSphere();
     return merged;
   }
+}
+
+/** A person model, kept indexed, with its parts tagged for the people shader (aSlot, aLimb, aOpt). */
+function convertPerson(root: THREE.Object3D): THREE.BufferGeometry | null {
+  const parts: THREE.BufferGeometry[] = [];
+  root.updateMatrixWorld(true);
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const src = mesh.geometry;
+    const groups = src.groups.length ? src.groups : [{ start: 0, count: src.index ? src.index.count : src.getAttribute('position').count, materialIndex: 0 }];
+    for (const grp of groups) {
+      const mat = mats[grp.materialIndex ?? 0];
+      const [, slot, limb, opt] = (mat?.name ?? '').split('_');
+      let g = src.index ? extractGroup(src, grp.start, grp.count) : src.clone();
+      g.applyMatrix4(mesh.matrixWorld);
+      if (!g.getAttribute('normal')) g.computeVertexNormals();
+      for (const key of Object.keys(g.attributes)) if (key !== 'position' && key !== 'normal') g.deleteAttribute(key);
+      if (!g.index) g = mergeVertices(g);
+      tagPerson(g, Math.max(0, PERSON_SLOTS.indexOf(slot)), Math.max(0, PERSON_LIMBS.indexOf(limb)), Math.max(0, PERSON_OPTIONS.indexOf(opt)));
+      parts.push(g);
+    }
+  });
+  if (!parts.length) return null;
+  const merged = mergeGeometries(parts, false);
+  merged?.computeBoundingSphere();
+  return merged;
+}
+
+export function tagPerson(g: THREE.BufferGeometry, slot: number, limb: number, opt: number): THREE.BufferGeometry {
+  const n = g.getAttribute('position').count;
+  g.setAttribute('aSlot', new THREE.BufferAttribute(new Float32Array(n).fill(slot), 1));
+  g.setAttribute('aLimb', new THREE.BufferAttribute(new Float32Array(n).fill(limb), 1));
+  g.setAttribute('aOpt', new THREE.BufferAttribute(new Float32Array(n).fill(opt), 1));
+  return g;
 }
 
 function extractGroup(src: THREE.BufferGeometry, start: number, count: number): THREE.BufferGeometry {
@@ -243,6 +286,21 @@ function fallback(name: AssetName): THREE.BufferGeometry {
     parts.push(box(32, 3.4, 3.4, 0, 3, 0, [0.92, 0.92, 0.9], MATK.fixed));
     parts.push(box(6, 0.4, 29, -2.5, 2.1, 0, [0.92, 0.92, 0.9], MATK.fixed));
     parts.push(box(4, 6, 0.3, -15, 6.5, 0, [0.8, 0.8, 0.8], MATK.tint));
+  } else if (PEOPLE.includes(name)) {
+    const h = name === 'person_child' ? 0.74 : 1;
+    const piece = (g: THREE.BufferGeometry, x: number, y: number, z: number, slot: number, limb: number) => {
+      g.translate(x, y, z);
+      return tagPerson(g, slot, limb, 0);
+    };
+    const people: THREE.BufferGeometry[] = [
+      piece(new THREE.CylinderGeometry(0.07, 0.06, 0.88 * h, 6), 0, 0.47 * h, -0.1, 1, 2),
+      piece(new THREE.CylinderGeometry(0.07, 0.06, 0.88 * h, 6), 0, 0.47 * h, 0.1, 1, 4),
+      piece(new THREE.CapsuleGeometry(0.17, 0.32 * h, 3, 8), 0, 1.17 * h, 0, 0, 0),
+      piece(new THREE.SphereGeometry(0.11, 8, 6), 0, 1.6 * h, 0, 2, 1),
+    ];
+    const merged = mergeGeometries(people.map((g) => { for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'aSlot', 'aLimb', 'aOpt'].includes(k)) g.deleteAttribute(k); return g; }), false)!;
+    merged.computeBoundingSphere();
+    return merged;
   } else if (name === 'wind_rotor') {
     for (let k = 0; k < 3; k++) {
       const b = new THREE.BoxGeometry(0.2, 27, 1.2);

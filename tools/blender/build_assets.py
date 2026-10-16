@@ -126,7 +126,8 @@ class Builder:
         ret = bmesh.ops.create_cube(self.bm, size=1.0, matrix=m)
         faces = self._tag_faces({f for v in ret["verts"] for f in v.link_faces}, mat)
         if bevel > 0:
-            faces = self._bevel_part(faces, bevel, segments)
+            # Newer Blenders give bevel faces material 0: tag them with the part's own.
+            faces = self._tag_faces(self._bevel_part(faces, bevel, segments), mat)
         return faces
 
     def cylinder(self, r1, r2, depth, loc, mat, segments=10, axis="Z", smooth=True, caps=True):
@@ -164,7 +165,7 @@ class Builder:
         faces = self._tag_faces(set(faces), mat)
         if bevel > 0:
             # Round the silhouette edges only; profile corners stay as modelled.
-            faces = self._bevel_part(faces, bevel, segments, edges=list({e for f in caps for e in f.edges}))
+            faces = self._tag_faces(self._bevel_part(faces, bevel, segments, edges=list({e for f in caps for e in f.edges})), mat)
         return faces
 
     def frustum(self, bottom, top, mat_roof, mat_side, mat_front=None, mat_back=None):
@@ -849,6 +850,116 @@ def wind_rotor():
     return b.finish(smooth_angle=50)
 
 
+# ── People (forward = +X, their left = +Y, feet at z = 0) ──────────────────
+# Material names say what each part is, for the game's people shader:
+#   P_<slot>_<limb>_<option>
+#   slot    the colour it takes per person: top, bottom, skin, hair, shoes, accent, dark
+#   limb    what it moves with: torso, head, thighL, shinL, thighR, shinR, uarmL, farmL, uarmR, farmR
+#   option  "none", or a part only some people show: hairShort, hairLong, hairBun, hat, bag, backpack, umbrella, coat
+# Joint heights (adult): hip 0.93, knee 0.50, shoulder 1.41, elbow 1.13, neck 1.54. Children are scaled by 0.74.
+SLOT_PREVIEW = {
+    "top": (0.32, 0.45, 0.62, 1), "bottom": (0.18, 0.2, 0.28, 1), "skin": (0.78, 0.57, 0.42, 1), "hair": (0.16, 0.1, 0.06, 1),
+    "shoes": (0.06, 0.06, 0.06, 1), "accent": (0.55, 0.28, 0.12, 1), "dark": (0.05, 0.05, 0.05, 1),
+}
+
+
+def PM(slot, limb, opt="none"):
+    name = f"P_{slot}_{limb}_{opt}"
+    PALETTE.setdefault(name, SLOT_PREVIEW[slot])
+    return material(name)
+
+
+def tube(b, p0, p1, r0, r1, mat, segments=7, squash=1.0):
+    """Tapered tube from p0 (radius r0) to p1 (radius r1); squash < 1 flattens it front to back."""
+    a, c = Vector(p0), Vector(p1)
+    d = c - a
+    rot = d.normalized().to_track_quat("Z", "X").to_matrix().to_4x4()
+    m = Matrix.Translation((a + c) / 2) @ rot @ Matrix.Diagonal((squash, 1, 1, 1))
+    ret = bmesh.ops.create_cone(b.bm, cap_ends=True, cap_tris=False, segments=segments, radius1=r0, radius2=r1, depth=d.length, matrix=m)
+    return b._tag(ret["verts"], mat, True)
+
+
+def ellipsoid(b, loc, radii, mat, subdiv=1):
+    return b.sphere(1.0, loc, mat, subdiv=subdiv, scale=radii)
+
+
+def build_person(name, h=1.0, dress=False, head=1.0, girth=1.0):
+    """A walking figure in its rest pose (arms down). Joints scale with `h`."""
+    b = Builder(name)
+    z = lambda v: v * h
+    g = girth
+    hip, knee, shoulder, elbow, neck = z(0.93), z(0.5), z(1.41), z(1.13), z(1.54)
+    leg_y, arm_y = 0.098 * g, 0.205 * g + 0.01
+    for side, L in ((1, "L"), (-1, "R")):
+        y = side * leg_y
+        # Legs: thigh (with the knee cap) and shin with the shoe.
+        legs_slot = "skin" if dress else "bottom"
+        tube(b, (0, y, knee), (0, y * 1.02, hip), 0.06 * g, 0.088 * g, PM(legs_slot, "thigh" + L))
+        ellipsoid(b, (0, y, knee), (0.06 * g, 0.06 * g, 0.06 * g), PM(legs_slot, "thigh" + L), subdiv=1)
+        tube(b, (0, y, z(0.07)), (0, y, knee), 0.044 * g, 0.057 * g, PM("skin" if dress else "bottom", "shin" + L))
+        b.box((0.22 * h + 0.02, 0.085 * g, 0.075 * h), (0.045 * h, y, 0.0375 * h), PM("shoes", "shin" + L), bevel=0.02 * h, segments=1)
+        # Arms: sleeve to the elbow, forearm, hand.
+        ya = side * arm_y
+        tube(b, (0, ya * 1.03, elbow), (0, ya, shoulder - 0.01 * h), 0.044 * g, 0.054 * g, PM("top", "uarm" + L))
+        ellipsoid(b, (0, ya * 1.03, elbow), (0.045 * g, 0.045 * g, 0.045 * g), PM("top", "uarm" + L), subdiv=1)
+        tube(b, (0, ya * 1.03, z(0.885)), (0, ya * 1.03, elbow), 0.034 * g, 0.043 * g, PM("top", "farm" + L))
+        ellipsoid(b, (0.006, ya * 1.03, z(0.84)), (0.034 * g, 0.024 * g, 0.05 * h), PM("skin", "farm" + L), subdiv=1)
+    # Body: hips, torso, shoulders, neck.
+    ellipsoid(b, (0, 0, z(0.95)), (0.105 * g, 0.165 * g, 0.1 * h), PM("bottom", "torso"), subdiv=1)
+    tube(b, (0, 0, z(0.97)), (0, 0, z(1.38)), 0.15 * g, 0.18 * g, PM("top", "torso"), segments=9, squash=0.62)
+    ellipsoid(b, (0, 0, z(1.385)), (0.1 * g, 0.2 * g, 0.065 * h), PM("top", "torso"), subdiv=1)
+    tube(b, (0, 0, z(1.42)), (0, 0, neck), 0.048 * g, 0.045 * g, PM("skin", "torso"), segments=6)
+    if dress:
+        tube(b, (0, 0, z(0.55)), (0, 0, z(1.0)), 0.26 * g, 0.16 * g, PM("bottom", "torso"), segments=10, squash=0.82)
+    # Head and face.
+    hr = (0.1 * head, 0.088 * head, 0.115 * head)
+    hc = (0.012, 0, neck + hr[2] * 0.82)
+    ellipsoid(b, hc, hr, PM("skin", "head"), subdiv=2)
+    b.box((0.03 * head, 0.026 * head, 0.04 * head), (hc[0] + hr[0] * 0.92, 0, hc[2] - 0.01 * head), PM("skin", "head"))
+    for side in (1, -1):
+        b.box((0.012, 0.016 * head, 0.012 * head), (hc[0] + hr[0] * 0.9, side * 0.034 * head, hc[2] + 0.018 * head), PM("dark", "head"))
+    # Hair styles (one is shown per person), and a winter hat.
+    cap = ((hc[0] - 0.022 * head, 0, hc[2] + 0.045 * head), (hr[0] * 1.06, hr[1] * 1.08, hr[2] * 0.8))
+    for opt in ("hairShort", "hairLong", "hairBun"):
+        ellipsoid(b, cap[0], cap[1], PM("hair", "head", opt), subdiv=2)
+    b.box((0.07 * head, 0.17 * head, 0.24 * head), (hc[0] - 0.08 * head, 0, hc[2] - 0.11 * head), PM("hair", "head", "hairLong"), bevel=0.025 * head, segments=1)
+    ellipsoid(b, (hc[0] - 0.105 * head, 0, hc[2] + 0.06 * head), (0.05 * head, 0.05 * head, 0.045 * head), PM("hair", "head", "hairBun"), subdiv=1)
+    ellipsoid(b, (hc[0] - 0.012 * head, 0, hc[2] + 0.06 * head), (hr[0] * 1.1, hr[1] * 1.12, hr[2] * 0.72), PM("accent", "head", "hat"), subdiv=2)
+    # Winter coat over the body, to the knees.
+    tube(b, (0, 0, z(0.6)), (0, 0, z(1.4)), 0.235 * g, 0.2 * g, PM("top", "torso", "coat"), segments=10, squash=0.72)
+    # Bags: a shoulder bag on the right hip with its strap, or a backpack.
+    b.box((0.2 * h, 0.06 * g, 0.16 * h), (0.0, -0.215 * g - 0.03, z(0.9)), PM("accent", "torso", "bag"), bevel=0.02, segments=1)
+    tube(b, (0.07 * g, -0.2 * g, z(0.97)), (0.07 * g, 0.16 * g, z(1.41)), 0.012, 0.012, PM("accent", "torso", "bag"), segments=4)
+    b.box((0.13 * g, 0.27 * g, 0.34 * h), (-0.16 * g, 0, z(1.18)), PM("accent", "torso", "backpack"), bevel=0.035, segments=2)
+    # Umbrella, held in the right hand (the shader raises that arm when it's up).
+    hand = (0.41 * h, -arm_y * 1.03, z(1.24))
+    top = (0.16 * h, -0.08, z(1.98))
+    tube(b, hand, top, 0.011, 0.011, PM("dark", "torso", "umbrella"), segments=5)
+    b.cylinder(0.52 * h, 0.03, 0.2 * h, (top[0], top[1], top[2] + 0.08 * h), PM("accent", "torso", "umbrella"), segments=10, smooth=True, caps=True)
+    return b.finish(smooth_angle=80)
+
+
+def build_person_lo(name):
+    """Far-away figure: a few boxes and a head, legs that still swing."""
+    b = Builder(name)
+    for side, L in ((1, "L"), (-1, "R")):
+        b.box((0.13, 0.12, 0.88), (0, side * 0.09, 0.47), PM("bottom", "thigh" + L))
+        b.box((0.1, 0.09, 0.56), (0, side * 0.22, 1.13), PM("top", "uarm" + L))
+    b.box((0.24, 0.38, 0.5), (0, 0, 1.17), PM("top", "torso"))
+    b.sphere(1.0, (0.01, 0, 1.6), PM("skin", "head"), subdiv=1, scale=(0.1, 0.09, 0.115))
+    b.sphere(1.0, (-0.01, 0, 1.65), PM("hair", "head"), subdiv=0, scale=(0.1, 0.095, 0.08))
+    return b.finish(smooth_angle=50)
+
+
+def build_people():
+    return [
+        build_person("person_adult"),
+        build_person("person_dress", dress=True),
+        build_person("person_child", h=0.74, head=0.93, girth=0.78),
+        build_person_lo("person_lo"),
+    ]
+
+
 def export(obj):
     bpy.ops.object.select_all(action="DESELECT")
     obj.select_set(True)
@@ -965,6 +1076,8 @@ def main():
     objs.append(sailboat())
     objs.append(motorboat())
     objs.append(container_ship())
+    people = build_people()
+    objs += people
     total = 0
     for o in objs:
         total += export(o)
@@ -974,7 +1087,8 @@ def main():
         render_closeup([o for o in objs if o.name == "airliner"], PREVIEW.replace(".png", "_plane.png"), spacing=0, distance=46.0)
         render_closeup([o for o in objs if o.name in ("sailboat", "motorboat")], PREVIEW.replace(".png", "_boats.png"), spacing=12.0, distance=24.0)
         render_closeup([o for o in objs if o.name == "container_ship"], PREVIEW.replace(".png", "_ship.png"), spacing=0, distance=150.0)
-        render_preview(objs, PREVIEW)
+        render_closeup(people, PREVIEW.replace(".png", "_people.png"), spacing=1.1, distance=7.5)
+        render_preview([o for o in objs if o not in people], PREVIEW)
 
 
 main()

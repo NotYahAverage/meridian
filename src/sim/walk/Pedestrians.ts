@@ -3,7 +3,7 @@ import { Rng } from '../../core/rng';
 import type { Building } from '../buildings/Buildings';
 import type { City } from '../City';
 import { MAX_VEHICLES } from '../constants';
-import { adultsIn, citizenOf, lookOf } from '../population/Citizens';
+import { adultsIn, bodySize, citizenOf, lookOf } from '../population/Citizens';
 import { ROAD_TYPES } from '../roads/RoadTypes';
 import { SERVICE_BY_ID } from '../services/ServiceTypes';
 import { WalkLight } from '../traffic/Signals';
@@ -184,6 +184,8 @@ export class Pedestrians {
   readonly speed = new Float32Array(MAX_PEOPLE);
   readonly stride = new Float32Array(MAX_PEOPLE);
   readonly age = new Uint8Array(MAX_PEOPLE);
+  /** Height relative to an adult (smaller people take quicker steps). */
+  readonly height = new Float32Array(MAX_PEOPLE);
   readonly look = new Uint32Array(MAX_PEOPLE);
   /** Household slot and member index (with the household's move-in tick, to notice when it has gone). */
   readonly household = new Int32Array(MAX_PEOPLE);
@@ -666,6 +668,7 @@ export class Pedestrians {
     this.moveIn[i] = pop.moveInTick[hh];
     this.age[i] = c.age;
     this.look[i] = lookOf(pop, hh, k);
+    this.height[i] = bodySize(c.age, this.look[i]).h;
     this.origin[i] = origin;
     this.dest[i] = dest;
     this.leader[i] = -1;
@@ -883,7 +886,7 @@ export class Pedestrians {
         this.stepLinger(i, dt);
         break;
     }
-    this.stride[i] += this.speed[i] * dt * 4.4;
+    this.stride[i] += (this.speed[i] * dt * 4.4) / this.height[i];
     this.chatCool[i] -= dt;
   }
 
@@ -1103,7 +1106,7 @@ export class Pedestrians {
     this.y[f] = this.y[l];
     this.speed[f] = this.speed[l];
     this.turnTo(f, this.state[l] === PedState.Pause && this.speed[l] < 0.2 ? this.face[l] : h, dt);
-    this.stride[f] += this.speed[f] * dt * 4.6;
+    this.stride[f] += (this.speed[f] * dt * 4.4) / this.height[f];
     if (!this.fadeIn[f]) this.scale[f] = this.scale[l];
   }
 
