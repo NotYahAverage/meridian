@@ -309,6 +309,8 @@ export class GeoBuilder {
   ground(x0: number, z0: number, x1: number, z1: number, m: Mat, lift = 0.04): void {
     const plate = m.pattern === P.GRASS || m.pattern === P.PAVING || m.pattern === P.CONCRETE || m.pattern === P.PARKING || m.pattern === P.DIRT;
     if (plate && (x1 - x0) * (z1 - z0) >= this.w * this.d * 0.85) return;
+    // Front paths run on to the sidewalk: the lot starts a little way behind it.
+    if (z0 <= 0.5 && z1 > z0 && x1 - x0 < 8 && (m.pattern === P.PAVING || m.pattern === P.CONCRETE)) z0 = -FRONT_GAP;
     this.flat(x0, z0, x1, z1, lift, m);
   }
 
@@ -362,6 +364,9 @@ export class GeoBuilder {
     };
   }
 }
+
+/** Distance from a zoned lot's front edge back to the sidewalk (the lot's setback). */
+const FRONT_GAP = 0.65;
 
 const FOUNDATION: Mat = { color: hex(0x8a847a), pattern: P.CONCRETE, seed: 0, fh: 3, bay: 3 };
 

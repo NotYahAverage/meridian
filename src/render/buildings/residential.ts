@@ -161,10 +161,10 @@ export const townhouse: Gen = (g, b, r) => {
     g.box(x0, zb, x1, zb + bd, 0, base, mat(shade(col, 0.8), brick ? P.STONE : P.CONCRETE, s), null, { sides: [true, i === n - 1, true, i === 0] });
     g.box(x0, zb, x1, zb + bd, base, h, facade, null, { sides: [true, i === n - 1, true, i === 0] });
     // Exposed party walls (plain, no windows), from the neighbour's eaves up; pitched roofs add the neighbour's ridge.
+    // (From the neighbour's roof, not its parapet: otherwise there's a slot you can see straight through.)
     const party = mat(col, P.TRIM, s);
-    const nh = (k: number) => heights[k] + (flat ? 0.8 : 0);
-    if (i > 0 && nh(i - 1) < h + (flat ? 0.8 : 0)) g.wall(x0, zb, x0, zb + bd, nh(i - 1), h, party);
-    if (i < n - 1 && nh(i + 1) < h + (flat ? 0.8 : 0)) g.wall(x1, zb + bd, x1, zb, nh(i + 1), h, party);
+    if (i > 0 && heights[i - 1] < h) g.wall(x0, zb, x0, zb + bd, heights[i - 1], h, party);
+    if (i < n - 1 && heights[i + 1] < h) g.wall(x1, zb + bd, x1, zb, heights[i + 1], h, party);
     if (flat) {
       g.flat(x0, zb, x1, zb + bd, h, mat(rgb(0x7f7b74), P.ROOF_FLAT, s));
       // Front upstand with a cornice; party walls rise between neighbours.
@@ -181,16 +181,19 @@ export const townhouse: Gen = (g, b, r) => {
     }
     // Ground-floor string course.
     outline(g, x0, zb, x1, zb + bd, base + 3.0 - 0.18, base + 3.0, 0.07, trim, [true, false, false, false]);
-    // Bay window on some houses (two storeys high).
-    const dx = i % 2 === 0 ? 0.18 : 0.62;
+    // Each house front has two window bays per floor: the door takes the place of one ground-floor window,
+    // and a bay window (on some houses) goes in front of the other half.
+    const doorCell = i % 2 === 0 ? 1 : 0;
     if (b.level >= 2 && r.chance(0.5)) {
-      const bx0 = x0 + uw * 0.12, bx1 = bx0 + Math.min(2.6, uw * 0.42);
+      const bx0 = x0 + uw * (doorCell === 1 ? 0.06 : 0.54), bx1 = bx0 + Math.min(2.6, uw * 0.42);
       const bh = base + 2 * 3.0;
       g.box(bx0, zb - 0.75, bx1, zb, base, bh, { ...mat(col, pat, s + i * 7, 3.0, bx1 - bx0), oy: base }, mat(roof, P.ROOF_METAL, s), { sides: [true, true, false, true] });
       outline(g, bx0, zb - 0.75, bx1, zb, bh - 0.2, bh, 0.08, trim, [true, true, false, true]);
     }
-    // Stoop and front door.
-    const dcx = x0 + uw * (dx < 0.5 ? 0.78 : 0.3);
+    // Stoop and front door, in the middle of a window bay, with that bay's ground floor drawn without its window.
+    const dcx = x0 + uw * (doorCell === 1 ? 0.75 : 0.25);
+    const blank: Mat = pat === P.RES ? mat(col, P.TRIM, s) : { ...facade, fh: 200, oy: base };
+    g.wall(dcx + uw * 0.25 - 0.06, zb - 0.012, dcx - uw * 0.25 + 0.06, zb - 0.012, base, base + 3.0 - 0.2, blank);
     g.box(dcx - 0.8, zb - 1.6, dcx + 0.8, zb, 0, base, stoopM, mat(rgb(0xb8b2a6), P.PAVING, s), { sides: [true, true, false, true] });
     door(g, dcx, zb, base, 1.0, 2.25, mat(rgb(r.pick(DOORS)), P.DOOR, s), trim);
     g.ground(dcx - 0.5, 0, dcx + 0.5, zb - 1.6, PAVE(s), 0.045);

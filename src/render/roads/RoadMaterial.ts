@@ -109,8 +109,12 @@ float stripes(float x) {
     vec2 pc = floor(vec2(u / 2.6, v / 5.5));
     float ph = m_hash12(pc + floor(vWPos.xz / 400.0));
     vec2 pf = fract(vec2(u / 2.6, v / 5.5));
-    float patchM = step(0.93, ph) * step(0.12, pf.x) * step(pf.x, 0.88) * step(0.1, pf.y) * step(pf.y, 0.9);
-    asph = mix(asph, asph * 0.8, patchM * (1.0 - smoothstep(0.25, 0.6, fwidth(v))));
+    // Now and then a repaired patch: a shade darker, with a slightly lighter sealed seam.
+    float patchM = step(0.965, ph) * step(0.12, pf.x) * step(pf.x, 0.88) * step(0.1, pf.y) * step(pf.y, 0.9);
+    float seam = patchM * (1.0 - step(0.15, pf.x) * step(pf.x, 0.85) * step(0.13, pf.y) * step(pf.y, 0.87));
+    float far = 1.0 - smoothstep(0.25, 0.6, fwidth(v));
+    asph = mix(asph, asph * 0.93, patchM * far);
+    asph = mix(asph, asph * 1.12, seam * far);
     float grain = m_hash12(floor(vWPos.xz * 22.0));
     asph *= 1.0 + (grain - 0.5) * 0.12 * (1.0 - smoothstep(0.02, 0.08, fwidth(vWPos.x)));
     float mark = 0.0;

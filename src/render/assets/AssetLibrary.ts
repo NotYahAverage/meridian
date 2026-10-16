@@ -27,7 +27,7 @@ const FOLIAGE: AssetName[] = ['oak', 'maple', 'bush'];
 const PEOPLE: AssetName[] = ['person_adult', 'person_dress', 'person_child', 'person_lo'];
 
 /** People parts: the colour slot, the limb it moves with, and the optional extra it belongs to (from `P_<slot>_<limb>_<option>`). */
-export const PERSON_SLOTS = ['top', 'bottom', 'skin', 'hair', 'shoes', 'accent', 'dark'];
+export const PERSON_SLOTS = ['top', 'bottom', 'skin', 'hair', 'shoes', 'accent', 'dark', 'sleeve'];
 export const PERSON_LIMBS = ['torso', 'head', 'thighL', 'shinL', 'thighR', 'shinR', 'uarmL', 'farmL', 'uarmR', 'farmR'];
 export const PERSON_OPTIONS = ['none', 'hairShort', 'hairLong', 'hairBun', 'hat', 'bag', 'backpack', 'umbrella', 'coat'];
 
@@ -137,9 +137,23 @@ function convertPerson(root: THREE.Object3D): THREE.BufferGeometry | null {
       let g = src.index ? extractGroup(src, grp.start, grp.count) : src.clone();
       g.applyMatrix4(mesh.matrixWorld);
       if (!g.getAttribute('normal')) g.computeVertexNormals();
+      // Each vertex may say what it is in its colour (slot, limb, option, weight toward the limb's parent; tenths).
+      const data = g.getAttribute('color');
+      const perVertex = data && data.itemSize === 4 ? Float32Array.from({ length: data.count * 4 }, (_, k) => data.getComponent(Math.floor(k / 4), k % 4)) : null;
       for (const key of Object.keys(g.attributes)) if (key !== 'position' && key !== 'normal') g.deleteAttribute(key);
-      if (!g.index) g = mergeVertices(g);
       tagPerson(g, Math.max(0, PERSON_SLOTS.indexOf(slot)), Math.max(0, PERSON_LIMBS.indexOf(limb)), Math.max(0, PERSON_OPTIONS.indexOf(opt)));
+      if (perVertex) {
+        const n = g.getAttribute('position').count;
+        const sl = g.getAttribute('aSlot').array as Float32Array, li = g.getAttribute('aLimb').array as Float32Array;
+        const op = g.getAttribute('aOpt').array as Float32Array, bl = g.getAttribute('aBlend').array as Float32Array;
+        for (let i = 0; i < n; i++) {
+          sl[i] = Math.round(perVertex[i * 4] * 10);
+          li[i] = Math.round(perVertex[i * 4 + 1] * 10);
+          op[i] = Math.round(perVertex[i * 4 + 2] * 10);
+          bl[i] = perVertex[i * 4 + 3];
+        }
+      }
+      if (!g.index) g = mergeVertices(g);
       parts.push(g);
     }
   });
@@ -149,11 +163,12 @@ function convertPerson(root: THREE.Object3D): THREE.BufferGeometry | null {
   return merged;
 }
 
-export function tagPerson(g: THREE.BufferGeometry, slot: number, limb: number, opt: number): THREE.BufferGeometry {
+export function tagPerson(g: THREE.BufferGeometry, slot: number, limb: number, opt: number, blend = 0): THREE.BufferGeometry {
   const n = g.getAttribute('position').count;
   g.setAttribute('aSlot', new THREE.BufferAttribute(new Float32Array(n).fill(slot), 1));
   g.setAttribute('aLimb', new THREE.BufferAttribute(new Float32Array(n).fill(limb), 1));
   g.setAttribute('aOpt', new THREE.BufferAttribute(new Float32Array(n).fill(opt), 1));
+  g.setAttribute('aBlend', new THREE.BufferAttribute(new Float32Array(n).fill(blend), 1));
   return g;
 }
 
@@ -298,7 +313,7 @@ function fallback(name: AssetName): THREE.BufferGeometry {
       piece(new THREE.CapsuleGeometry(0.17, 0.32 * h, 3, 8), 0, 1.17 * h, 0, 0, 0),
       piece(new THREE.SphereGeometry(0.11, 8, 6), 0, 1.6 * h, 0, 2, 1),
     ];
-    const merged = mergeGeometries(people.map((g) => { for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'aSlot', 'aLimb', 'aOpt'].includes(k)) g.deleteAttribute(k); return g; }), false)!;
+    const merged = mergeGeometries(people.map((g) => { for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'aSlot', 'aLimb', 'aOpt', 'aBlend'].includes(k)) g.deleteAttribute(k); return g; }), false)!;
     merged.computeBoundingSphere();
     return merged;
   } else if (name === 'wind_rotor') {

@@ -99,7 +99,7 @@ export class PedestrianRenderer {
       this.cacheLook = Array.from({ length: ped.max }, () => newLook());
     }
     // Coats, hats and umbrellas follow the weather.
-    const key = (weather.rain > 0.18 ? 1 : 0) | (weather.temperature < 8 ? 2 : 0) | (weather.temperature < 3 ? 4 : 0) | (weather.temperature < 2 ? 8 : 0);
+    const key = (weather.rain > 0.18 ? 1 : 0) | (weather.temperature < 8 ? 2 : 0) | (weather.temperature < 3 ? 4 : 0) | (weather.temperature < 2 ? 8 : 0) | (weather.temperature > 17 ? 16 : 0) | (weather.temperature > 23 ? 32 : 0);
     if (key !== this.weatherKey) {
       this.weatherKey = key;
       this.cacheSerial.fill(0);

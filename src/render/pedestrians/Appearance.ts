@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Errand } from '../../sim/walk/Pedestrians';
 
 /** Bits of the per-person option mask (matches the option order in the models: bit k = option k + 1). */
-export const OPT = { hairShort: 1, hairLong: 2, hairBun: 4, hat: 8, bag: 16, backpack: 32, umbrella: 64, coat: 128 } as const;
+export const OPT = { hairShort: 1, hairLong: 2, hairBun: 4, hat: 8, bag: 16, backpack: 32, umbrella: 64, coat: 128, shortSleeves: 256 } as const;
 
 export enum Body {
   Adult = 0,
@@ -82,6 +82,8 @@ export function lookFor(seed: number, age: number, errand: Errand, w: WeatherNow
     out.top.copy(pick(COATS, r()));
   }
   if (w.temperature < 3 && hatR < 0.4) mask |= OPT.hat;
+  // Bare arms when it's warm.
+  if (w.temperature > 17 && !(mask & OPT.coat) && r() < (w.temperature > 23 ? 0.75 : 0.45)) mask |= OPT.shortSleeves;
   const umbrella = w.rain > 0.18 && umbR < (child ? 0.25 : 0.62);
   // Bags: school backpacks, work bags, shopping bags.
   const bagR = r();

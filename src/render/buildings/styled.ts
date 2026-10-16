@@ -486,8 +486,11 @@ function townhouse(g: GeoBuilder, b: GenInput, r: Rng, k: Kit): void {
       }
     }
     if (k.has('loggias') || k.has('terraces')) faceBalcony(g, face(0, x0, fz, x1, zb + bd), uw * 0.15, uw * 0.85, base + fh * 2, 1.2, unitKit, r, k.has('terraces'), k.has('loggias'));
-    // Stoop and door.
-    const dcx = x0 + uw * (i % 2 ? 0.3 : 0.72);
+    // Stoop and door, in the middle of a window bay, with that bay's ground floor drawn without its window.
+    const cells = Math.max(1, Math.round(uw / (wallM.bay ?? 3)));
+    const cw = uw / cells;
+    const dcx = x0 + cw * ((i % 2 ? 0 : cells - 1) + 0.5);
+    g.wall(dcx + cw / 2 - 0.06, zb - 0.012, dcx - cw / 2 + 0.06, zb - 0.012, base, base + fh - 0.2, { ...wallM, fh: 200, oy: base });
     g.box(dcx - 0.8, zb - 1.6, dcx + 0.8, zb, 0, base, { color: hex(k.look.baseColor), pattern: P.STONE, seed: s, fh: 30 }, PAVE(s), { sides: [true, true, false, true] });
     door(g, dcx, zb, base, 1.0, 2.25, { color: hex(a.hand < -0.3 ? 0x2b2c2e : r.pick(DOORS)), pattern: P.DOOR, seed: s }, k.trim);
     g.ground(dcx - 0.5, 0, dcx + 0.5, zb - 1.6, PAVE(s), 0.045);

@@ -10,8 +10,8 @@ export interface Joints {
   neck: number;
 }
 
-export const ADULT_JOINTS: Joints = { hip: 0.93, knee: 0.5, shoulder: 1.41, elbow: 1.13, neck: 1.54 };
-export const CHILD_JOINTS: Joints = { hip: 0.93 * 0.74, knee: 0.5 * 0.74, shoulder: 1.41 * 0.74, elbow: 1.13 * 0.74, neck: 1.54 * 0.74 };
+export const ADULT_JOINTS: Joints = { hip: 0.93, knee: 0.5, shoulder: 1.4, elbow: 1.13, neck: 1.54 };
+export const CHILD_JOINTS: Joints = { hip: 0.93 * 0.74, knee: 0.5 * 0.74, shoulder: 1.4 * 0.74, elbow: 1.13 * 0.74, neck: 1.54 * 0.74 };
 export const LO_JOINTS: Joints = { hip: 0.92, knee: 0.92, shoulder: 1.4, elbow: 1.4, neck: 1.5 };
 
 /** Poses (per instance). */
@@ -29,6 +29,7 @@ const ANIMATE = /* glsl */ `
 attribute float aSlot;
 attribute float aLimb;
 attribute float aOpt;
+attribute float aBlend;
 attribute vec4 aC0;
 attribute vec4 aC1;
 attribute vec4 aC2;
@@ -113,21 +114,26 @@ void pAnimate(inout vec3 p, inout vec3 n) {
     faR = 1.35;
   }
   float L = aLimb;
-  // Legs: knee first (in the thigh's frame), then the hip.
-  if (abs(L - 3.0) < 0.5) pSwing(p, n, knee, knL);
-  if (abs(L - 5.0) < 0.5) pSwing(p, n, knee, knR);
-  if (abs(L - 2.0) < 0.5 || abs(L - 3.0) < 0.5) pSwing(p, n, hip, thL);
-  if (abs(L - 4.0) < 0.5 || abs(L - 5.0) < 0.5) pSwing(p, n, hip, thR);
-  // Arms: elbow, then shoulder.
-  if (abs(L - 7.0) < 0.5) pSwing(p, n, elbow, faL);
-  if (abs(L - 9.0) < 0.5) pSwing(p, n, elbow, faR);
-  if (abs(L - 6.0) < 0.5 || abs(L - 7.0) < 0.5) pSwing(p, n, shoulder, uaL);
-  if (abs(L - 8.0) < 0.5 || abs(L - 9.0) < 0.5) pSwing(p, n, shoulder, uaR);
-  // Head turns.
-  if (abs(L - 1.0) < 0.5 && yaw != 0.0) {
+  // Each vertex follows its limb, blending (by aBlend) toward the limb it hangs from, so
+  // knees, elbows, hips and shoulders bend smoothly instead of coming apart.
+  vec3 pp = p, np = n;
+  if (abs(L - 3.0) < 0.5) { pSwing(p, n, knee, knL); pSwing(p, n, hip, thL); pSwing(pp, np, hip, thL); }
+  else if (abs(L - 5.0) < 0.5) { pSwing(p, n, knee, knR); pSwing(p, n, hip, thR); pSwing(pp, np, hip, thR); }
+  else if (abs(L - 2.0) < 0.5) pSwing(p, n, hip, thL);
+  else if (abs(L - 4.0) < 0.5) pSwing(p, n, hip, thR);
+  else if (abs(L - 7.0) < 0.5) { pSwing(p, n, elbow, faL); pSwing(p, n, shoulder, uaL); pSwing(pp, np, shoulder, uaL); }
+  else if (abs(L - 9.0) < 0.5) { pSwing(p, n, elbow, faR); pSwing(p, n, shoulder, uaR); pSwing(pp, np, shoulder, uaR); }
+  else if (abs(L - 6.0) < 0.5) pSwing(p, n, shoulder, uaL);
+  else if (abs(L - 8.0) < 0.5) pSwing(p, n, shoulder, uaR);
+  else if (abs(L - 1.0) < 0.5 && yaw != 0.0) {
+    // Head turns.
     float c = cos(yaw), s = sin(yaw);
     p.xz = vec2(c * p.x - s * p.z, s * p.x + c * p.z);
     n.xz = vec2(c * n.x - s * n.z, s * n.x + c * n.z);
+  }
+  if (aBlend > 0.001) {
+    p = mix(p, pp, aBlend);
+    n = normalize(mix(n, np, aBlend));
   }
   // The upper body leans forward from the hips (everything that isn't a leg).
   if (L < 1.5 || L > 5.5) pSwing(p, n, hip, -lean);
@@ -137,9 +143,11 @@ void pAnimate(inout vec3 p, inout vec3 n) {
 
 const VERTEX_COLOR = /* glsl */ `
 float slot = aSlot;
+// Sleeves are the top's colour, or bare arms when it's warm (mask bit 256).
+float shortSleeves = mod(floor(aC1.w / 256.0 + 0.001), 2.0);
 vPCol = slot < 0.5 ? aC0.rgb : slot < 1.5 ? aC1.rgb : slot < 2.5 ? aC2.rgb : slot < 3.5 ? aC3.rgb
-  : slot < 4.5 ? mix(vec3(0.03), vec3(0.72), floor(aC0.w)) : slot < 5.5 ? aC4.rgb : vec3(0.02);
-vPRough = slot > 1.5 && slot < 2.5 ? 0.55 : slot > 2.5 && slot < 3.5 ? 0.85 : 0.8;
+  : slot < 4.5 ? mix(vec3(0.03), vec3(0.72), floor(aC0.w)) : slot < 5.5 ? aC4.rgb : slot < 6.5 ? vec3(0.02) : mix(aC0.rgb, aC2.rgb, shortSleeves);
+vPRough = slot > 1.5 && slot < 2.5 ? 0.55 : slot > 2.5 && slot < 3.5 ? 0.85 : slot > 3.5 && slot < 4.5 ? 0.5 : 0.8;
 `;
 
 /** Lit material for one body type: limbs animated on the GPU, colours per person. */

@@ -883,72 +883,231 @@ def ellipsoid(b, loc, radii, mat, subdiv=1):
     return b.sphere(1.0, loc, mat, subdiv=subdiv, scale=radii)
 
 
+SLOTS = ["top", "bottom", "skin", "hair", "shoes", "accent", "dark", "sleeve"]
+LIMBS = ["torso", "head", "thighL", "shinL", "thighR", "shinR", "uarmL", "farmL", "uarmR", "farmR"]
+OPTS = ["none", "hairShort", "hairLong", "hairBun", "hat", "bag", "backpack", "umbrella", "coat"]
+SLOT_PREVIEW["sleeve"] = (0.32, 0.45, 0.62, 1)
+
+
+class PersonBuilder(Builder):
+    """A Builder whose vertices also carry, in a colour attribute, what they are:
+    (colour slot, limb, optional part, weight toward the limb's parent) / 10."""
+
+    def __init__(self, name):
+        super().__init__(name)
+        self.pdata = self.bm.verts.layers.float_color.new("pdata")
+
+    def tag(self, faces, slot, limb, opt="none", blend=0.0):
+        data = (SLOTS.index(slot) / 10, LIMBS.index(limb) / 10, OPTS.index(opt) / 10, blend)
+        for v in {v for f in faces for v in f.verts}:
+            v[self.pdata] = data
+        return faces
+
+    def part(self, faces, slot, limb, opt="none", blend=0.0):
+        """Tags faces made by the plain Builder helpers (material and data)."""
+        idx = self.mat_index(PM(slot, limb, opt))
+        for f in faces:
+            f.material_index = idx
+            f.smooth = True
+        return self.tag(faces, slot, limb, opt, blend)
+
+    def loft(self, rings, opt="none", cap0=True, cap1=True, segments=12, ref=(1, 0, 0)):
+        """Lofts a smooth body through rings: (centre, rx, ry, slot, limb, blend).
+        rx runs along `ref` (projected across the path), ry across it."""
+        bm = self.bm
+        n = len(rings)
+        cs = [Vector(r[0]) for r in rings]
+        made = []
+        for i, (c, rx, ry, slot, limb, blend) in enumerate(rings):
+            t = (cs[min(n - 1, i + 1)] - cs[max(0, i - 1)]).normalized()
+            u = Vector(ref) - t * t.dot(Vector(ref))
+            if u.length < 1e-4:
+                u = Vector((0, 0, 1)) - t * t.z
+            u.normalize()
+            v = t.cross(u)
+            ring = []
+            for k in range(segments):
+                a = 2 * math.pi * k / segments
+                vert = bm.verts.new(cs[i] + u * (rx * math.cos(a)) + v * (ry * math.sin(a)))
+                vert[self.pdata] = (SLOTS.index(slot) / 10, LIMBS.index(limb) / 10, OPTS.index(opt) / 10, blend)
+                ring.append(vert)
+            made.append(ring)
+        faces = []
+        for i in range(n - 1):
+            slot, limb = rings[i][3], rings[i][4]
+            m = self.mat_index(PM(slot, limb, opt))
+            for k in range(segments):
+                f = bm.faces.new((made[i][k], made[i][(k + 1) % segments], made[i + 1][(k + 1) % segments], made[i + 1][k]))
+                f.material_index = m
+                f.smooth = True
+                faces.append(f)
+        for end, ring, flag, sign in ((0, made[0], cap0, -1), (n - 1, made[-1], cap1, 1)):
+            if not flag:
+                continue
+            c, rx, ry, slot, limb, blend = rings[end]
+            t = (cs[min(n - 1, end + 1)] - cs[max(0, end - 1)]).normalized()
+            tip = bm.verts.new(cs[end] + t * sign * min(rx, ry) * 0.6)
+            tip[self.pdata] = (SLOTS.index(slot) / 10, LIMBS.index(limb) / 10, OPTS.index(opt) / 10, blend)
+            m = self.mat_index(PM(slot, limb, opt))
+            for k in range(segments):
+                a, b2 = ring[k], ring[(k + 1) % segments]
+                f = bm.faces.new((b2, a, tip) if sign < 0 else (a, b2, tip))
+                f.material_index = m
+                f.smooth = True
+                faces.append(f)
+        return faces
+
+    def finish(self, smooth_angle=None):
+        obj = super().finish(smooth_angle)
+        mesh = obj.data
+        try:
+            mesh.color_attributes.active_color_name = "pdata"
+        except Exception:
+            pass
+        try:
+            mesh.color_attributes.render_color_index = mesh.color_attributes.active_color_index
+        except Exception:
+            pass
+        return obj
+
+
 def build_person(name, h=1.0, dress=False, head=1.0, girth=1.0):
-    """A walking figure in its rest pose (arms down). Joints scale with `h`."""
-    b = Builder(name)
+    """A walking figure in its rest pose. Joint heights (adult): hip 0.93, knee 0.5,
+    shoulder 1.4, elbow 1.13. Children are the same figure at 0.74 height, with a bigger head."""
+    b = PersonBuilder(name)
     z = lambda v: v * h
     g = girth
-    hip, knee, shoulder, elbow, neck = z(0.93), z(0.5), z(1.41), z(1.13), z(1.54)
-    leg_y, arm_y = 0.098 * g, 0.205 * g + 0.01
+    knee, hip, elbow = z(0.5), z(0.93), z(1.13)
+    # ── Legs: thigh and shin lofted in one piece, bending at the knee; shoes.
     for side, L in ((1, "L"), (-1, "R")):
-        y = side * leg_y
-        # Legs: thigh (with the knee cap) and shin with the shoe.
-        legs_slot = "skin" if dress else "bottom"
-        tube(b, (0, y, knee), (0, y * 1.02, hip), 0.06 * g, 0.088 * g, PM(legs_slot, "thigh" + L))
-        ellipsoid(b, (0, y, knee), (0.06 * g, 0.06 * g, 0.06 * g), PM(legs_slot, "thigh" + L), subdiv=1)
-        tube(b, (0, y, z(0.07)), (0, y, knee), 0.044 * g, 0.057 * g, PM("skin" if dress else "bottom", "shin" + L))
-        b.box((0.22 * h + 0.02, 0.085 * g, 0.075 * h), (0.045 * h, y, 0.0375 * h), PM("shoes", "shin" + L), bevel=0.02 * h, segments=1)
-        # Arms: sleeve to the elbow, forearm, hand.
-        ya = side * arm_y
-        tube(b, (0, ya * 1.03, elbow), (0, ya, shoulder - 0.01 * h), 0.044 * g, 0.054 * g, PM("top", "uarm" + L))
-        ellipsoid(b, (0, ya * 1.03, elbow), (0.045 * g, 0.045 * g, 0.045 * g), PM("top", "uarm" + L), subdiv=1)
-        tube(b, (0, ya * 1.03, z(0.885)), (0, ya * 1.03, elbow), 0.034 * g, 0.043 * g, PM("top", "farm" + L))
-        ellipsoid(b, (0.006, ya * 1.03, z(0.84)), (0.034 * g, 0.024 * g, 0.05 * h), PM("skin", "farm" + L), subdiv=1)
-    # Body: hips, torso, shoulders, neck.
-    ellipsoid(b, (0, 0, z(0.95)), (0.105 * g, 0.165 * g, 0.1 * h), PM("bottom", "torso"), subdiv=1)
-    tube(b, (0, 0, z(0.97)), (0, 0, z(1.38)), 0.15 * g, 0.18 * g, PM("top", "torso"), segments=9, squash=0.62)
-    ellipsoid(b, (0, 0, z(1.385)), (0.1 * g, 0.2 * g, 0.065 * h), PM("top", "torso"), subdiv=1)
-    tube(b, (0, 0, z(1.42)), (0, 0, neck), 0.048 * g, 0.045 * g, PM("skin", "torso"), segments=6)
+        y = side * 0.096 * g
+        thigh, shin = "thigh" + L, "shin" + L
+        legs = "skin" if dress else "bottom"
+        b.loft([
+            ((0, y * 0.98, z(0.97)), 0.088 * g, 0.088 * g, legs, thigh, 0.5),
+            ((0.004, y, z(0.86)), 0.083 * g, 0.08 * g, legs, thigh, 0.12),
+            ((0.008, y, z(0.72)), 0.074 * g, 0.068 * g, legs, thigh, 0.0),
+            ((0.012, y, z(0.58)), 0.06 * g, 0.056 * g, legs, thigh, 0.0),
+            ((0.014, y, knee), 0.054 * g, 0.051 * g, legs, shin, 0.5),
+            ((0.01, y, z(0.43)), 0.054 * g, 0.051 * g, legs, shin, 0.15),
+            ((0.0, y, z(0.33)), 0.058 * g, 0.054 * g, legs, shin, 0.0),
+            ((-0.006, y, z(0.2)), 0.044 * g, 0.042 * g, legs, shin, 0.0),
+            ((-0.008, y, z(0.1)), 0.036 * g, 0.035 * g, "skin" if dress else legs, shin, 0.0),
+        ], cap0=False, cap1=False, segments=10)
+        # Shoe: heel to toe, with a sole.
+        b.loft([
+            ((-0.055 * h, y, z(0.05)), 0.03 * h, 0.042 * g, "shoes", shin, 0.0),
+            ((-0.02 * h, y, z(0.055)), 0.05 * h, 0.046 * g, "shoes", shin, 0.0),
+            ((0.06 * h, y, z(0.04)), 0.04 * h, 0.047 * g, "shoes", shin, 0.0),
+            ((0.14 * h, y, z(0.03)), 0.026 * h, 0.04 * g, "shoes", shin, 0.0),
+        ], segments=10, ref=(0, 0, 1))
+        # Arms: sleeve to the wrist, a hand; bending at the elbow.
+        ya = side * 0.205 * g
+        uarm, farm = "uarm" + L, "farm" + L
+        b.loft([
+            ((0, ya * 0.97, z(1.42)), 0.055 * g, 0.052 * g, "top", uarm, 0.0),
+            ((0, ya, z(1.33)), 0.05 * g, 0.048 * g, "top", uarm, 0.0),
+            ((0, ya * 1.03, z(1.22)), 0.045 * g, 0.043 * g, "top", uarm, 0.0),
+            ((0.002, ya * 1.06, elbow), 0.04 * g, 0.039 * g, "sleeve", farm, 0.5),
+            ((0.008, ya * 1.07, z(1.03)), 0.039 * g, 0.037 * g, "sleeve", farm, 0.1),
+            ((0.016, ya * 1.08, z(0.92)), 0.03 * g, 0.03 * g, "sleeve", farm, 0.0),
+            ((0.018, ya * 1.08, z(0.885)), 0.027 * g, 0.026 * g, "skin", farm, 0.0),
+        ], cap0=True, cap1=False, segments=9)
+        b.part(b.sphere(1.0, (0.024 * h, ya * 1.08, z(0.83)), M("Body"), subdiv=1, scale=(0.03 * h, 0.019 * g, 0.055 * h)), "skin", farm)
+        # Shoulder cap (moves with the arm).
+        b.part(b.sphere(1.0, (0.0, ya * 0.93, z(1.405)), M("Body"), subdiv=1, scale=(0.065 * g, 0.06 * g, 0.055 * h)), "top", uarm)
+    # ── Body: hips, waist, chest, shoulders, neck.
+    b.loft([
+        ((0.0, 0, z(0.85)), 0.09 * g, 0.12 * g, "bottom", "torso", 0.0),
+        ((-0.01, 0, z(0.9)), 0.112 * g, 0.165 * g, "bottom", "torso", 0.0),
+        ((-0.008, 0, z(0.97)), 0.112 * g, 0.165 * g, "bottom", "torso", 0.0),
+        ((0.0, 0, z(1.0)), 0.103 * g, 0.148 * g, "dark", "torso", 0.0),
+        ((0.004, 0, z(1.02)), 0.102 * g, 0.146 * g, "top", "torso", 0.0),
+        ((0.008, 0, z(1.14)), 0.105 * g, 0.15 * g, "top", "torso", 0.0),
+        ((0.014, 0, z(1.27)), 0.116 * g, 0.172 * g, "top", "torso", 0.0),
+        ((0.008, 0, z(1.36)), 0.108 * g, 0.19 * g, "top", "torso", 0.0),
+        ((0.0, 0, z(1.42)), 0.085 * g, 0.165 * g, "top", "torso", 0.0),
+        ((0.004, 0, z(1.46)), 0.05 * g, 0.075 * g, "top", "torso", 0.0),
+        ((0.008, 0, z(1.48)), 0.046, 0.05, "skin", "torso", 0.0),
+        ((0.012, 0, z(1.56)), 0.043, 0.045, "skin", "head", 0.6),
+    ], cap0=True, cap1=False, segments=14)
     if dress:
-        tube(b, (0, 0, z(0.55)), (0, 0, z(1.0)), 0.26 * g, 0.16 * g, PM("bottom", "torso"), segments=10, squash=0.82)
-    # Head and face.
-    hr = (0.1 * head, 0.088 * head, 0.115 * head)
-    hc = (0.012, 0, neck + hr[2] * 0.82)
-    ellipsoid(b, hc, hr, PM("skin", "head"), subdiv=2)
-    b.box((0.03 * head, 0.026 * head, 0.04 * head), (hc[0] + hr[0] * 0.92, 0, hc[2] - 0.01 * head), PM("skin", "head"))
+        b.loft([
+            ((0.0, 0, z(1.02)), 0.108 * g, 0.152 * g, "bottom", "torso", 0.0),
+            ((-0.004, 0, z(0.9)), 0.13 * g, 0.18 * g, "bottom", "torso", 0.0),
+            ((-0.01, 0, z(0.72)), 0.17 * g, 0.22 * g, "bottom", "torso", 0.0),
+            ((-0.012, 0, z(0.56)), 0.2 * g, 0.25 * g, "bottom", "torso", 0.0),
+        ], cap0=False, cap1=False, segments=16)
+    # ── Head: chin to crown, with nose, ears and eyes.
+    hs = head
+    hz = z(1.56)
+    b.loft([
+        ((0.05 * hs + 0.012, 0, hz - 0.005 * hs), 0.03 * hs, 0.03 * hs, "skin", "head", 0.0),
+        ((0.032 * hs + 0.012, 0, hz + 0.02 * hs), 0.07 * hs, 0.058 * hs, "skin", "head", 0.0),
+        ((0.016 * hs + 0.012, 0, hz + 0.06 * hs), 0.094 * hs, 0.078 * hs, "skin", "head", 0.0),
+        ((0.006 * hs + 0.012, 0, hz + 0.11 * hs), 0.102 * hs, 0.086 * hs, "skin", "head", 0.0),
+        ((0.0 + 0.012, 0, hz + 0.16 * hs), 0.098 * hs, 0.083 * hs, "skin", "head", 0.0),
+        ((-0.006 + 0.012, 0, hz + 0.2 * hs), 0.074 * hs, 0.066 * hs, "skin", "head", 0.0),
+        ((-0.01 + 0.012, 0, hz + 0.225 * hs), 0.035 * hs, 0.032 * hs, "skin", "head", 0.0),
+    ], cap0=True, cap1=True, segments=14)
+    fx = 0.012 + 0.1 * hs
+    b.part(b.box((0.03 * hs, 0.024 * hs, 0.045 * hs), (fx - 0.004, 0, hz + 0.1 * hs), M("Body")), "skin", "head")
     for side in (1, -1):
-        b.box((0.012, 0.016 * head, 0.012 * head), (hc[0] + hr[0] * 0.9, side * 0.034 * head, hc[2] + 0.018 * head), PM("dark", "head"))
-    # Hair styles (one is shown per person), and a winter hat.
-    cap = ((hc[0] - 0.022 * head, 0, hc[2] + 0.045 * head), (hr[0] * 1.06, hr[1] * 1.08, hr[2] * 0.8))
+        b.part(b.sphere(1.0, (0.004, side * 0.086 * hs, hz + 0.105 * hs), M("Body"), subdiv=1, scale=(0.02 * hs, 0.012 * hs, 0.03 * hs)), "skin", "head")
+        b.part(b.box((0.01, 0.02 * hs, 0.012 * hs), (fx - 0.012, side * 0.034 * hs, hz + 0.125 * hs), M("Body")), "dark", "head")
+        b.part(b.box((0.01, 0.03 * hs, 0.008 * hs), (fx - 0.01, side * 0.034 * hs, hz + 0.145 * hs), M("Body")), "hair", "head")
+    # ── Hair: a cap following the skull (every style), long hair down the back, a bun; a woolly hat.
+    def cap(opt, back_to, scale=1.07):
+        return b.loft([
+            ((0.004, 0, hz + 0.085 * hs), 0.104 * hs * scale, 0.089 * hs * scale, "hair", "head", 0.0),
+            ((-0.002, 0, hz + 0.13 * hs), 0.104 * hs * scale, 0.089 * hs * scale, "hair", "head", 0.0),
+            ((-0.004, 0, hz + 0.18 * hs), 0.094 * hs * scale, 0.083 * hs * scale, "hair", "head", 0.0),
+            ((-0.006, 0, hz + 0.215 * hs), 0.064 * hs * scale, 0.06 * hs * scale, "hair", "head", 0.0),
+            ((-0.008, 0, hz + 0.235 * hs), 0.025 * hs * scale, 0.024 * hs * scale, "hair", "head", 0.0),
+        ], opt=opt, cap0=False, cap1=True, segments=14)
     for opt in ("hairShort", "hairLong", "hairBun"):
-        ellipsoid(b, cap[0], cap[1], PM("hair", "head", opt), subdiv=2)
-    b.box((0.07 * head, 0.17 * head, 0.24 * head), (hc[0] - 0.08 * head, 0, hc[2] - 0.11 * head), PM("hair", "head", "hairLong"), bevel=0.025 * head, segments=1)
-    ellipsoid(b, (hc[0] - 0.105 * head, 0, hc[2] + 0.06 * head), (0.05 * head, 0.05 * head, 0.045 * head), PM("hair", "head", "hairBun"), subdiv=1)
-    ellipsoid(b, (hc[0] - 0.012 * head, 0, hc[2] + 0.06 * head), (hr[0] * 1.1, hr[1] * 1.12, hr[2] * 0.72), PM("accent", "head", "hat"), subdiv=2)
-    # Winter coat over the body, to the knees.
-    tube(b, (0, 0, z(0.6)), (0, 0, z(1.4)), 0.235 * g, 0.2 * g, PM("top", "torso", "coat"), segments=10, squash=0.72)
-    # Bags: a shoulder bag on the right hip with its strap, or a backpack.
-    b.box((0.2 * h, 0.06 * g, 0.16 * h), (0.0, -0.215 * g - 0.03, z(0.9)), PM("accent", "torso", "bag"), bevel=0.02, segments=1)
-    tube(b, (0.07 * g, -0.2 * g, z(0.97)), (0.07 * g, 0.16 * g, z(1.41)), 0.012, 0.012, PM("accent", "torso", "bag"), segments=4)
-    b.box((0.13 * g, 0.27 * g, 0.34 * h), (-0.16 * g, 0, z(1.18)), PM("accent", "torso", "backpack"), bevel=0.035, segments=2)
-    # Umbrella, held in the right hand (the shader raises that arm when it's up).
-    hand = (0.41 * h, -arm_y * 1.03, z(1.24))
+        cap(opt, 0)
+    b.loft([
+        ((-0.05 * hs, 0, hz + 0.16 * hs), 0.05 * hs, 0.08 * hs, "hair", "head", 0.0),
+        ((-0.07 * hs, 0, hz + 0.06 * hs), 0.045 * hs, 0.085 * hs, "hair", "head", 0.0),
+        ((-0.075 * hs, 0, hz - 0.06 * hs), 0.03 * hs, 0.08 * hs, "hair", "head", 0.0),
+    ], opt="hairLong", segments=10)
+    b.part(b.sphere(1.0, (-0.1 * hs, 0, hz + 0.19 * hs), M("Body"), subdiv=1, scale=(0.045 * hs, 0.045 * hs, 0.042 * hs)), "hair", "head", "hairBun")
+    b.loft([
+        ((0.0, 0, hz + 0.115 * hs), 0.112 * hs, 0.097 * hs, "accent", "head", 0.0),
+        ((-0.003, 0, hz + 0.18 * hs), 0.104 * hs, 0.09 * hs, "accent", "head", 0.0),
+        ((-0.006, 0, hz + 0.235 * hs), 0.06 * hs, 0.056 * hs, "accent", "head", 0.0),
+    ], opt="hat", cap0=False, cap1=True, segments=14)
+    # ── Winter coat over the body, to the knees.
+    b.loft([
+        ((0.004, 0, z(1.44)), 0.1 * g, 0.18 * g, "top", "torso", 0.0),
+        ((0.016, 0, z(1.3)), 0.13 * g, 0.195 * g, "top", "torso", 0.0),
+        ((0.01, 0, z(1.0)), 0.128 * g, 0.185 * g, "top", "torso", 0.0),
+        ((0.0, 0, z(0.8)), 0.15 * g, 0.205 * g, "top", "torso", 0.0),
+        ((-0.006, 0, z(0.6)), 0.165 * g, 0.22 * g, "top", "torso", 0.0),
+    ], opt="coat", cap0=False, cap1=False, segments=14)
+    # ── Bags: a shoulder bag on the right hip with its strap, or a backpack.
+    b.part(b.box((0.2 * h, 0.06 * g, 0.16 * h), (0.0, -0.205 * g - 0.03, z(0.9)), M("Body"), bevel=0.02, segments=1), "accent", "torso", "bag")
+    b.part(tube(b, (0.07 * g, -0.19 * g, z(0.97)), (0.07 * g, 0.15 * g, z(1.42)), 0.012, 0.012, M("Body"), segments=4), "accent", "torso", "bag")
+    b.part(b.box((0.13 * g, 0.27 * g, 0.34 * h), (-0.165 * g, 0, z(1.18)), M("Body"), bevel=0.035, segments=2), "accent", "torso", "backpack")
+    # ── Umbrella, held up in the right hand (the shader raises that arm when it's up).
+    hand = (0.41 * h, -0.205 * g * 1.08, z(1.24))
     top = (0.16 * h, -0.08, z(1.98))
-    tube(b, hand, top, 0.011, 0.011, PM("dark", "torso", "umbrella"), segments=5)
-    b.cylinder(0.52 * h, 0.03, 0.2 * h, (top[0], top[1], top[2] + 0.08 * h), PM("accent", "torso", "umbrella"), segments=10, smooth=True, caps=True)
-    return b.finish(smooth_angle=80)
+    b.part(tube(b, hand, top, 0.011, 0.011, M("Body"), segments=5), "dark", "torso", "umbrella")
+    b.part(b.cylinder(0.52 * h, 0.03, 0.2 * h, (top[0], top[1], top[2] + 0.08 * h), M("Body"), segments=12, smooth=True, caps=True), "accent", "torso", "umbrella")
+    return b.finish(smooth_angle=89)
 
 
 def build_person_lo(name):
-    """Far-away figure: a few boxes and a head, legs that still swing."""
-    b = Builder(name)
+    """Far-away figure: a few lofted shapes; legs that still swing."""
+    b = PersonBuilder(name)
     for side, L in ((1, "L"), (-1, "R")):
-        b.box((0.13, 0.12, 0.88), (0, side * 0.09, 0.47), PM("bottom", "thigh" + L))
-        b.box((0.1, 0.09, 0.56), (0, side * 0.22, 1.13), PM("top", "uarm" + L))
-    b.box((0.24, 0.38, 0.5), (0, 0, 1.17), PM("top", "torso"))
-    b.sphere(1.0, (0.01, 0, 1.6), PM("skin", "head"), subdiv=1, scale=(0.1, 0.09, 0.115))
-    b.sphere(1.0, (-0.01, 0, 1.65), PM("hair", "head"), subdiv=0, scale=(0.1, 0.095, 0.08))
-    return b.finish(smooth_angle=50)
+        y = side * 0.095
+        b.loft([((0, y, 0.95), 0.08, 0.08, "bottom", "thigh" + L, 0.3), ((0.01, y, 0.5), 0.055, 0.055, "bottom", "thigh" + L, 0.0), ((0.0, y, 0.03), 0.045, 0.045, "shoes", "thigh" + L, 0.0)], segments=5)
+        b.loft([((0, side * 0.2, 1.42), 0.05, 0.05, "top", "uarm" + L, 0.0), ((0.02, side * 0.22, 0.86), 0.03, 0.03, "skin", "uarm" + L, 0.0)], segments=5)
+    b.loft([((0, 0, 0.86), 0.1, 0.15, "bottom", "torso", 0.0), ((0.0, 0, 1.0), 0.1, 0.15, "top", "torso", 0.0), ((0.01, 0, 1.36), 0.11, 0.19, "top", "torso", 0.0), ((0.0, 0, 1.48), 0.05, 0.06, "skin", "torso", 0.0)], segments=7)
+    b.loft([((0.02, 0, 1.55), 0.06, 0.05, "skin", "head", 0.0), ((0.012, 0, 1.66), 0.1, 0.085, "skin", "head", 0.0), ((0.0, 0, 1.76), 0.07, 0.06, "hair", "head", 0.0)], segments=7)
+    return b.finish(smooth_angle=89)
 
 
 def build_people():
@@ -966,10 +1125,19 @@ def export(obj):
     bpy.context.view_layer.objects.active = obj
     path = os.path.join(OUT_DIR, obj.name + ".glb")
     kwargs = dict(filepath=path, export_format="GLB", use_selection=True, export_apply=True, export_yup=True)
-    try:
-        bpy.ops.export_scene.gltf(**kwargs, export_materials="EXPORT")
-    except TypeError:
-        bpy.ops.export_scene.gltf(**kwargs)
+    if obj.name.startswith("person_"):
+        # People carry what each vertex is in their colour attribute.
+        for extra in (dict(export_vertex_color="ACTIVE"), dict(export_colors=True), {}):
+            try:
+                bpy.ops.export_scene.gltf(**kwargs, export_materials="EXPORT", **extra)
+                break
+            except TypeError:
+                continue
+    else:
+        try:
+            bpy.ops.export_scene.gltf(**kwargs, export_materials="EXPORT")
+        except TypeError:
+            bpy.ops.export_scene.gltf(**kwargs)
     tris = sum(len(p.vertices) - 2 for p in obj.data.polygons)
     print(f"exported {obj.name:12s} {tris:6d} tris -> {path}")
     return tris
