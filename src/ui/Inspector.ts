@@ -2,6 +2,12 @@ import { formatInt, formatMoney, formatPct } from '../core/math';
 import type { Game } from '../game/Game';
 import { ARCHETYPE_BY_ID } from '../sim/buildings/Archetypes';
 import { GRADE_LABEL } from '../sim/design/Trials';
+import { GROUPS } from '../sim/design/Tastes';
+import type { Building } from '../sim/buildings/Buildings';
+import type { City } from '../sim/City';
+import { type Citizen, citizenOf } from '../sim/population/Citizens';
+import { Errand, PauseWhy, PedState } from '../sim/walk/Pedestrians';
+import { WALK_SPEED } from '../sim/walk/WalkNetwork';
 import { bulldozeBuilding, bulldozeRoad, removeStop } from '../sim/CityCommands';
 import { Purpose, VEHICLE_MODELS } from '../sim/traffic/Vehicles';
 import { POLICY_BY_ID } from '../sim/policies/Policies';
@@ -77,6 +83,38 @@ function vehicleActivity(purpose: Purpose, model: string, hour: number): string 
   }
 }
 
+/** A building as people would name it: the service's name, a house number, or the kind of place and its street. */
+export function placeLabel(city: City, b: Building | undefined): string {
+  if (!b) return 'somewhere that’s gone';
+  const st = b.kind === 'service' ? SERVICE_BY_ID.get(b.typeId) : undefined;
+  if (st) return st.name;
+  const street = streetOf(city, b);
+  if (isResidential(b.zone)) return `${2 * Math.floor(b.segS / 14) + (b.side > 0 ? 1 : 2)} ${street}`;
+  const arch = ARCHETYPE_BY_ID.get(b.typeId);
+  return `${arch ? humanize(arch.id) : 'Building'}, ${street}`;
+}
+
+const ERRAND_TEXT: Record<Errand, string> = {
+  [Errand.Home]: 'Walking home',
+  [Errand.Work]: 'Walking to work',
+  [Errand.Shop]: 'Going shopping',
+  [Errand.Park]: 'Off to the park',
+  [Errand.School]: 'On the way to school',
+  [Errand.Bus]: 'Walking to the bus stop',
+  [Errand.Stroll]: 'Out for a stroll',
+  [Errand.Lunch]: 'Popping out for lunch',
+};
+
+const ROLE_TEXT: Record<Citizen['role'], string> = {
+  worker: 'Works',
+  jobseeker: 'Looking for work',
+  retired: 'Retired',
+  student: 'Student',
+  pupil: 'At school',
+  child: 'Too young for school',
+  carer: 'Looks after the home',
+};
+
 const kv = (k: string, v: string | HTMLElement) => h('div', { class: 'kv' }, h('span', null, k), typeof v === 'string' ? h('b', null, v) : v);
 
 /** Right-hand panel describing the selected building or road. */
@@ -84,6 +122,8 @@ export class Inspector {
   readonly el = h('aside', { class: 'inspector hidden' });
   private sel: Selection = null;
   private timer = 0;
+  /** Who the selected person is (kept when they go indoors). */
+  private person: { serial: number; who: Citizen } | null = null;
 
   constructor(private game: Game) {}
 
@@ -117,6 +157,83 @@ export class Inspector {
       chip ?? null,
       h('button', { class: 'icon-btn', 'aria-label': 'Close', onclick: () => this.game.select(null) }, icon('close', 16)),
     );
+  }
+
+  private renderPerson(city: City, i: number, serial: number): void {
+    const ped = city.pedestrians;
+    const alive = ped.alive(i, serial);
+    if (alive && (!this.person || this.person.serial !== serial) && ped.stillHome(i)) {
+      this.person = { serial, who: citizenOf(city.population, ped.household[i], ped.member[i]) };
+    }
+    const who = this.person && this.person.serial === serial ? this.person.who : null;
+    if (!who) {
+      this.game.select(null);
+      return;
+    }
+    const name = `${who.first} ${who.family}`;
+    const body = h('div', { class: 'insp-body' });
+    const showBtn = (label: string, id: number, ic: string) =>
+      h('button', { class: 'btn', onclick: () => this.game.select({ kind: 'building', id }) }, icon(ic, 14), label);
+    if (!alive) {
+      // Gone indoors, onto a bus, or out of the neighbourhood.
+      const exit = ped.exits.find((x) => x.serial === serial);
+      const place = exit?.building ? city.buildings.get(exit.building) : undefined;
+      const text = exit?.how === 'bus' ? `${who.first} got on the bus.` : place ? `${who.first} went into ${placeLabel(city, place)}.` : `${who.first} walked out of view.`;
+      this.el.appendChild(this.header(name, `${who.age} · ${exit?.how === 'bus' ? 'On the bus' : place ? 'Inside' : 'Out of view'}`, 'people'));
+      body.append(h('div', { class: 'hint' }, text));
+      body.appendChild(h('div', { class: 'btn-row' }, place ? showBtn('Show where', place.id, 'build') : null, city.buildings.get(who.home) ? showBtn('Home', who.home, 'home') : null));
+      this.el.appendChild(body);
+      return;
+    }
+    const act = ped.activity(i);
+    const leader = ped.leader[i];
+    const lead = leader >= 0 ? leader : i;
+    let doing: string;
+    if (act.state === PedState.WaitCross) doing = ped.waitingFor(lead) === 'lights' ? 'Waiting for the walk signal' : 'Waiting for a gap in traffic';
+    else if (act.state === PedState.Pause) {
+      const why = ped.pauseWhy[lead];
+      doing = why === PauseWhy.Window ? 'Looking in a shop window' : why === PauseWhy.Chat ? 'Stopped for a chat' : 'Turning for home';
+    } else if (act.state === PedState.Stop) doing = 'Waiting for the bus';
+    else if (act.state === PedState.Linger) doing = `Spending time in ${placeLabel(city, city.buildings.get(ped.dest[lead]))}`;
+    else if (act.state === PedState.Inside) doing = act.errand === Errand.Bus ? 'Getting on the bus' : 'Going inside';
+    else if (act.crossing) doing = 'Crossing the road';
+    else doing = ERRAND_TEXT[act.errand as Errand];
+    if (leader >= 0 && ped.stillHome(leader)) doing += ` with ${citizenOf(city.population, ped.household[leader], ped.member[leader]).first}`;
+    this.el.appendChild(this.header(name, `${who.age} · ${doing}`, 'people'));
+    const home = city.buildings.get(who.home);
+    const job = who.job ? city.buildings.get(who.job) : undefined;
+    body.append(kv('Lives at', placeLabel(city, home)), kv(who.role === 'worker' ? 'Works at' : 'Day to day', who.role === 'worker' ? placeLabel(city, job) : ROLE_TEXT[who.role]));
+    const destId = ped.dest[lead];
+    if (act.errand === Errand.Bus) {
+      const st = city.transit.stops.get(destId);
+      body.append(kv('Heading to', st ? st.name : 'A bus stop'));
+    } else if (act.errand !== Errand.Stroll && act.state !== PedState.Linger) {
+      body.append(kv('Heading to', placeLabel(city, city.buildings.get(destId))));
+    }
+    if (act.remaining > 1 && act.state !== PedState.Linger) body.append(kv('Time to go', `${Math.max(1, Math.round(act.remaining / WALK_SPEED / 60))} min on foot`));
+    const pop = city.population;
+    const hh = ped.household[i];
+    if (ped.stillHome(i)) {
+      body.append(kv('Household', `${pop.size[hh]} ${pop.size[hh] === 1 ? 'person' : 'people'}`));
+      const t = pop.taste[hh];
+      if (t !== 255 && GROUPS[t]) body.append(kv('Sides with', GROUPS[t].short));
+    }
+    const following = this.game.following?.id === i && this.game.following.serial === serial;
+    body.appendChild(
+      h('div', { class: 'btn-row' },
+        h('button', {
+          class: following ? 'btn active' : 'btn',
+          'data-follow': '1',
+          onclick: () => {
+            this.game.follow(following ? null : { id: i, serial });
+            this.render();
+          },
+        }, icon(following ? 'close' : 'camera', 14), following ? 'Stop following' : 'Follow'),
+        home ? showBtn('Home', home.id, 'home') : null,
+        job ? showBtn('Work', job.id, 'office') : null,
+      ),
+    );
+    this.el.appendChild(body);
   }
 
   private render(): void {
@@ -293,6 +410,8 @@ export class Inspector {
         ),
       );
       this.el.appendChild(body);
+    } else if (sel.kind === 'person') {
+      this.renderPerson(city, sel.id, sel.serial);
     } else if (sel.kind === 'vehicle') {
       const v = city.vehicles;
       const route = v.routeOf(sel.id);

@@ -19,7 +19,7 @@ import { StatusIcons } from './effects/StatusIcons';
 import type { Environment } from './Environment';
 import { Ghost } from './overlays/Ghost';
 import { Overlays } from './overlays/Overlays';
-import { Pedestrians } from './pedestrians/Pedestrians';
+import { PedestrianRenderer, personSize } from './pedestrians/Pedestrians';
 import { PropRenderer } from './props/PropRenderer';
 import { RoadRenderer } from './roads/RoadRenderer';
 import { globalUniforms } from './shared';
@@ -47,7 +47,7 @@ export class WorldRenderer {
   readonly buildings: BuildingRenderer;
   readonly props: PropRenderer;
   readonly vehicles: VehicleRenderer;
-  readonly pedestrians: Pedestrians;
+  readonly pedestrians: PedestrianRenderer;
   readonly effects: Effects;
   readonly icons: StatusIcons;
   readonly ghost: Ghost;
@@ -75,7 +75,7 @@ export class WorldRenderer {
     this.buildings = new BuildingRenderer(city);
     this.props = new PropRenderer(city, assets, this.roads, this.buildings);
     this.vehicles = new VehicleRenderer(assets);
-    this.pedestrians = new Pedestrians(city);
+    this.pedestrians = new PedestrianRenderer();
     this.effects = new Effects(city);
     this.icons = new StatusIcons(city, this.buildings);
     this.ghost = new Ghost(city, this.roads.uniforms, this.buildings.uniforms);
@@ -142,7 +142,9 @@ export class WorldRenderer {
     city.vehicles.lodZ = focus.z;
     city.vehicles.lodRadius = Math.max(600, camDist * 1.2);
     this.vehicles.update(city.vehicles, camera, focus);
-    this.pedestrians.update(dt, simDt, focus, camDist, env.hour);
+    // People on foot live around the camera's focus; they only move while the game runs.
+    city.pedestrians.update(simDt, focus, camera.position, camDist, env.hour);
+    this.pedestrians.update(city.pedestrians, camera.position, camDist);
     this.effects.update(dt, this.labActivity(), camera.position, viewportH, camera.fov, simRunning);
     this.icons.update(dt, camDist, globalUniforms.uTime.value);
     this.ghost.update();
@@ -264,6 +266,35 @@ export class WorldRenderer {
 
   /** Nearest building whose box the ray passes through. */
   /** Vehicle under the cursor (ray against each vehicle's oriented box). */
+  /** The person on foot under the cursor (nearest along the ray), if any. */
+  pickPerson(ndc: THREE.Vector2, camera: THREE.Camera): number | null {
+    const ped = this.city.pedestrians;
+    if (!this.pedestrians.pool.mesh.visible || !ped.count) return null;
+    this.raycaster.setFromCamera(ndc, camera);
+    const o = this.raycaster.ray.origin, d = this.raycaster.ray.direction;
+    let best: number | null = null;
+    let bestT = Infinity;
+    const horiz = Math.hypot(d.x, d.z);
+    for (let i = 0; i < ped.max; i++) {
+      if (!ped.active[i] || ped.scale[i] < 0.3) continue;
+      const size = personSize(ped.age[i], ped.look[i]);
+      const top = ped.y[i] + 1.8 * size.h;
+      // Closest approach of the ray to the person's vertical axis, in plan.
+      const px = ped.x[i] - o.x, pz = ped.z[i] - o.z;
+      const t = horiz > 1e-6 ? (px * d.x + pz * d.z) / (horiz * horiz) : 0;
+      if (t <= 0 || t >= bestT) continue;
+      const cx = o.x + d.x * t - ped.x[i], cz = o.z + d.z * t - ped.z[i];
+      // Generous radius: people are small on screen.
+      const r = 0.55 + t * 0.004;
+      if (cx * cx + cz * cz > r * r) continue;
+      const y = o.y + d.y * t;
+      if (y < ped.y[i] - 0.2 || y > top + 0.3) continue;
+      bestT = t;
+      best = i;
+    }
+    return best;
+  }
+
   pickVehicle(ndc: THREE.Vector2, camera: THREE.Camera): number | null {
     this.raycaster.setFromCamera(ndc, camera);
     const ray = this.raycaster.ray;

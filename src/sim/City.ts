@@ -24,6 +24,7 @@ import { TripGenerator } from './traffic/TripGenerator';
 import { Vehicles } from './traffic/Vehicles';
 import { LiveTraffic } from './traffic/LiveTraffic';
 import { Transit } from './transit/Transit';
+import { Pedestrians } from './walk/Pedestrians';
 import { WalkNetwork } from './walk/WalkNetwork';
 import { HIGH_RISE_CAP, Policies } from './policies/Policies';
 import { Utilities } from './utilities/Utilities';
@@ -126,6 +127,8 @@ export class City {
   readonly layout: RoadLayout;
   /** Sidewalks, corners and crossings (rebuilt lazily from the road layout). */
   readonly walk: WalkNetwork;
+  /** People on foot near the camera (a view of the simulation, not part of it). */
+  readonly pedestrians: Pedestrians;
   readonly zones: ZoneMap;
   readonly buildings = new Buildings();
   readonly population = new Population();
@@ -227,6 +230,7 @@ export class City {
       carShare: (i, k) => this.transit.carShare(i, k),
     });
     this.live = new LiveTraffic(this);
+    this.pedestrians = new Pedestrians(this);
     this.spawner = new Spawner(this.roads, this.terrain, this.zones, this.buildings, (x, z) => this.landValue.at(x, z));
     // Attractions are few: keep a list (refreshed when coverage is) instead of searching every building nearby.
     let sights: { version: number; list: { x: number; z: number; w: number }[] } = { version: -1, list: [] };

@@ -6,6 +6,7 @@ export type Selection =
   | { kind: 'road'; id: number }
   | { kind: 'stop'; id: number }
   | { kind: 'vehicle'; id: number; serial: number }
+  | { kind: 'person'; id: number; serial: number }
   | null;
 
 /** Default tool: hover highlighting and click-to-inspect. */
@@ -35,10 +36,11 @@ export class InspectTool extends Tool {
   onMove(p: THREE.Vector3 | null, e: PointerInfo): void {
     const w = this.game.world;
     if (!w) return;
-    const veh = w.pickVehicle(e.ndc, this.game.renderer.camera);
-    const b = veh === null ? w.pickBuilding(e.ndc, this.game.renderer.camera, p) : null;
-    const r = veh === null && b === null && p ? w.pickSegment(p) : null;
-    const cursor = veh !== null || b !== null || r !== null ? 'pointer' : 'default';
+    const person = w.pickPerson(e.ndc, this.game.renderer.camera);
+    const veh = person === null ? w.pickVehicle(e.ndc, this.game.renderer.camera) : null;
+    const b = veh === null && person === null ? w.pickBuilding(e.ndc, this.game.renderer.camera, p) : null;
+    const r = veh === null && person === null && b === null && p ? w.pickSegment(p) : null;
+    const cursor = person !== null || veh !== null || b !== null || r !== null ? 'pointer' : 'default';
     if (b === this.hoverB && r === this.hoverR) {
       this.game.canvas.style.cursor = cursor;
       return;
@@ -55,6 +57,12 @@ export class InspectTool extends Tool {
   onDown(p: THREE.Vector3 | null, e: PointerInfo): void {
     const w = this.game.world;
     if (!w) return;
+    const person = w.pickPerson(e.ndc, this.game.renderer.camera);
+    if (person !== null && this.game.city) {
+      this.game.select({ kind: 'person', id: person, serial: this.game.city.pedestrians.serial[person] });
+      this.game.audio.play('click');
+      return;
+    }
     const veh = w.pickVehicle(e.ndc, this.game.renderer.camera);
     if (veh !== null && this.game.city) {
       this.game.select({ kind: 'vehicle', id: veh, serial: this.game.city.vehicles.serial[veh] });

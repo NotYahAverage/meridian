@@ -79,7 +79,7 @@ export class Game {
   selection: Selection = null;
   /** Interface hidden for taking pictures. */
   photoMode = false;
-  /** Vehicle the camera is following, if any. */
+  /** Vehicle or person the camera is following, if any (matches the selection). */
   following: { id: number; serial: number } | null = null;
   readonly tools: {
     inspect: InspectTool;
@@ -226,6 +226,7 @@ export class Game {
     this.world.warmUp();
     this.world.icons.visible = this.settings.showIcons;
     city.live.density = this.settings.trafficDensity;
+    city.pedestrians.density = this.settings.trafficDensity;
     this.cam.groundHeight = (x, z) => city.terrain.heightAt(x, z);
     this.cam.obstacleHeight = (x, z) => {
       let top = -Infinity;
@@ -495,18 +496,19 @@ export class Game {
     this.ui.onToolChanged();
   }
 
-  /** Starts or stops the camera following a vehicle. */
+  /** Starts or stops the camera following the selected vehicle or person. */
   follow(target: { id: number; serial: number } | null): void {
     this.following = target;
     if (target) {
       this.cam.stopFlight();
-      this.cam.goal.distance = Math.min(this.cam.goal.distance, 90);
+      this.cam.goal.distance = Math.min(this.cam.goal.distance, this.selection?.kind === 'person' ? 38 : 90);
     }
   }
 
   select(sel: Selection): void {
-    if (sel?.kind !== 'vehicle') this.following = null;
-    if (this.selection?.kind === 'vehicle') this.world?.ghost.setSelectionRing(0, 0, null);
+    if (sel?.kind !== 'vehicle' && sel?.kind !== 'person') this.following = null;
+    if (this.selection?.kind === 'vehicle' || this.selection?.kind === 'person') this.world?.ghost.setSelectionRing(0, 0, null);
+    if (this.city) this.city.pedestrians.watched = sel?.kind === 'person' ? sel.id : -1;
     const w = this.world;
     if (w) {
       w.buildings.clearHighlights(2);
@@ -580,7 +582,7 @@ export class Game {
     this.keys.load(s.keybinds ?? {});
     this.ui?.toolbar.refreshKeyHints();
     this.cam.lookSpeed = s.lookSpeed ?? 1;
-    if (this.city) this.city.live.density = s.trafficDensity;
+    if (this.city) this.city.live.density = this.city.pedestrians.density = s.trafficDensity;
     if (this.world) this.world.icons.visible = s.showIcons;
     this.largeMode = null;
     this.shadowStep = 0;
@@ -878,6 +880,21 @@ export class Game {
     const city = this.city;
     const sel = this.selection;
     const v = city?.vehicles;
+    if (city && sel?.kind === 'person') {
+      const ped = city.pedestrians;
+      if (!ped.alive(sel.id, sel.serial)) {
+        this.following = null;
+        this.world?.ghost.setSelectionRing(0, 0, null);
+        return;
+      }
+      this.world?.ghost.setSelectionRing(ped.x[sel.id], ped.z[sel.id], 0.9);
+      const f = this.following;
+      if (f && f.id === sel.id && f.serial === sel.serial) {
+        this.cam.goal.x = ped.x[sel.id];
+        this.cam.goal.z = ped.z[sel.id];
+      }
+      return;
+    }
     if (!city || !v || sel?.kind !== 'vehicle') return;
     const alive = v.active[sel.id] && v.serial[sel.id] === sel.serial;
     if (!alive) {

@@ -77,7 +77,7 @@ export class Vehicles {
   private callbacks = new Map<number, () => void>();
   private continuations = new Map<number, (i: number) => { route: Route; dwell: number } | null>();
   /** Seconds left standing still (buses at stops). */
-  private hold: Float32Array;
+  readonly hold: Float32Array;
   private free: number[] = [];
   private lanes = new Map<number, number[]>();
   private junctionLoad = new Map<number, { n: number; seg: number }>();
