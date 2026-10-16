@@ -340,7 +340,7 @@ export class OverlaysPanel extends Panel {
 
 /** Key colour shown beside each layer in the list (matches the legend ramps). */
 const LAYER_COLOR: Partial<Record<OverlayId, string>> = {
-  traffic: '#e0703a', landValue: '#4fbf72', happiness: '#d9b84a', districts: '#8f87e8', transit: '#3fb0d0', pollution: '#a8743c', noise: '#e0874a',
+  traffic: '#e0703a', landValue: '#4fbf72', happiness: '#d9b84a', districts: '#8f87e8', transit: '#3fb0d0', walking: '#46e178', pollution: '#a8743c', noise: '#e0874a',
   power: '#d9c24a', water: '#4a9be0', police: '#3c82ff', fire: '#ff5a3c', health: '#ff6eaa', education: '#aa6eff', garbage: '#aabe3c', park: '#3cd26e',
 };
 

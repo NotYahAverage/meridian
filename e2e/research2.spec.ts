@@ -154,12 +154,11 @@ test('research: budget, joint work, decisions, knowledge web, retrofits, names a
   expect(await page.locator('.rs-tl-item.rs-tl-ms').first().evaluate((e) => getComputedStyle(e).opacity)).toBe('1');
   await shot(page, 'research2-log');
 
-  // A policy made possible by the transport discovery.
+  // Congestion pricing (unlocked by population since research became a utilities branch).
   await page.keyboard.press('Escape');
   await game(page, `g.ui.openPanel('policies');`);
   const policy = page.locator('.policy', { hasText: 'Congestion Pricing' });
   await expect(policy).toBeVisible();
-  await expect(policy).toContainText('Made possible by your research');
   await policy.locator('.switch').click();
   expect(await game<boolean>(page, `return g.city.policies.has('congestionPricing');`)).toBe(true);
   await shot(page, 'research2-policy');

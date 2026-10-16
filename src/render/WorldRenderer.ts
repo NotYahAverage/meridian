@@ -103,6 +103,7 @@ export class WorldRenderer {
       this.effects.points,
       this.icons.mesh,
       this.ghost.group,
+      this.overlays.walk.mesh,
       this.transit.group,
       this.precipitation.group,
     );

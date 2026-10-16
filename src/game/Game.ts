@@ -848,6 +848,8 @@ export class Game {
     this.env.updateEnvironmentMap();
     this.renderer.setNight(this.env.night);
     this.renderer.setFogRange(this.env.fog.near, this.env.fog.far);
+    // The Walking overlay measures from the cursor (or the middle of the view).
+    world.overlays.walkOrigin = this.hoverPoint ?? this.cam.target;
     world.update(dt, dt * Math.min(mult, 3), this.renderer.camera, this.env, this.cam.target, this.cam.distance, h, mult > 0);
     this.tool.update(dt);
     this.ui.update(dt);

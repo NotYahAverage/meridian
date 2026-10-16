@@ -305,6 +305,7 @@ button.tb-stat:hover { background: var(--panel-2); }
 .legend-title .icon-btn { margin-left: auto; }
 .legend-ramp { height: 6px; border-radius: 3px; margin-top: 9px; background: linear-gradient(90deg, #d95b4f, #d9a23d, #58b56f); }
 .legend-ramp.traffic { background: linear-gradient(90deg, #22c55e, #facc15, #f97316, #dc2626); }
+.legend-ramp.walking { background: linear-gradient(90deg, #46e178 0 33%, #ebd746 33% 66%, #f08c32 66%); }
 .legend-ramp.pollution { background: linear-gradient(90deg, transparent, #b45309, #7c2d12); }
 .legend-ramp.noise { background: linear-gradient(90deg, transparent, #fb923c, #dc2626); }
 .legend-ramp.police { background: linear-gradient(90deg, transparent, #3c82ff); }

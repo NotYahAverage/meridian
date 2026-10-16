@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { City } from '../../sim/City';
 import { CHUNKS, CHUNK_SIZE } from '../../sim/constants';
 import { ROAD_TYPES } from '../../sim/roads/RoadTypes';
-import { type PropInstance, RoadGeo, type SignalHead, buildNode, buildSegment, buildIsland } from './RoadMeshBuilder';
+import { type PropInstance, RoadGeo, type SignalHead, type WalkSignalHead, buildNode, buildSegment, buildIsland } from './RoadMeshBuilder';
 import { nodeRaised } from '../../sim/roads/Overpass';
 import { type RoadUniforms, createRoadMaterial } from './RoadMaterial';
 
@@ -56,6 +56,9 @@ export class RoadRenderer {
   /** Props per chunk (consumed by the prop renderer). */
   readonly chunkProps = new Map<number, PropInstance[]>();
   readonly chunkSignals = new Map<number, SignalHead[]>();
+  readonly chunkWalkSignals = new Map<number, WalkSignalHead[]>();
+  private walkList: WalkSignalHead[] = [];
+  private walkListVersion = -1;
   propsVersion = 0;
 
   constructor(private city: City) {
@@ -197,6 +200,7 @@ export class RoadRenderer {
     }
     this.chunkProps.set(index, g.props);
     this.chunkSignals.set(index, g.signals);
+    this.chunkWalkSignals.set(index, g.walkSignals);
     this.propsVersion++;
     this.segTex.needsUpdate = true;
   }
@@ -233,6 +237,16 @@ export class RoadRenderer {
     const out: SignalHead[] = [];
     for (const list of this.chunkSignals.values()) out.push(...list);
     return out;
+  }
+
+  /** Every pedestrian signal head in the city (rebuilt only when road props change). */
+  allWalkSignals(): WalkSignalHead[] {
+    if (this.walkListVersion !== this.propsVersion) {
+      this.walkListVersion = this.propsVersion;
+      this.walkList = [];
+      for (const list of this.chunkWalkSignals.values()) for (const h of list) this.walkList.push(h);
+    }
+    return this.walkList;
   }
 
   dispose(): void {

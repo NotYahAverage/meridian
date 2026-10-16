@@ -40,7 +40,7 @@ export class RoadLayout {
   /** Bumped whenever any node layout changes (used by renderers). */
   version = 0;
 
-  constructor(private net: RoadNetwork) {}
+  constructor(readonly net: RoadNetwork) {}
 
   rebuildAll(): void {
     this.nodes.clear();

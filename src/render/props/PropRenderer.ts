@@ -5,7 +5,10 @@ import { VEHICLE_MODELS } from '../../sim/traffic/Vehicles';
 import type { AssetLibrary, AssetName } from '../assets/AssetLibrary';
 import { Pool, createAssetMaterial, createFoliageDepthMaterial, createFoliageMaterial, writeMatrix } from '../assets/AssetMaterials';
 import type { BuildingRenderer } from '../buildings/BuildingRenderer';
+import { WALK_LAMP_Y } from '../roads/RoadMeshBuilder';
 import type { RoadRenderer } from '../roads/RoadRenderer';
+import { WalkLight } from '../../sim/traffic/Signals';
+import { walkLampGeometry, walkLampTexture, walkSignalGeometry } from './WalkSignalGeometry';
 
 const TREE_HI: AssetName[] = ['oak', 'maple', 'pine', 'bush'];
 const HI_TREE_DIST = 620;
@@ -42,6 +45,7 @@ interface ChunkProps {
   trees: Bucket[];
   lights: Bucket;
   signals: Bucket;
+  walkPoles: Bucket;
   cranes: Bucket;
   towers: Bucket;
   rotors: { x: number; y: number; z: number; rot: number; phase: number }[];
@@ -54,6 +58,7 @@ function emptyChunk(): ChunkProps {
     trees: TREE_HI.map(bucket),
     lights: bucket(),
     signals: bucket(),
+    walkPoles: bucket(),
     cranes: bucket(),
     towers: bucket(),
     rotors: [],
@@ -81,6 +86,10 @@ export class PropRenderer {
   private lights: Pool;
   private signals: Pool;
   private signalLamps: Pool;
+  private walkPoles: Pool;
+  private handLamps: Pool;
+  private walkLamps: Pool;
+  private blink = 0;
   private cranes: Pool;
   private towers: Pool;
   private rotors: Pool;
@@ -108,12 +117,15 @@ export class PropRenderer {
     this.signals = new Pool(assets.get('signal'), propMat, 128, { shadows: true });
     const lampGeo = new THREE.SphereGeometry(0.2, 8, 6);
     this.signalLamps = new Pool(lampGeo, new THREE.MeshBasicMaterial({ toneMapped: false }), 128, { colors: true });
+    this.walkPoles = new Pool(walkSignalGeometry(), propMat, 256, { shadows: true });
+    this.handLamps = new Pool(walkLampGeometry(WALK_LAMP_Y.hand), new THREE.MeshBasicMaterial({ map: walkLampTexture('hand'), toneMapped: false }), 256, { colors: true });
+    this.walkLamps = new Pool(walkLampGeometry(WALK_LAMP_Y.walk), new THREE.MeshBasicMaterial({ map: walkLampTexture('walk'), toneMapped: false }), 256, { colors: true });
     this.cranes = new Pool(assets.get('crane'), propMat, 16, { shadows: true });
     this.towers = new Pool(assets.get('wind_tower'), propMat, 16, { shadows: true });
     this.rotors = new Pool(assets.get('wind_rotor'), propMat, 16, { shadows: true });
     const carMat = createAssetMaterial('parked');
     this.cars = VEHICLE_MODELS.map((m) => new Pool(assets.get(m), carMat, 256, { colors: true, shadows: true }));
-    for (const p of [...this.treeHi, ...this.treeLo, this.lights, this.signals, this.signalLamps, this.cranes, this.towers, this.rotors, ...this.cars]) {
+    for (const p of [...this.treeHi, ...this.treeLo, this.lights, this.signals, this.signalLamps, this.walkPoles, this.handLamps, this.walkLamps, this.cranes, this.towers, this.rotors, ...this.cars]) {
       this.group.add(p.mesh);
     }
   }
@@ -153,6 +165,7 @@ export class PropRenderer {
     for (const p of this.roads.chunkProps.get(ch) ?? []) {
       if (p.kind === 'streetlight') push(cp.lights, p.x, p.y, p.z, p.rot, 1);
       else if (p.kind === 'signal') push(cp.signals, p.x, p.y, p.z, p.rot, 1);
+      else if (p.kind === 'walksignal') push(cp.walkPoles, p.x, p.y, p.z, p.rot, 1);
       else if (p.kind === 'tree') {
         const t = 0.9 + hash(p.x + p.z) * 0.15;
         push(cp.trees[p.variant === 1 ? 1 : 0], p.x, p.y, p.z, p.rot, p.scale ?? 0.7, t, t, t * 0.95);
@@ -225,6 +238,7 @@ export class PropRenderer {
       this.assemble(vis);
     }
     this.animateRotors(dt);
+    this.blink = (this.blink + dt) % 1;
     this.signalTimer -= dt;
     if (this.signalTimer <= 0) {
       this.signalTimer = 0.2;
@@ -252,6 +266,7 @@ export class PropRenderer {
     const loPine: Bucket[] = [];
     const lights: Bucket[] = [];
     const signals: Bucket[] = [];
+    const walkPoles: Bucket[] = [];
     const cranes: Bucket[] = [];
     const towers: Bucket[] = [];
     const cars: Bucket[][] = VEHICLE_MODELS.map(() => []);
@@ -270,6 +285,7 @@ export class PropRenderer {
       if (d < LIGHT_DIST) {
         lights.push(cp.lights);
         signals.push(cp.signals);
+        walkPoles.push(cp.walkPoles);
       }
       cranes.push(cp.cranes);
       towers.push(cp.towers);
@@ -281,6 +297,7 @@ export class PropRenderer {
     copy(this.treeLo[1], loPine, true);
     copy(this.lights, lights, false);
     copy(this.signals, signals, false);
+    copy(this.walkPoles, walkPoles, false);
     copy(this.cranes, cranes, false);
     copy(this.towers, towers, false);
     for (let k = 0; k < cars.length; k++) copy(this.cars[k], cars[k], true);
@@ -321,5 +338,33 @@ export class PropRenderer {
       c[i * 3 + 2] = col[2];
     }
     this.signalLamps.commit(heads.length);
+    this.updateWalkLamps();
+  }
+
+  /** Pedestrian signals: steady walking person, then a flashing hand, then a steady hand. */
+  private updateWalkLamps(): void {
+    const heads = this.roads.allWalkSignals();
+    this.handLamps.ensure(heads.length);
+    this.walkLamps.ensure(heads.length);
+    const hm = this.handLamps.matrices, hc = this.handLamps.colors!;
+    const wm = this.walkLamps.matrices, wc = this.walkLamps.colors!;
+    const sig = this.city.signals;
+    const on = this.blink < 0.55;
+    for (let i = 0; i < heads.length; i++) {
+      const h = heads[i];
+      writeMatrix(hm, i * 16, h.x, h.y, h.z, h.rot, 1);
+      writeMatrix(wm, i * 16, h.x, h.y, h.z, h.rot, 1);
+      const light = sig.walkLight(h.nodeId, h.segId);
+      const hand = light === WalkLight.DontWalk || (light === WalkLight.Flashing && on);
+      hc[i * 3] = hand ? 3.1 : 0.07;
+      hc[i * 3 + 1] = hand ? 1.15 : 0.06;
+      hc[i * 3 + 2] = hand ? 0.1 : 0.05;
+      const walk = light === WalkLight.Walk;
+      wc[i * 3] = walk ? 2.5 : 0.06;
+      wc[i * 3 + 1] = walk ? 2.8 : 0.065;
+      wc[i * 3 + 2] = walk ? 3.1 : 0.07;
+    }
+    this.handLamps.commit(heads.length);
+    this.walkLamps.commit(heads.length);
   }
 }

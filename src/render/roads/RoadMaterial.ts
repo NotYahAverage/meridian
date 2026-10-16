@@ -164,14 +164,26 @@ float stripes(float x) {
       float zebra = stripes(u / 1.1 + 0.5);
       if (cs && v > 0.5 && v < 3.6 && ax < ah - 0.4) mark = max(mark, zebra);
       if (ce && v > len - 3.6 && v < len - 0.5 && ax < ah - 0.4) mark = max(mark, zebra);
+      // Stop lines just behind the crosswalk, or at the junction's edge where there isn't one;
+      // dashed where traffic gives way rather than stopping at lights.
+      bool gwS = mod(floor(flags / 64.0), 2.0) > 0.5;
+      bool gwE = mod(floor(flags / 128.0), 2.0) > 0.5;
+      bool ss = cs || gwS || mod(floor(flags / 16.0), 2.0) > 0.5;
+      bool se = ce || gwE || mod(floor(flags / 32.0), 2.0) > 0.5;
+      float gS = gwS ? step(fract(u / 1.1), 0.55) : 1.0;
+      float gE = gwE ? step(fract(u / 1.1), 0.55) : 1.0;
+      float s0v = cs ? 3.9 : 0.6;
+      float e0v = ce ? 3.9 : 0.6;
+      bool inS = ss && v > s0v && v < s0v + 0.45;
+      bool inE = se && v > len - e0v - 0.45 && v < len - e0v;
       if (ow) {
         // One-way: a full-width stop line where traffic arrives.
         bool rev = mod(floor(flags / 8.0), 2.0) > 0.5;
-        if (rev && cs && v > 3.9 && v < 4.35 && ax < ah - 0.3) mark = 1.0;
-        if (!rev && ce && v > len - 4.35 && v < len - 3.9 && ax < ah - 0.3) mark = 1.0;
+        if (rev && inS && ax < ah - 0.3) mark = max(mark, gS);
+        if (!rev && inE && ax < ah - 0.3) mark = max(mark, gE);
       } else {
-        if (cs && v > 3.9 && v < 4.35 && u < -med && ax < ah - 0.3) mark = 1.0;
-        if (ce && v > len - 4.35 && v < len - 3.9 && u > med && ax < ah - 0.3) mark = 1.0;
+        if (inS && u < -med && ax < ah - 0.3) mark = max(mark, gS);
+        if (inE && u > med && ax < ah - 0.3) mark = max(mark, gE);
       }
       mark *= 0.75 + 0.25 * n3;
     }

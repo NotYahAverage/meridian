@@ -7,6 +7,11 @@ import type { BuildingRenderer } from '../buildings/BuildingRenderer';
 import type { RoadRenderer } from '../roads/RoadRenderer';
 import { globalUniforms } from '../shared';
 import type { TerrainRenderer } from '../terrain/TerrainRenderer';
+import { WALK_SPEED } from '../../sim/walk/WalkNetwork';
+import { WalkOverlay } from './WalkOverlay';
+
+/** The Walking overlay shades how far one can get on foot from the cursor in this long (seconds). */
+const WALK_REACH = 15 * 60;
 
 export type OverlayId =
   | 'none'
@@ -24,7 +29,8 @@ export type OverlayId =
   | 'water'
   | 'happiness'
   | 'districts'
-  | 'transit';
+  | 'transit'
+  | 'walking';
 
 export const OVERLAYS: { id: OverlayId; label: string; group: string; legend: [string, string] }[] = [
   { id: 'traffic', label: 'Traffic', group: 'City', legend: ['Free flowing', 'Gridlock'] },
@@ -32,6 +38,7 @@ export const OVERLAYS: { id: OverlayId; label: string; group: string; legend: [s
   { id: 'happiness', label: 'Happiness', group: 'City', legend: ['Unhappy', 'Happy'] },
   { id: 'districts', label: 'Districts', group: 'City', legend: ['', ''] },
   { id: 'transit', label: 'Public Transit', group: 'City', legend: ['Far from a stop', 'Short walk'] },
+  { id: 'walking', label: 'Walking', group: 'City', legend: ['5 min on foot', '15 min'] },
   { id: 'pollution', label: 'Pollution', group: 'Environment', legend: ['Clean', 'Polluted'] },
   { id: 'noise', label: 'Noise', group: 'Environment', legend: ['Quiet', 'Loud'] },
   { id: 'power', label: 'Electricity', group: 'Utilities', legend: ['No power', 'Powered'] },
@@ -68,8 +75,17 @@ export class Overlays {
   private timer = 0;
   private zoneVersion = -1;
   private zoneTimer = 0;
+  /** Sidewalks and crossings drawn over the streets while the Walking overlay is on. */
+  readonly walk: WalkOverlay;
+  /** Where the Walking overlay measures from (the cursor; the camera's focus when off the map). */
+  walkOrigin: { x: number; z: number } | null = null;
+  private walkFrom = { x: NaN, z: NaN, version: -1 };
+  private walkTimes: Float32Array = new Float32Array(0);
+  private walkTimer = 0;
 
-  constructor(private city: City, private terrain: TerrainRenderer, private roads: RoadRenderer, private buildings: BuildingRenderer) {}
+  constructor(private city: City, private terrain: TerrainRenderer, private roads: RoadRenderer, private buildings: BuildingRenderer) {
+    this.walk = new WalkOverlay(city);
+  }
 
   set(mode: OverlayId): void {
     this.mode = mode;
@@ -78,6 +94,8 @@ export class Overlays {
     this.buildings.uniforms.uBldOverlay.value = bldMode ? 1 : 0;
     this.buildings.overlayValue = bldMode ? this.buildingValue(mode) : null;
     this.roads.uniforms.uTrafficOverlay.value = mode === 'traffic' ? 1 : 0;
+    this.walk.visible = mode === 'walking';
+    this.walkFrom.version = -1;
     globalUniforms.uDesat.value = mode === 'none' ? 0 : bldMode ? 0.4 : 0.75;
     this.terrain.uniforms.uOverlayOpacity.value = mode === 'none' || mode === 'traffic' || bldMode ? 0 : 0.78;
     this.buildings.updateState(0, true);
@@ -104,6 +122,13 @@ export class Overlays {
       this.zonesWritten = true;
     }
     this.terrain.uniforms.uZonableOpacity.value = this.zonableHint;
+    if (this.mode === 'walking') {
+      this.walk.update(dt);
+      // At most a few repaints a second while the cursor moves.
+      this.walkTimer -= dt;
+      if (this.walkTimer <= 0 && this.updateWalkReach()) this.walkTimer = 0.12;
+      return;
+    }
     this.timer -= dt;
     if (this.timer > 0 || this.mode === 'none') return;
     this.timer = 1;
@@ -228,6 +253,63 @@ export class Overlays {
     this.terrain.overlayTex.needsUpdate = true;
   }
 
+  /** Repaints the walking reach when the origin moves to another spot (or the roads change); true if it did. */
+  private updateWalkReach(): boolean {
+    const o = this.walkOrigin;
+    const walk = this.city.walk;
+    const f = this.walkFrom;
+    if (!o) return false;
+    walk.ensure();
+    if (f.version === walk.version && Math.hypot(o.x - f.x, o.z - f.z) < 6) return false;
+    f.x = o.x;
+    f.z = o.z;
+    f.version = walk.version;
+    const out = this.terrain.overlayData;
+    out.fill(0);
+    const from = walk.nearest(o.x, o.z, 80);
+    if (from) {
+      const t = (this.walkTimes = walk.timesFrom(from, WALK_REACH, this.walkTimes));
+      const p = { x: 0, z: 0, tx: 1, tz: 0 };
+      for (let e = 0; e < walk.edgeCount; e++) {
+        const ta = t[walk.ea[e]], tb = t[walk.eb[e]];
+        if (ta === Infinity && tb === Infinity) continue;
+        const len = walk.len[e];
+        const n = Math.max(1, Math.ceil(len / 6));
+        for (let k = 0; k <= n; k++) {
+          const d = (len * k) / n;
+          const time = Math.min(ta + d / WALK_SPEED, tb + (len - d) / WALK_SPEED);
+          if (time > WALK_REACH) continue;
+          walk.pointOnEdge(e, d, p);
+          this.paintReach(out, p.x, p.z, time / WALK_REACH);
+        }
+      }
+    }
+    this.terrain.overlayTex.needsUpdate = true;
+    return true;
+  }
+
+  /** Shades the grid cells around a point on the network: green when close, through yellow, to orange at the limit. */
+  private paintReach(out: Uint8Array, x: number, z: number, f: number): void {
+    const R = 22;
+    const ix0 = Math.max(0, Math.floor((x - R) / GRID_CELL)), ix1 = Math.min(GRID_RES - 1, Math.floor((x + R) / GRID_CELL));
+    const iz0 = Math.max(0, Math.floor((z - R) / GRID_CELL)), iz1 = Math.min(GRID_RES - 1, Math.floor((z + R) / GRID_CELL));
+    // Three bands (5, 10, 15 minutes) with soft steps between them.
+    const band = f < 1 / 3 ? 0 : f < 2 / 3 ? 1 : 2;
+    const rgb = band === 0 ? [70, 225, 120] : band === 1 ? [235, 215, 70] : [240, 140, 50];
+    const a = band === 0 ? 165 : band === 1 ? 140 : 115;
+    for (let iz = iz0; iz <= iz1; iz++) {
+      for (let ix = ix0; ix <= ix1; ix++) {
+        const o = (iz * GRID_RES + ix) * 4;
+        // Keep the quickest band already painted in this cell.
+        if (out[o + 3] && out[o + 3] >= a) continue;
+        out[o] = rgb[0];
+        out[o + 1] = rgb[1];
+        out[o + 2] = rgb[2];
+        out[o + 3] = a;
+      }
+    }
+  }
+
   /** Short explanation for the legend. */
   static describe(mode: OverlayId): string {
     switch (mode) {
@@ -239,6 +321,7 @@ export class Overlays {
       case 'water': return 'Buildings with water and sewage service (amber = only one).';
       case 'happiness': return 'How satisfied residents and businesses are.';
       case 'districts': return 'Named districts painted with the District tool.';
+      case 'walking': return 'Sidewalks and crossings; red edges are roads with no sidewalk, which people can’t walk along or cross. The shading shows how far you can walk from the cursor in 5, 10 and 15 minutes.';
       case 'transit': return 'Bus lines and how far people walk to a stop. Commuters ride when the bus is competitive with driving.';
       default: return 'Coverage from service buildings. Effectiveness drops when overloaded.';
     }

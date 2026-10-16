@@ -24,6 +24,7 @@ import { TripGenerator } from './traffic/TripGenerator';
 import { Vehicles } from './traffic/Vehicles';
 import { LiveTraffic } from './traffic/LiveTraffic';
 import { Transit } from './transit/Transit';
+import { WalkNetwork } from './walk/WalkNetwork';
 import { HIGH_RISE_CAP, Policies } from './policies/Policies';
 import { Utilities } from './utilities/Utilities';
 import { Nature } from './world/Nature';
@@ -123,6 +124,8 @@ export class City {
   readonly nature: Nature;
   readonly roads = new RoadNetwork();
   readonly layout: RoadLayout;
+  /** Sidewalks, corners and crossings (rebuilt lazily from the road layout). */
+  readonly walk: WalkNetwork;
   readonly zones: ZoneMap;
   readonly buildings = new Buildings();
   readonly population = new Population();
@@ -203,6 +206,7 @@ export class City {
     this.news = new NewsDesk(this);
     this.policies = new Policies(this);
     this.layout = new RoadLayout(this.roads);
+    this.walk = new WalkNetwork(this.layout);
     this.zones = new ZoneMap(this.terrain);
     this.landValue = new LandValue(this.terrain);
     this.economy = new Economy(START_MONEY);

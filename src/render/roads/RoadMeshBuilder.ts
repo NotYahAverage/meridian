@@ -3,6 +3,7 @@ import type { NodeLayout, RoadLayout } from '../../sim/roads/RoadLayout';
 import type { RoadNetwork, RoadSegment } from '../../sim/roads/RoadNetwork';
 import { nodeLift, raisedLift } from '../../sim/roads/Overpass';
 import { ROAD_TYPES, ROAD_TYPE_LIST, type RoadType, type RoadTypeId } from '../../sim/roads/RoadTypes';
+import { CROSSWALK_INSET, hasCrosswalk, servesPedestrians } from '../../sim/walk/WalkNetwork';
 import type { Terrain } from '../../sim/world/Terrain';
 
 /** Surface kinds understood by the road shader. */
@@ -15,7 +16,7 @@ export const CURB_H = 0.15;
 const SKIRT_DEPTH = 1.8;
 
 export interface PropInstance {
-  kind: 'streetlight' | 'tree' | 'signal' | 'bush';
+  kind: 'streetlight' | 'tree' | 'signal' | 'bush' | 'walksignal';
   x: number;
   y: number;
   z: number;
@@ -32,6 +33,16 @@ export interface SignalHead {
   z: number;
 }
 
+/** Pedestrian signal at one end of a crosswalk (`segId` is the arm crossed), facing across the road. */
+export interface WalkSignalHead extends SignalHead {
+  rot: number;
+}
+
+/** Height of the pedestrian signal's lamps above the sidewalk. */
+export const WALK_LAMP_Y = { hand: 2.86, walk: 2.5 };
+/** How far the lamps sit in front of the pole (along the facing direction). */
+export const WALK_LAMP_OUT = 0.29;
+
 /** Growable vertex buffer for road meshes. */
 export class RoadGeo {
   pos: number[] = [];
@@ -42,6 +53,7 @@ export class RoadGeo {
   idx: number[] = [];
   props: PropInstance[] = [];
   signals: SignalHead[] = [];
+  walkSignals: WalkSignalHead[] = [];
 
   get vertexCount(): number {
     return this.pos.length / 3;
@@ -136,12 +148,6 @@ function miterTangent(layout: RoadLayout, seg: RoadSegment, nodeId: number): { x
   return nodeId === seg.b ? { x: mx, z: mz } : { x: -mx, z: -mz };
 }
 
-function endHasCrosswalk(layout: RoadLayout, nodeId: number, type: RoadTypeId): boolean {
-  if (ROAD_TYPES[type].sidewalk === 0) return false;
-  const lay = layout.get(nodeId);
-  return !!lay && lay.kind === 'junction' && lay.arms.length >= 3;
-}
-
 /** Builds the ribbon mesh and props for one road segment. */
 export function buildSegment(
   out: RoadGeo,
@@ -170,14 +176,40 @@ export function buildSegment(
     frames[frames.length - 1].tx = mB.x;
     frames[frames.length - 1].tz = mB.z;
   }
+  const crossA = hasCrosswalk(layout, seg.a, seg);
+  const crossB = hasCrosswalk(layout, seg.b, seg);
+  const ctrlA = seg.ring ? 'none' : layout.get(seg.a)?.control ?? 'none';
+  const ctrlB = seg.ring ? 'none' : layout.get(seg.b)?.control ?? 'none';
+  const giveWay = (c: string) => c === 'yield' || c === 'roundabout';
   const flags =
     // Pedestrians cross a roundabout's approaches, never the ring itself.
-    (!seg.ring && endHasCrosswalk(layout, seg.a, seg.type) ? 1 : 0) |
-    (!seg.ring && endHasCrosswalk(layout, seg.b, seg.type) ? 2 : 0) |
+    (crossA ? 1 : 0) |
+    (crossB ? 2 : 0) |
     (seg.oneway !== 0 ? 4 : 0) |
-    (seg.oneway === -1 ? 8 : 0);
+    (seg.oneway === -1 ? 8 : 0) |
+    // Stop lines at lights where there's no crosswalk (they're drawn with the crosswalk otherwise).
+    (!crossA && ctrlA === 'signal' ? 16 : 0) |
+    (!crossB && ctrlB === 'signal' ? 32 : 0) |
+    // Dashed give-way lines where traffic yields instead of stopping at a light.
+    (giveWay(ctrlA) ? 64 : 0) |
+    (giveWay(ctrlB) ? 128 : 0);
   const len = s1 - s0;
-  emitRibbon(out, frames, profile(rt), TYPE_INDEX[seg.type], flags, len, slot);
+  const bands = profile(rt);
+  if (rt.medianKind === 'barrier' && (crossA || crossB)) {
+    // A gap in the median barrier where people cross at the lights.
+    emitRibbon(out, frames, bands.filter((b) => b.kind !== SURF.barrier), TYPE_INDEX[seg.type], flags, len, slot);
+    const cutA = crossA ? CROSSWALK_INSET + 2.2 : 0, cutB = crossB ? CROSSWALK_INSET + 2.2 : 0;
+    if (len - cutA - cutB > 1) {
+      const bf = sampleFrames(seg.poly, s0 + cutA, s1 - cutB, terrain, lift);
+      for (const f of bf) {
+        if (seg.raised) f.h += raisedLift(net, seg, s0 + cutA + f.v);
+        f.v += cutA;
+      }
+      emitRibbon(out, bf, bands.filter((b) => b.kind === SURF.barrier), TYPE_INDEX[seg.type], flags, len, slot);
+    }
+  } else {
+    emitRibbon(out, frames, bands, TYPE_INDEX[seg.type], flags, len, slot);
+  }
   if (seg.elevated || seg.raised) emitBridge(out, seg.poly, s0, s1, frames, rt, terrain, TYPE_INDEX[seg.type], len, slot);
   if (opts.props !== false) emitSegmentProps(out, seg, rt, s0, s1, terrain, (s) => raisedLift(net, seg, s));
 }
@@ -344,7 +376,7 @@ export function buildNode(out: RoadGeo, nodeId: number, net: RoadNetwork, layout
   const node = net.getNode(nodeId);
   nodeLiftNow = nodeLift(net, nodeId);
   if (lay.kind === 'end') buildEndCap(out, lay, net, terrain);
-  else if (lay.kind === 'junction') buildJunction(out, lay, node.x, node.z, net, terrain, signalled);
+  else if (lay.kind === 'junction') buildJunction(out, lay, node.x, node.z, net, layout, terrain, signalled);
   nodeLiftNow = 0;
 }
 
@@ -360,7 +392,7 @@ function bez(ax: number, az: number, cx: number, cz: number, bx: number, bz: num
   return [u * u * ax + 2 * u * t * cx + t * t * bx, u * u * az + 2 * u * t * cz + t * t * bz];
 }
 
-function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, net: RoadNetwork, terrain: Terrain, signalled: boolean): void {
+function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, net: RoadNetwork, layout: RoadLayout, terrain: Terrain, signalled: boolean): void {
   const arms = lay.arms;
   const n = arms.length;
   const N = 7;
@@ -372,6 +404,7 @@ function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, ne
   }
   const corners: Corner[] = [];
   const types = arms.map((a) => ROAD_TYPES[net.getSegment(a.segId).type]);
+  const pedestrians = signalled && servesPedestrians(layout, lay);
   for (let i = 0; i < n; i++) {
     const a = arms[i];
     const j = (i + 1) % n;
@@ -393,7 +426,8 @@ function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, ne
     const inner: [number, number][] = [];
     for (let k = 0; k <= N; k++) inner.push(bez(right[0], right[1], c[0], c[1], nextLeft[0], nextLeft[1], k / N));
     for (let k = 1; k < N; k++) boundary.push(inner[k]);
-    const sw = types[i].sidewalk > 0 && types[j].sidewalk > 0;
+    // Paved where both roads have sidewalks, and on every corner of a junction with lights where people cross.
+    const sw = (types[i].sidewalk > 0 && types[j].sidewalk > 0) || (signalled && pedestrians);
     const oRight = [a.px + ra.x * Wi, a.pz + ra.z * Wi] as [number, number];
     const oLeft = [b.px - rb.x * Wj, b.pz - rb.z * Wj] as [number, number];
     const oc = ctrlFor(oRight, oLeft);
@@ -458,6 +492,24 @@ function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, ne
       out.props.push({ kind: 'signal', x, y, z, rot });
       const reach = Math.min(3.9, rt.asphaltHalf);
       out.signals.push({ nodeId: lay.nodeId, segId: a.segId, x: x + ra.x * reach, y: y + 5.3, z: z + ra.z * reach });
+    }
+    // Pedestrian signals at both ends of each crosswalk, just beyond the stripes, each facing the far kerb.
+    for (let i = 0; i < n; i++) {
+      const a = arms[i];
+      const seg = net.getSegment(a.segId);
+      if (!hasCrosswalk(layout, lay.nodeId, seg)) continue;
+      const rt = types[i];
+      const ra = { x: -a.tz, z: a.tx };
+      const along = CROSSWALK_INSET + 2.4;
+      const off = rt.asphaltHalf + 0.45;
+      for (const sd of [1, -1]) {
+        const px = a.px + a.tx * along + ra.x * off * sd;
+        const pz = a.pz + a.tz * along + ra.z * off * sd;
+        const py = hAt(terrain, px, pz) + (rt.sidewalk > 0 ? CURB_H : 0);
+        const prot = Math.atan2(-ra.z * sd, -ra.x * sd);
+        out.props.push({ kind: 'walksignal', x: px, y: py, z: pz, rot: prot });
+        out.walkSignals.push({ nodeId: lay.nodeId, segId: a.segId, x: px, y: py, z: pz, rot: prot });
+      }
     }
   }
 }
