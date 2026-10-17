@@ -232,6 +232,24 @@ float stripes(float x) {
       }
       mark *= 0.75 + 0.25 * n3;
     }
+    // Bike lanes: green along the kerb (both kerbs; the right-hand one on a one-way road), a white
+    // edge line, and a bike symbol now and then.
+    float bk = mod(floor(flags / 16384.0), 4.0);
+    if (kind == 0 && bk > 0.5 && v > 4.2 && v < len - 4.2) {
+      float rev = mod(floor(flags / 8.0), 2.0) > 0.5 ? -1.0 : 1.0;
+      float sideOk = ow ? step(0.0, u * rev) : 1.0;
+      float fromKerb = ah - abs(u);
+      if (sideOk > 0.5 && fromKerb > 0.0 && fromKerb < 1.35) {
+        asph = mix(asph, m_srgb(vec3(0.24, 0.5, 0.3)) * (0.85 + 0.15 * n), 0.85);
+        mark = max(mark, band(fromKerb, 1.28, 0.12));
+        // The symbol: two wheels and a frame, every 30 m.
+        float sv = mod(v, 30.0) - 15.0;
+        vec2 q = vec2(sv, fromKerb - 0.68);
+        float ring = abs(length(q - vec2(-0.42, 0.0)) - 0.24) < 0.045 || abs(length(q - vec2(0.42, 0.0)) - 0.24) < 0.045 ? 1.0 : 0.0;
+        float frame = abs(q.y - 0.12) < 0.035 && abs(q.x) < 0.42 ? 1.0 : 0.0;
+        if (abs(sv) < 1.0) mark = max(mark, max(ring, frame));
+      }
+    }
     col = mix(asph, mc, mark);
     r_rough = mix(0.9, 0.6, mark);
     lampable = 1.0;

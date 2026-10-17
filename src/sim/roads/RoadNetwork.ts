@@ -47,6 +47,8 @@ export interface RoadSegment {
   ring: boolean;
   /** Raised highway (overpass): carried on piers above the ground and the roads under it. */
   raised: boolean;
+  /** Bike lanes along the kerbs: 0 none, 1 painted, 2 protected (a kerb between them and the traffic). */
+  bikeLane: 0 | 1 | 2;
 }
 
 export interface Roundabout {
@@ -114,7 +116,7 @@ export class RoadNetwork {
     a: number,
     b: number,
     type: RoadTypeId,
-    opts: { ctrl?: P2; name?: string; id?: number; builtTick?: number; elevated?: boolean; oneway?: 0 | 1 | -1; ring?: boolean; raised?: boolean } = {},
+    opts: { ctrl?: P2; name?: string; id?: number; builtTick?: number; elevated?: boolean; oneway?: 0 | 1 | -1; ring?: boolean; raised?: boolean; bikeLane?: 0 | 1 | 2 } = {},
   ): RoadSegment {
     const na = this.getNode(a);
     const nb = this.getNode(b);
@@ -152,6 +154,7 @@ export class RoadNetwork {
       builtTick: opts.builtTick ?? 0,
       elevated: !!opts.elevated,
       oneway: opts.oneway ?? 0,
+      bikeLane: opts.bikeLane ?? 0,
       ring: !!opts.ring,
       raised: !!opts.raised,
     };
@@ -184,6 +187,14 @@ export class RoadNetwork {
     const seg = this.getSegment(id);
     if (seg.oneway === oneway) return;
     seg.oneway = canBeOneWay(seg.type) ? oneway : 0;
+    this.emit({ kind: 'retype', seg, from: seg.type });
+  }
+
+  /** Adds, changes or removes a road's bike lanes. */
+  setBikeLane(id: number, kind: 0 | 1 | 2): void {
+    const seg = this.getSegment(id);
+    if (seg.bikeLane === kind) return;
+    seg.bikeLane = kind;
     this.emit({ kind: 'retype', seg, from: seg.type });
   }
 
@@ -233,6 +244,7 @@ export class RoadNetwork {
       oneway: seg.oneway,
       ring: seg.ring,
       raised: seg.raised,
+      bikeLane: seg.bikeLane,
     });
     const second = this.addSegment(node.id, seg.b, seg.type, {
       ctrl: { x: sp.second.cx, z: sp.second.cz },
@@ -242,6 +254,7 @@ export class RoadNetwork {
       oneway: seg.oneway,
       ring: seg.ring,
       raised: seg.raised,
+      bikeLane: seg.bikeLane,
     });
     return { node, first, second };
   }

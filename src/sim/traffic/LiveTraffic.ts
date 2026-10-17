@@ -165,7 +165,9 @@ export class LiveTraffic {
       const rt = ROAD_TYPES[s.type];
       if (rt.freeway || rt.sidewalk <= 0) return 1e6;
       // Cost by time at bike speed rather than the speed limit, and a busy road counts as longer.
-      return (rt.speed / 4.6) * (s.type === 'lane' || s.type === 'street' ? 1 : 1.35);
+      // Bike lanes are the way to go.
+      const lane = s.bikeLane === 2 ? 0.6 : s.bikeLane === 1 ? 0.75 : 1;
+      return (rt.speed / 4.6) * (s.type === 'lane' || s.type === 'street' ? 1 : 1.35) * lane;
     });
     return r && r.cost < 1e5 ? r : null;
   }

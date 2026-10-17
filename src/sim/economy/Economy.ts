@@ -3,6 +3,9 @@ import { TICKS_PER_MONTH } from '../constants';
 import type { RoadNetwork } from '../roads/RoadNetwork';
 import { REGIONAL_ROAD_NAME, ROAD_TYPES } from '../roads/RoadTypes';
 import { SERVICE_BY_ID } from '../services/ServiceTypes';
+
+/** Bike lane upkeep per metre (none, painted, protected); matches BIKE_LANE in CityCommands. */
+const BIKE_UPKEEP = [0, 0.04, 0.1];
 import { BuildingState, Zone, zoneBase } from '../types';
 
 export type TaxCategory = 'residential' | 'commercial' | 'industrial' | 'office';
@@ -183,7 +186,7 @@ export class Economy {
     let roads = 0;
     for (const s of net.segments.values()) {
       if (s.name === REGIONAL_ROAD_NAME) continue;
-      roads += s.length * ROAD_TYPES[s.type].upkeepPerMeter;
+      roads += s.length * (ROAD_TYPES[s.type].upkeepPerMeter + BIKE_UPKEEP[s.bikeLane ?? 0]);
     }
     expense['Road maintenance'] = roads;
     for (const b of buildings.all.values()) {

@@ -1,13 +1,13 @@
 import type * as THREE from 'three';
 import { type PolyPoint, pointAt } from '../core/geom2d';
 import { formatMoney, formatInt } from '../core/math';
-import { type RoundaboutPreview, buildRoad, buildRoundabout, cycleRoadDirection, previewRoad, previewRoundabout, snap, upgradeCost, upgradeRoad } from '../sim/CityCommands';
+import { BIKE_LANE, type RoundaboutPreview, bikeLaneCost, buildRoad, buildRoundabout, canHaveBikeLane, cycleRoadDirection, previewRoad, previewRoundabout, setBikeLane, snap, upgradeCost, upgradeRoad } from '../sim/CityCommands';
 import type { RoadPlan, Snap } from '../sim/roads/RoadPlanner';
 import { isFreeway, ROAD_TYPES, type RoadTypeId, canBeOneWay } from '../sim/roads/RoadTypes';
 import { roadUnlocked } from '../sim/progress/Progress';
 import { type CursorLabel, type PointerInfo, Tool } from './Tool';
 
-export type RoadMode = 'straight' | 'curve' | 'upgrade' | 'direction' | 'roundabout' | 'grid';
+export type RoadMode = 'straight' | 'curve' | 'upgrade' | 'direction' | 'roundabout' | 'grid' | 'bike';
 
 /** Grid tool limits. */
 const GRID_MIN = 56, GRID_MAX = 160, GRID_MAX_LINES = 32;
@@ -38,8 +38,11 @@ export class RoadTool extends Tool {
 
   /** Build highways raised on piers (overpasses). */
   raised = false;
+  /** Bike lane mode: what clicking a road gives it (0 removes them). */
+  bikeKind: 0 | 1 | 2 = 1;
 
-  configure(type: RoadTypeId, mode: RoadMode, oneway = false, raised = false): void {
+  configure(type: RoadTypeId, mode: RoadMode, oneway = false, raised = false, bikeKind: 0 | 1 | 2 = 1): void {
+    this.bikeKind = bikeKind;
     this.type = type;
     this.mode = mode;
     this.oneway = oneway;
@@ -134,7 +137,7 @@ export class RoadTool extends Tool {
       this.gridMove(p, e);
       return;
     }
-    if (this.mode === 'upgrade' || this.mode === 'direction') {
+    if (this.mode === 'upgrade' || this.mode === 'direction' || this.mode === 'bike') {
       const seg = w.pickSegment(p);
       if (seg !== this.upgradeSeg) {
         if (this.upgradeSeg !== null) w.roads.setHighlight([this.upgradeSeg], 0);
@@ -186,6 +189,17 @@ export class RoadTool extends Tool {
         this.game.flashMoney(-(res.cost ?? 0));
       } else {
         this.game.toastError(res.error ?? 'Cannot change direction');
+      }
+      return;
+    }
+    if (this.mode === 'bike') {
+      if (this.upgradeSeg === null) return;
+      const res = setBikeLane(city, this.upgradeSeg, this.bikeKind);
+      if (res.ok) {
+        this.game.audio.play(this.bikeKind ? 'build' : 'click');
+        this.game.flashMoney(-(res.cost ?? 0));
+      } else {
+        this.game.toastError(res.error ?? 'Cannot add bike lanes here');
       }
       return;
     }
@@ -449,6 +463,15 @@ export class RoadTool extends Tool {
       if (!seg) return { title: 'Traffic direction', lines: ['Click a street or avenue to make it one-way, flip it, or make it two-way again'] };
       const now = seg.oneway === 0 ? 'Two-way' : 'One-way';
       return { title: `${seg.name || 'Road'} · ${now}`, lines: ['Click to change direction · $150'], error: canBeOneWay(seg.type) ? undefined : 'Divided roads stay two-way' };
+    }
+    if (this.mode === 'bike') {
+      const what = BIKE_LANE.name[this.bikeKind];
+      const seg = this.upgradeSeg !== null ? this.game.city!.roads.segments.get(this.upgradeSeg) : undefined;
+      if (!seg) return { title: this.bikeKind ? what : 'Remove bike lanes', lines: [this.bikeKind ? 'Click a road to add lanes along both kerbs' : 'Click a road to take its bike lanes away'] };
+      const now = BIKE_LANE.name[seg.bikeLane];
+      if (!canHaveBikeLane(seg)) return { title: seg.name || 'Road', lines: [], error: seg.ring ? 'Not on a roundabout' : `${ROAD_TYPES[seg.type].name}s have no room for bike lanes` };
+      if (seg.bikeLane === this.bikeKind) return { title: `${seg.name || 'Road'} · ${now}`, lines: [], error: this.bikeKind ? 'Already has these' : 'No bike lanes here' };
+      return { title: `${seg.name || 'Road'} · ${now} → ${this.bikeKind ? what.toLowerCase() : 'none'}`, lines: [this.bikeKind ? `Cost ${formatMoney(bikeLaneCost(seg, this.bikeKind))} · ${Math.round(seg.length)} m` : 'Free'], good: true };
     }
     if (this.mode === 'upgrade') {
       if (this.upgradeSeg === null) return { title: `Upgrade to ${rt.name}`, lines: ['Click a road to convert it'] };

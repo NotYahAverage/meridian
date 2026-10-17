@@ -12,6 +12,8 @@ export const SURF = { asphalt: 0, sidewalk: 1, curb: 2, median: 3, junction: 4, 
 export const TYPE_INDEX = Object.fromEntries(ROAD_TYPE_LIST.map((t, i) => [t.id, i])) as Record<RoadTypeId, number>;
 
 export const ROAD_LIFT = 0.08;
+/** Width of the painted bike lane along each kerb. */
+export const BIKE_STRIP = 1.35;
 export const CURB_H = 0.15;
 const SKIRT_DEPTH = 1.8;
 
@@ -195,7 +197,9 @@ export function buildSegment(
     (giveWay(ctrlB) ? 128 : 0) |
     // Turn arrows: the movements open to traffic arriving at each end (left 1, straight on 2, right 4).
     (turnMask(net, layout, seg, false) << 8) |
-    (turnMask(net, layout, seg, true) << 11);
+    (turnMask(net, layout, seg, true) << 11) |
+    // Bike lanes (painted 1, protected 2).
+    ((seg.bikeLane ?? 0) << 14);
   const len = s1 - s0;
   const bands = profile(rt);
   if (rt.medianKind === 'barrier' && (crossA || crossB)) {
@@ -212,6 +216,22 @@ export function buildSegment(
     }
   } else {
     emitRibbon(out, frames, bands, TYPE_INDEX[seg.type], flags, len, slot);
+  }
+  if (seg.bikeLane === 2 && len > 12) {
+    // Protected lanes: a low kerb between the bikes and the traffic (not across the crossings).
+    const bf = sampleFrames(seg.poly, s0 + 5, s1 - 5, terrain, lift);
+    for (const f of bf) {
+      if (seg.raised) f.h += raisedLift(net, seg, s0 + 5 + f.v);
+      f.v += 5;
+    }
+    const A = rt.asphaltHalf, H = 0.13;
+    const sep: Band[] = [];
+    for (const sd of seg.oneway === 0 ? [1, -1] : [seg.oneway]) {
+      const a = sd * (A - BIKE_STRIP - 0.22), b = sd * (A - BIKE_STRIP);
+      const lo = Math.min(a, b), hi = Math.max(a, b);
+      sep.push({ u0: lo, y0: 0.01, u1: lo, y1: H, kind: SURF.curb }, { u0: lo, y0: H, u1: hi, y1: H, kind: SURF.curb }, { u0: hi, y0: H, u1: hi, y1: 0.01, kind: SURF.curb });
+    }
+    emitRibbon(out, bf, sep, TYPE_INDEX[seg.type], flags, len, slot);
   }
   if (seg.elevated || seg.raised) emitBridge(out, seg.poly, s0, s1, frames, rt, terrain, TYPE_INDEX[seg.type], len, slot);
   if (opts.props !== false) emitSegmentProps(out, seg, rt, s0, s1, terrain, (s) => raisedLift(net, seg, s));

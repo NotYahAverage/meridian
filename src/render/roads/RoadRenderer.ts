@@ -131,7 +131,7 @@ export class RoadRenderer {
       seenSegs.add(s.id);
       const mid = Math.floor(s.poly.count / 2) * 2;
       const ch = chunkOf(s.poly.pts[mid], s.poly.pts[mid + 1]);
-      const sig = `${s.type}|${s.oneway}|${s.elevated ? 1 : 0}|${s.raised ? `R${nodeRaised(this.city.roads, s.a) ? 1 : 0}${nodeRaised(this.city.roads, s.b) ? 1 : 0}` : ''}|${s.trimA.toFixed(2)}|${s.trimB.toFixed(2)}|${this.nodeSig.get(s.a)}|${this.nodeSig.get(s.b)}`;
+      const sig = `${s.type}|${s.oneway}|b${s.bikeLane}|${s.elevated ? 1 : 0}|${s.raised ? `R${nodeRaised(this.city.roads, s.a) ? 1 : 0}${nodeRaised(this.city.roads, s.b) ? 1 : 0}` : ''}|${s.trimA.toFixed(2)}|${s.trimB.toFixed(2)}|${this.nodeSig.get(s.a)}|${this.nodeSig.get(s.b)}`;
       if (this.segSig.get(s.id) !== sig || this.segChunk.get(s.id) !== ch) {
         const old = this.segChunk.get(s.id);
         if (old !== undefined) {

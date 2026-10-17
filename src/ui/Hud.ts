@@ -22,6 +22,7 @@ import { brandMark } from './brand';
 import { DemandPanel } from './DemandPanel';
 import { bindingName } from '../game/Keybinds';
 import type { ThumbSpec } from '../render/Thumbnails';
+import { BIKE_LANE } from '../sim/CityCommands';
 import { ARCHETYPES } from '../sim/buildings/Archetypes';
 
 const SERVICE_ICON: Record<string, string> = {
@@ -302,6 +303,7 @@ export class Toolbar {
   private lastBuild: BuildCategory = 'roads';
   private roadType: RoadTypeId = 'street';
   private roadMode: RoadMode = 'straight';
+  private bikeKind: 0 | 1 | 2 = 1;
   private roadOneway = false;
   private roadRaised = false;
   private zone: Zone = Zone.ResLow;
@@ -470,7 +472,7 @@ export class Toolbar {
   }
 
   private activateRoad(): void {
-    this.game.setTool('road', (t: import('../tools/RoadTool').RoadTool) => t.configure(this.roadType, this.roadMode, this.roadOneway, this.roadRaised));
+    this.game.setTool('road', (t: import('../tools/RoadTool').RoadTool) => t.configure(this.roadType, this.roadMode, this.roadOneway, this.roadRaised, this.bikeKind));
   }
 
   private activateTerraform(): void {
@@ -577,12 +579,33 @@ export class Toolbar {
           this.modeBtn('Grid', 'grid', this.roadMode === 'grid', 'Lay out a grid of streets: click two corners, then drag out the depth', () => { this.roadMode = 'grid'; this.activateRoad(); this.renderTray(); }),
           this.modeBtn('Upgrade', 'upgrade', this.roadMode === 'upgrade', 'Convert existing roads to the selected type', () => { this.roadMode = 'upgrade'; this.activateRoad(); this.renderTray(); }),
           this.modeBtn('Roundabout', 'roundabout', this.roadMode === 'roundabout', 'Click an intersection to turn it into a roundabout', () => { this.roadMode = 'roundabout'; this.activateRoad(); this.renderTray(); }),
+          this.modeBtn('Bike lanes', 'bike', this.roadMode === 'bike', 'Click existing roads to add bike lanes along their kerbs (or take them away)', () => { this.roadMode = 'bike'; this.activateRoad(); this.renderTray(); }),
           this.modeBtn('Direction', 'oneway', this.roadMode === 'direction', 'Click streets and avenues to make them one-way or flip them', () => { this.roadMode = 'direction'; this.activateRoad(); this.renderTray(); }),
           this.modeBtn('One-way', 'oneway', this.roadOneway, 'Draw new streets and avenues as one-way roads (traffic follows the drawing direction)', () => { this.roadOneway = !this.roadOneway; if (this.roadMode !== 'straight' && this.roadMode !== 'curve') this.roadMode = 'straight'; this.activateRoad(); this.renderTray(); }),
           ...(isFreeway(this.roadType) ? [this.modeBtn('Raised', 'upgrade', this.roadRaised, 'Build the highway on piers above the ground: roads underneath pass under it without a junction. Ramps at the ends; about 3 × the cost', () => { this.roadRaised = !this.roadRaised; if (this.roadMode !== 'straight' && this.roadMode !== 'curve') this.roadMode = 'straight'; this.activateRoad(); this.renderTray(); })] : []),
         ),
       );
-      for (const rt of ROAD_TYPE_LIST) {
+      if (this.roadMode === 'bike') {
+        // Bike lanes: what a click adds.
+        const kinds: [0 | 1 | 2, string, string][] = [
+          [1, 'Painted bike lanes', 'A green lane along each kerb. Cheap; makes busy streets fine for most riders.'],
+          [2, 'Protected bike lanes', 'Lanes behind a low kerb. Costs more; draws the most riders, even on main roads.'],
+          [0, 'Remove bike lanes', 'Give the road back to the traffic.'],
+        ];
+        for (const [k, title, desc] of kinds) {
+          items.appendChild(
+            this.card({
+              icon: k ? 'bike' : 'erase',
+              title,
+              sub: k ? `${formatMoney(BIKE_LANE.costPerMeter[k])}/m · upkeep ${formatMoney(BIKE_LANE.upkeepPerMeter[k] * 100)}/100 m/mo` : 'Free',
+              active: this.bikeKind === k,
+              tip: tipBox(title, desc, []),
+              onClick: () => { this.bikeKind = k; this.activateRoad(); this.renderTray(); },
+            }),
+          );
+        }
+      }
+      for (const rt of this.roadMode === 'bike' ? [] : ROAD_TYPE_LIST) {
         const locked = roadUnlocked(rt.id, peak) ? undefined : `Unlocks at ${formatInt(rt.unlockPopulation)}`;
         items.appendChild(
           this.card({

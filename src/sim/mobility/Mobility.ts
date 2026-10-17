@@ -446,7 +446,9 @@ export class Mobility {
         // Cycling: a few brave souls anywhere, many more where the streets feel safe, if it's not too far.
         const za = zones[zh], zb = zones[zj];
         const bikeM = (Math.hypot(za.x - zb.x, za.z - zb.z) * BIKE_DETOUR) / BIKE_SPEED / 60 + 2;
-        const willing = 0.04 + 0.22 * Math.min(safety[zh], safety[zj]);
+        // Lanes draw riders who'd never mix with traffic.
+        const lanes = Math.min(this.laneAt(zones[zh].rep), this.laneAt(zones[zj].rep));
+        const willing = 0.04 + 0.22 * Math.min(safety[zh], safety[zj]) + (lanes === 2 ? 0.14 : lanes === 1 ? 0.06 : 0);
         const pB = bikeM <= MAX_BIKE_MIN && carM < Infinity ? (1 - pWalk) * willing * sigmoid((Math.min(alt, carM + 5) - bikeM * 1.3) / 4) : 0;
         const pT = (1 - pWalk - pB) * (trM < Infinity ? tShare : 0);
         const pC = Math.max(0, 1 - pWalk - pB - pT);
@@ -623,13 +625,21 @@ export class Mobility {
     return r && slot < r.slotBike.length ? r.slotBike[slot] : 0;
   }
 
+  /** Bike lanes on a building's street (0 none, 1 painted, 2 protected). */
+  laneAt(b: Building): number {
+    const seg = b.segId ? this.city.roads.segments.get(b.segId) : undefined;
+    return seg?.bikeLane ?? 0;
+  }
+
   /** How safe a building's street feels to ride on (0–1): quiet streets, not busy main roads. */
   bikeSafety(b: Building): number {
     const seg = b.segId ? this.city.roads.segments.get(b.segId) : undefined;
     if (!seg) return 0;
     const kind: Record<string, number> = { lane: 1, street: 0.9, avenue: 0.45, boulevard: 0.35 };
     const base = kind[seg.type] ?? 0;
-    return base * (1 - 0.6 * Math.min(1, this.city.traffic.ratio(seg.id)));
+    const traffic = base * (1 - 0.6 * Math.min(1, this.city.traffic.ratio(seg.id)));
+    // A lane of their own makes a busy road fine to ride; a protected one, as good as a quiet street.
+    return seg.bikeLane === 2 ? Math.max(traffic, 1) : seg.bikeLane === 1 ? Math.max(traffic, 0.75) : traffic;
   }
 
   /** Access to the city's jobs from a building (0–1: the share of jobs, nearby ones counting most). */

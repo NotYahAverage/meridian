@@ -177,6 +177,37 @@ export function upgradeRoad(city: City, segId: number, type: RoadTypeId): Comman
   return { ok: true, cost };
 }
 
+/** Bike lanes: building cost and monthly upkeep per metre of road (both sides), painted and protected. */
+export const BIKE_LANE = {
+  name: ['No bike lanes', 'Painted bike lanes', 'Protected bike lanes'],
+  costPerMeter: [0, 14, 48],
+  upkeepPerMeter: [0, 0.04, 0.1],
+} as const;
+
+/** Whether a road can have bike lanes (it needs kerbs and sidewalks; not on highways or roundabouts). */
+export function canHaveBikeLane(seg: RoadSegment): boolean {
+  const rt = ROAD_TYPES[seg.type];
+  return rt.sidewalk > 0 && !rt.freeway && !seg.ring;
+}
+
+export function bikeLaneCost(seg: RoadSegment, kind: 0 | 1 | 2): number {
+  return Math.round(seg.length * BIKE_LANE.costPerMeter[kind]);
+}
+
+/** Adds (or changes, or removes) bike lanes on a road. */
+export function setBikeLane(city: City, segId: number, kind: 0 | 1 | 2): CommandResult {
+  const seg = city.roads.segments.get(segId);
+  if (!seg) return err('Road not found');
+  if (!canHaveBikeLane(seg)) return err(seg.ring ? 'Not on a roundabout' : `${ROAD_TYPES[seg.type].name}s have no room for bike lanes`);
+  if (seg.bikeLane === kind) return err(kind ? `Already has ${BIKE_LANE.name[kind].toLowerCase()}` : 'No bike lanes to remove');
+  const cost = bikeLaneCost(seg, kind);
+  if (!city.economy.spend(cost)) return err('Not enough money');
+  city.roads.setBikeLane(segId, kind);
+  city.processRoadChanges();
+  if (kind) city.events.emit('built', { x: (seg.minX + seg.maxX) / 2, z: (seg.minZ + seg.maxZ) / 2, kind: 'road' });
+  return { ok: true, cost };
+}
+
 /** Cycles a road between two-way, one-way (a→b) and one-way (b→a). */
 export function cycleRoadDirection(city: City, segId: number): CommandResult & { oneway?: 0 | 1 | -1 } {
   const seg = city.roads.segments.get(segId);

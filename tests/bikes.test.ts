@@ -89,3 +89,52 @@ describe('cyclists', () => {
     expect(s.walk + s.bike + s.transit + s.car).toBeGreaterThan(0.98);
   });
 });
+
+describe('bike lanes', () => {
+  it('cost money, stay through saving and loading and road splits, and not on highways', async () => {
+    const { setBikeLane, BIKE_LANE } = await import('../src/sim/CityCommands');
+    const { serializeCity, deserializeCity } = await import('../src/sim/save/Serializer');
+    const city = makeCity({ empty: true });
+    city.economy.money = 1e6;
+    city.peakPopulation = 1e5;
+    road(city, 900, 1200, 1300, 1200);
+    road(city, 900, 1500, 1500, 1500, 'highway');
+    const seg = city.roads.nearestSegment(1100, 1200, 5)!.seg;
+    const before = city.economy.money;
+    const r = setBikeLane(city, seg.id, 2);
+    expect(r.ok).toBe(true);
+    expect(before - city.economy.money).toBeCloseTo(seg.length * BIKE_LANE.costPerMeter[2], 0);
+    expect(setBikeLane(city, seg.id, 2).ok).toBe(false);
+    const hw = city.roads.nearestSegment(1200, 1500, 5)!.seg;
+    expect(setBikeLane(city, hw.id, 1).ok).toBe(false);
+    // A new road across splits it: both halves keep their lanes.
+    road(city, 1100, 1100, 1100, 1300);
+    const parts = [...city.roads.segments.values()].filter((s) => s.type === 'street' && Math.abs(s.poly.pts[1] - 1200) < 1 && Math.abs(s.poly.pts[s.poly.pts.length - 1] - 1200) < 1);
+    expect(parts.length).toBe(2);
+    for (const p of parts) expect(p.bikeLane).toBe(2);
+    const loaded = deserializeCity(JSON.parse(JSON.stringify(serializeCity(city))), { flatTerrain: 10 });
+    expect([...loaded.roads.segments.values()].filter((s) => s.bikeLane === 2).length).toBe(2);
+    // Taking them away is free.
+    const m = city.economy.money;
+    expect(setBikeLane(city, parts[0].id, 0).ok).toBe(true);
+    expect(city.economy.money).toBe(m);
+  });
+
+  it('make streets feel safe to ride, and bike routes use them', async () => {
+    const { setBikeLane } = await import('../src/sim/CityCommands');
+    const city = makeCity({ empty: true, unlimited: true });
+    // Two parallel avenues; one gets protected lanes.
+    road(city, 900, 1200, 1500, 1200, 'avenue');
+    road(city, 900, 1300, 1500, 1300, 'avenue');
+    road(city, 900, 1200, 900, 1300);
+    road(city, 1500, 1200, 1500, 1300);
+    const a = city.roads.nearestSegment(1200, 1300, 5)!.seg;
+    const fake = { segId: a.id } as never;
+    const plain = city.mobility.bikeSafety(fake);
+    setBikeLane(city, a.id, 2);
+    expect(city.mobility.bikeSafety(fake)).toBeGreaterThan(plain);
+    expect(city.mobility.bikeSafety(fake)).toBe(1);
+    const r = city.live.bikeRoute(pt(city, 905, 1250), pt(city, 1495, 1250))!;
+    expect(r.legs.some((l) => l.segId === a.id)).toBe(true);
+  });
+});

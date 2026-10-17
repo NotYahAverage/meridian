@@ -70,7 +70,7 @@ export interface SaveData {
   };
   roads: {
     nodes: [number, number, number, 0 | 1][];
-    segments: [number, number, number, RoadTypeId, number, number, string, number, (0 | 1)?, (0 | 1 | -1)?, (0 | 1)?, (0 | 1)?][];
+    segments: [number, number, number, RoadTypeId, number, number, string, number, (0 | 1)?, (0 | 1 | -1)?, (0 | 1)?, (0 | 1)?, (0 | 1 | 2)?][];
     roundabouts?: [number, number, number, number][];
     nextNodeId: number;
     nextSegId: number;
@@ -161,7 +161,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
   const nodes: SaveData['roads']['nodes'] = [];
   for (const n of city.roads.nodes.values()) nodes.push([n.id, r3(n.x), r3(n.z), n.outside ? 1 : 0]);
   const segments: SaveData['roads']['segments'] = [];
-  for (const s of city.roads.segments.values()) segments.push(s.elevated || s.oneway || s.ring || s.raised ? [s.id, s.a, s.b, s.type, r3(s.cx), r3(s.cz), s.name, s.builtTick, s.elevated ? 1 : 0, s.oneway, s.ring ? 1 : 0, s.raised ? 1 : 0] : [s.id, s.a, s.b, s.type, r3(s.cx), r3(s.cz), s.name, s.builtTick]);
+  for (const s of city.roads.segments.values()) segments.push(s.elevated || s.oneway || s.ring || s.raised || s.bikeLane ? [s.id, s.a, s.b, s.type, r3(s.cx), r3(s.cz), s.name, s.builtTick, s.elevated ? 1 : 0, s.oneway, s.ring ? 1 : 0, s.raised ? 1 : 0, s.bikeLane] : [s.id, s.a, s.b, s.type, r3(s.cx), r3(s.cz), s.name, s.builtTick]);
   const buildings: BuildingRecord[] = [];
   for (const b of city.buildings.all.values()) {
     buildings.push([
@@ -322,8 +322,8 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
 
   // Roads
   for (const [id, x, z, outside] of data.roads.nodes) city.roads.addNode(x, z, outside === 1, id);
-  for (const [id, a, b, type, cx, cz, name, built, elevated, oneway, ring, raised] of data.roads.segments) {
-    city.roads.addSegment(a, b, type, { id, ctrl: { x: cx, z: cz }, name, builtTick: built, elevated: elevated === 1, oneway: oneway ?? 0, ring: ring === 1, raised: raised === 1 });
+  for (const [id, a, b, type, cx, cz, name, built, elevated, oneway, ring, raised, bikeLane] of data.roads.segments) {
+    city.roads.addSegment(a, b, type, { id, ctrl: { x: cx, z: cz }, name, builtTick: built, elevated: elevated === 1, oneway: oneway ?? 0, ring: ring === 1, raised: raised === 1, bikeLane: bikeLane ?? 0 });
     city.namer.markUsed(name);
   }
   for (const [id, x, z, r] of data.roads.roundabouts ?? []) {
