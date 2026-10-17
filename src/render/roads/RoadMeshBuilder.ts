@@ -401,9 +401,15 @@ function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, ne
     inner: [number, number][];
     outer: [number, number][];
     sidewalk: boolean;
+    h0: number;
+    h1: number;
   }
   const corners: Corner[] = [];
   const types = arms.map((a) => ROAD_TYPES[net.getSegment(a.segId).type]);
+  // Roads are level across their width at their centre-line height, so the junction meets each one at that
+  // height (on a slope, the ground at the corners would leave a step), blending between arms round each corner.
+  const hEnd = arms.map((a) => hAt(terrain, a.px, a.pz));
+  const bh: number[] = [];
   const pedestrians = signalled && servesPedestrians(layout, lay);
   for (let i = 0; i < n; i++) {
     const a = arms[i];
@@ -416,6 +422,7 @@ function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, ne
     const left = [a.px - ra.x * Ai, a.pz - ra.z * Ai] as [number, number];
     const right = [a.px + ra.x * Ai, a.pz + ra.z * Ai] as [number, number];
     boundary.push(left, right);
+    bh.push(hEnd[i], hEnd[i]);
     const nextLeft = [b.px - rb.x * Aj, b.pz - rb.z * Aj] as [number, number];
     const ctrlFor = (p: [number, number], q: [number, number]): [number, number] => {
       const hit = lineIntersect(p[0], p[1], a.tx, a.tz, q[0], q[1], b.tx, b.tz);
@@ -425,7 +432,10 @@ function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, ne
     const c = ctrlFor(right, nextLeft);
     const inner: [number, number][] = [];
     for (let k = 0; k <= N; k++) inner.push(bez(right[0], right[1], c[0], c[1], nextLeft[0], nextLeft[1], k / N));
-    for (let k = 1; k < N; k++) boundary.push(inner[k]);
+    for (let k = 1; k < N; k++) {
+      boundary.push(inner[k]);
+      bh.push(hEnd[i] + (hEnd[j] - hEnd[i]) * (k / N));
+    }
     // Paved where both roads have sidewalks, and on every corner of a junction with lights where people cross.
     const sw = (types[i].sidewalk > 0 && types[j].sidewalk > 0) || (signalled && pedestrians);
     const oRight = [a.px + ra.x * Wi, a.pz + ra.z * Wi] as [number, number];
@@ -433,13 +443,13 @@ function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, ne
     const oc = ctrlFor(oRight, oLeft);
     const outer: [number, number][] = [];
     for (let k = 0; k <= N; k++) outer.push(bez(oRight[0], oRight[1], oc[0], oc[1], oLeft[0], oLeft[1], k / N));
-    corners.push({ inner, outer, sidewalk: sw });
+    corners.push({ inner, outer, sidewalk: sw, h0: hEnd[i], h1: hEnd[j] });
   }
   // Asphalt fan.
-  const ch = hAt(terrain, cx, cz);
+  const ch = hEnd.reduce((a, b) => a + b, 0) / n;
   const center = out.vert(cx, ch, cz, 0, 1, 0, 0, 0, SURF.junction, 0, 0, 0, -1);
   const first = out.vertexCount;
-  for (const [x, z] of boundary) out.vert(x, hAt(terrain, x, z), z, 0, 1, 0, 0, 0, SURF.junction, 0, 0, 0, -1);
+  boundary.forEach(([x, z], k) => out.vert(x, bh[k], z, 0, 1, 0, 0, 0, SURF.junction, 0, 0, 0, -1));
   const m = boundary.length;
   for (let k = 0; k < m; k++) out.idx.push(center, first + ((k + 1) % m), first + k);
 
@@ -451,8 +461,8 @@ function buildJunction(out: RoadGeo, lay: NodeLayout, cx: number, cz: number, ne
     for (let k = 0; k <= N; k++) {
       const [ix, iz] = c.inner[k];
       const [ox, oz] = c.outer[k];
-      const hi = hAt(terrain, ix, iz);
-      const ho = hAt(terrain, ox, oz);
+      const hi = c.h0 + (c.h1 - c.h0) * (k / N);
+      const ho = hi;
       // Outward horizontal direction for curb/skirt normals.
       const dx = ox - ix, dz = oz - iz;
       const dl = Math.hypot(dx, dz) || 1;
@@ -530,7 +540,8 @@ function buildEndCap(out: RoadGeo, lay: NodeLayout, net: RoadNetwork, terrain: T
   const first = out.vertexCount;
   for (let k = 0; k <= N; k++) {
     const [x, z] = pt(A, (k / N) * Math.PI);
-    out.vert(x, hAt(terrain, x, z), z, 0, 1, 0, 0, 0, SURF.junction, 0, 0, 0, -1);
+    // Level with the road's end (it's level across its width).
+    out.vert(x, ch, z, 0, 1, 0, 0, 0, SURF.junction, 0, 0, 0, -1);
   }
   for (let k = 0; k < N; k++) out.idx.push(center, first + k + 1, first + k);
   const sw = rt.sidewalk > 0;
@@ -541,8 +552,8 @@ function buildEndCap(out: RoadGeo, lay: NodeLayout, net: RoadNetwork, terrain: T
     const phi = (k / N) * Math.PI;
     const [ix, iz] = pt(A, phi);
     const [ox, oz] = pt(W, phi);
-    const hi = hAt(terrain, ix, iz);
-    const ho = hAt(terrain, ox, oz);
+    const hi = ch;
+    const ho = ch;
     const nx = (ox - ix) / (W - A || 1), nz = (oz - iz) / (W - A || 1);
     out.vert(ix, hi, iz, -nx, 0, -nz, 0, k, SURF.curb, 0, 0, 0, -1);
     out.vert(ix, hi + (sw ? CURB_H : 0), iz, -nx, 0, -nz, 0, k, SURF.curb, 0, 0, 0, -1);

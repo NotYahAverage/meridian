@@ -46,6 +46,10 @@ import { ZoneTool } from '../tools/ZoneTool';
 import { BusLineTool, BusStopTool, MetroLineTool } from '../tools/TransitTools';
 import { UI } from '../ui/UI';
 import { buildDemoCity } from './demo';
+
+/** The daylight hours the daytime-only setting loops through (sunrise is at 6, sunset at 18). */
+const DAY_START = 6.25;
+const DAY_END = 17.75;
 import { Input } from './Input';
 
 export type GameState = 'boot' | 'menu' | 'playing';
@@ -823,8 +827,11 @@ export class Game {
         n++;
       }
       if (this.tickAcc >= TICK_SECONDS) this.tickAcc = Math.min(this.tickAcc, TICK_SECONDS);
-      if (this.settings.dayNight) this.hour = (this.hour + (dt * mult * 24) / DAY_CYCLE_SECONDS) % 24;
-      else this.hour = 13;
+      if (this.settings.dayNight) {
+        this.hour = (this.hour + (dt * mult * 24) / DAY_CYCLE_SECONDS) % 24;
+        // Daytime only: just after sunrise to just before sunset, round and round.
+        if (this.settings.dayOnly && (this.hour < DAY_START || this.hour >= DAY_END)) this.hour = DAY_START + ((((this.hour - DAY_START) % 24) + 24) % 24) % (DAY_END - DAY_START);
+      } else this.hour = 13;
       this.autosaveTimer -= dt;
       if (this.autosaveTimer <= 0) {
         this.autosaveTimer = AUTOSAVE_SECONDS;

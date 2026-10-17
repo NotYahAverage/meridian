@@ -310,7 +310,10 @@ export class SettingsDialog extends Modal {
       h('label', { class: 'set-row' }, h('span', null, 'Fullscreen (F11)'), fsBox),
       sel('Quality', s.quality, [['low', 'Low (fast)'], ['medium', 'Medium'], ['high', 'High']], (v) => (s.quality = v as typeof s.quality)),
       sel('Interface scale', String(s.uiScale ?? 0), [['0', 'Automatic'], ['1', '100%'], ['1.15', '115%'], ['1.25', '125%'], ['1.5', '150%']], (v) => (s.uiScale = Number(v))),
-      chk('Day & night cycle', s.dayNight, (v) => (s.dayNight = v)),
+      sel('Time of day', !s.dayNight ? 'noon' : s.dayOnly ? 'day' : 'cycle', [['cycle', 'Day & night'], ['day', 'Daytime only (sunrise to sunset, on a loop)'], ['noon', 'Always midday']], (v) => {
+        s.dayNight = v !== 'noon';
+        s.dayOnly = v === 'day';
+      }),
       chk('Problem icons over buildings', s.showIcons, (v) => (s.showIcons = v)),
       rng('Traffic density', s.trafficDensity, (v) => (s.trafficDensity = v), 0.25, 1.5, 0.05),
       sel('Large city mode', s.largeCityMode ?? 'auto', [['auto', `Automatic (from ${LARGE_CITY_POPULATION.toLocaleString('en-US')} residents)`], ['on', 'On'], ['off', 'Off']], (v) => (s.largeCityMode = v as 'auto' | 'on' | 'off')),

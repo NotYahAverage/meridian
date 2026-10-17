@@ -143,6 +143,8 @@ export const platform = {
 export interface Settings {
   quality: 'low' | 'medium' | 'high';
   dayNight: boolean;
+  /** With the day & night cycle on: only the daylight hours, from sunrise to sunset, on a loop. */
+  dayOnly?: boolean;
   edgeScroll: boolean;
   invertRotate: boolean;
   /** Mouse look sensitivity, 0.4–2. */
@@ -180,6 +182,7 @@ export const LARGE_CITY_POPULATION = 40_000;
 export const DEFAULT_SETTINGS: Settings = {
   quality: 'high',
   dayNight: true,
+  dayOnly: false,
   edgeScroll: false,
   invertRotate: false,
   lookSpeed: 1,
