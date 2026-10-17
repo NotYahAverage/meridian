@@ -734,7 +734,8 @@ function tower(g: GeoBuilder, b: GenInput, r: Rng, k: Kit, use: TowerUse): void 
     const n = Math.max(3, Math.round(pw / 4.5));
     for (let i = 0; i <= n; i++) {
       const cx = px0 + 0.4 + ((pw - 0.8) * i) / n;
-      g.box(cx - 0.4, pz0, cx + 0.4, pz0 + 0.8, 0, podiumH, { color: hex(k.look.baseColor), pattern: P.STONE, seed: s, fh: 30 }, null);
+      // Up to the arcade ceiling (above it they'd share the podium wall's faces and flicker through it).
+      g.box(cx - 0.4, pz0, cx + 0.4, pz0 + 0.8, 0, 4.2, { color: hex(k.look.baseColor), pattern: P.STONE, seed: s, fh: 30 }, null);
     }
     g.box(px0, pz0, px1, pz1, 4.2, podiumH, k.base(4.2), null);
     g.quad([px0, 4.2, pz0], [px1, 4.2, pz0], [px1, 4.2, pz0 + 2.8], [px0, 4.2, pz0 + 2.8], [0, -1, 0], k.trim, [[0, 0], [1, 0], [1, 1], [0, 1]]);
