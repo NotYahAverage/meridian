@@ -563,6 +563,8 @@ function dailyBuildings(city: City): void {
       h += 6 * grids.fire[ci] + parkWeight(b) * (parks === null ? grids.park[ci] : lerp(grids.park[ci], parks, mobEffect)) + policyMood(b);
       // What became of the street's request for bike lanes.
       h += city.bikeRequests.moodOf(b);
+      // Cycling to work: cheap, healthy, reliable.
+      if (mobEffect > 0) h += mobEffect * 5 * (mob.modesOf(b)?.bike ?? 0);
       h += (lv - 0.35) * 30;
       h -= lvMap.pollution[ci] * 38 + lvMap.noise[ci] * 16;
       h -= (tax.residential - 9) * 1.6;

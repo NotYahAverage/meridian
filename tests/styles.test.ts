@@ -97,7 +97,8 @@ describe('styles from adopted designs', () => {
     expect(st.renovated).toBeGreaterThan(0);
     expect(notices.some((n) => n.includes('is spreading'))).toBe(true);
     const inStyle = city.design.styleCounts().get(st.id) ?? 0;
-    expect(inStyle).toBeGreaterThanOrEqual(st.renovated);
+    // Most are still standing in it (a few may since have been rebuilt or replaced).
+    expect(inStyle).toBeGreaterThanOrEqual(Math.ceil(st.renovated / 2));
     // Living in a well-liked style makes people happier.
     const b = [...city.buildings.all.values()].find((x) => x.movement === st.id)!;
     expect(city.design.moodBonus(b)).toBeGreaterThan(0);

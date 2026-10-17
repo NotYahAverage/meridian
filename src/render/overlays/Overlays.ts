@@ -33,7 +33,8 @@ export type OverlayId =
   | 'walking'
   | 'commute'
   | 'shoppers'
-  | 'access';
+  | 'access'
+  | 'cycling';
 
 export const OVERLAYS: { id: OverlayId; label: string; group: string; legend: [string, string] }[] = [
   { id: 'traffic', label: 'Traffic', group: 'City', legend: ['Free flowing', 'Gridlock'] },
@@ -45,6 +46,7 @@ export const OVERLAYS: { id: OverlayId; label: string; group: string; legend: [s
   { id: 'commute', label: 'Commutes', group: 'City', legend: ['Long', 'Short'] },
   { id: 'access', label: 'Jobs in reach', group: 'City', legend: ['Few', 'Many'] },
   { id: 'shoppers', label: 'Shop customers', group: 'City', legend: ['Quiet', 'Busy'] },
+  { id: 'cycling', label: 'Cycling', group: 'City', legend: ['Lanes wanted', 'Bike lanes'] },
   { id: 'pollution', label: 'Pollution', group: 'Environment', legend: ['Clean', 'Polluted'] },
   { id: 'noise', label: 'Noise', group: 'Environment', legend: ['Quiet', 'Loud'] },
   { id: 'power', label: 'Electricity', group: 'Utilities', legend: ['No power', 'Powered'] },
@@ -99,13 +101,14 @@ export class Overlays {
     const bldMode = mode === 'power' || mode === 'water' || mode === 'happiness' || mode === 'commute' || mode === 'shoppers';
     this.buildings.uniforms.uBldOverlay.value = bldMode ? 1 : 0;
     this.buildings.overlayValue = bldMode ? this.buildingValue(mode) : null;
-    this.roads.uniforms.uTrafficOverlay.value = mode === 'traffic' ? 1 : 0;
+    this.roads.uniforms.uTrafficOverlay.value = mode === 'traffic' ? 1 : mode === 'cycling' ? 2 : 0;
     this.walk.visible = mode === 'walking';
     this.walkFrom.version = -1;
     globalUniforms.uDesat.value = mode === 'none' ? 0 : bldMode ? 0.4 : 0.75;
-    this.terrain.uniforms.uOverlayOpacity.value = mode === 'none' || mode === 'traffic' || bldMode ? 0 : 0.78;
+    this.terrain.uniforms.uOverlayOpacity.value = mode === 'none' || mode === 'traffic' || mode === 'cycling' || bldMode ? 0 : 0.78;
     this.buildings.updateState(0, true);
     if (mode === 'traffic') this.roads.updateTraffic();
+    if (mode === 'cycling') this.roads.updateCycling();
   }
 
   private buildingValue(mode: OverlayId): (b: Building) => number {
@@ -159,6 +162,10 @@ export class Overlays {
     this.timer = 1;
     if (this.mode === 'traffic') {
       this.roads.updateTraffic();
+      return;
+    }
+    if (this.mode === 'cycling') {
+      this.roads.updateCycling();
       return;
     }
     if (this.mode === 'power' || this.mode === 'water' || this.mode === 'happiness') return;
@@ -378,6 +385,7 @@ export class Overlays {
       case 'districts': return 'Named districts painted with the District tool.';
       case 'commute': return 'Homes by how long their residents take to get to work, walking, riding or driving. Mix jobs and homes, add crossings and transit, or ease congestion to shorten them.';
       case 'access': return 'How many jobs each neighbourhood can reach quickly (nearby jobs count most), against the city\u2019s average. Well-connected places are worth more.';
+      case 'cycling': return 'Roads by cycling: green where there are bike lanes (dark for protected), pale to red where people along them want lanes, amber where they have asked. Use Roads → Bike lanes to add them.';
       case 'shoppers': return 'Shops by customers per worker. Shops with homes within a walk, on streets people can reach, do best.';
       case 'walking': return 'Sidewalks and crossings; red edges are roads with no sidewalk, which people can’t walk along or cross. The shading shows how far you can walk from the cursor in 5, 10 and 15 minutes.';
       case 'transit': return 'Bus lines and how far people walk to a stop. Commuters ride when the bus is competitive with driving.';

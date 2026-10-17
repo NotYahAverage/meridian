@@ -218,6 +218,31 @@ export class RoadRenderer {
     this.segTex.needsUpdate = true;
   }
 
+  /**
+   * The cycling layer, per road (blue channel): 0 not for bikes; 1–200 how much the people
+   * along it want lanes (no lanes yet); 210 they've asked; 230 painted lanes; 250 protected.
+   */
+  updateCycling(): void {
+    const city = this.city;
+    for (const [segId, slot] of this.slots) {
+      const seg = city.roads.segments.get(segId);
+      let code = 0;
+      if (seg && ROAD_TYPES[seg.type].sidewalk > 0 && !ROAD_TYPES[seg.type].freeway && !seg.ring) {
+        if (seg.bikeLane === 2) code = 250;
+        else if (seg.bikeLane === 1) code = 230;
+        else if (city.bikeRequests.forSegment(segId)) code = 210;
+        else {
+          let residents = 0;
+          for (const b of city.buildings.onSegment(segId)) residents += b.residents;
+          const safety = city.mobility.bikeSafety({ segId } as never);
+          code = 1 + Math.round(Math.min(1, (residents * (1 - safety)) / 400) * 199);
+        }
+      }
+      this.segData[slot * 4 + 2] = code;
+    }
+    this.segTex.needsUpdate = true;
+  }
+
   setHighlight(segIds: Iterable<number>, code: number): void {
     for (const id of segIds) {
       const s = this.slots.get(id);

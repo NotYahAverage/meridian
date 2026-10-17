@@ -311,7 +311,17 @@ float stripes(float x) {
   }
   col = mix(col, m_desat(col, 0.8) * 0.85, uDesat);
   // Traffic overlay and highlights.
-  if (uTrafficOverlay > 0.5 && (kind == 0)) {
+  if (uTrafficOverlay > 1.5 && (kind == 0)) {
+    // Cycling: greens for lanes, pale to red where people want them, amber where they've asked.
+    float code = floor(vSeg.b * 255.0 + 0.5);
+    vec3 cc = vec3(0.35);
+    if (code > 245.0) cc = vec3(0.05, 0.62, 0.3);
+    else if (code > 225.0) cc = vec3(0.45, 0.85, 0.45);
+    else if (code > 205.0) cc = vec3(1.0, 0.62, 0.1);
+    else if (code > 0.5) cc = mix(vec3(0.95, 0.92, 0.75), vec3(0.9, 0.15, 0.12), smoothstep(0.0, 1.0, (code - 1.0) / 199.0));
+    col = mix(col, m_srgb(cc), code > 0.5 ? 0.85 : 0.5);
+    if (code > 205.0) r_emis += m_srgb(cc) * 0.25;
+  } else if (uTrafficOverlay > 0.5 && (kind == 0)) {
     float r = vSeg.r * 2.0;
     vec3 ramp = mix(vec3(0.15, 0.8, 0.35), vec3(0.98, 0.85, 0.2), smoothstep(0.25, 0.75, r));
     ramp = mix(ramp, vec3(0.95, 0.35, 0.12), smoothstep(0.75, 1.0, r));
