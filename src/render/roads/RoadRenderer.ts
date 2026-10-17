@@ -60,6 +60,8 @@ export class RoadRenderer {
   private walkList: WalkSignalHead[] = [];
   private walkListVersion = -1;
   propsVersion = 0;
+  /** Chunks whose props changed since the prop renderer last looked. */
+  readonly changedProps = new Set<number>();
 
   constructor(private city: City) {
     this.segTex = new THREE.DataTexture(this.segData, SEG_TEX, SEG_TEX, THREE.RGBAFormat);
@@ -199,6 +201,7 @@ export class RoadRenderer {
       this.group.add(mesh);
     }
     this.chunkProps.set(index, g.props);
+    this.changedProps.add(index);
     this.chunkSignals.set(index, g.signals);
     this.chunkWalkSignals.set(index, g.walkSignals);
     this.propsVersion++;

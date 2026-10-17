@@ -160,7 +160,13 @@ The **Goals** tab of City Info also tracks 16 achievements for the long game (br
 - **Economy**: taxes per household and per worker scale with land value and building level. Road and service upkeep accrue every hour, construction is paid up front, and loans are available.
 - **Services** cover a radius that fades toward the edge. A service's effectiveness drops when more residents are in range than its capacity. Fire risk, crime, sickness, garbage and park access all feed happiness, land value and building upgrades.
 - **Land value, pollution and noise** live on a 16 m grid and update daily from parks, services, shops, water views, industry and road noise.
-- **Simulation level of detail**: systems run at different rates (every hour, every 6 hours, daily, monthly). Traffic assignment is incremental, and vehicles far from the camera update less often.
+- **Simulation level of detail**:
+  - Systems run at different rates (every hour, every 6 hours, daily, monthly), and traffic assignment is incremental.
+  - Vehicles far from the camera update every few frames, and those out of sight less often still. Their catch-up steps are limited, so they keep time.
+  - People on foot only exist around the camera, and distant ones use a simpler figure.
+  - After a road edit, the walking network is rebuilt a few milliseconds per frame, using the old one until the new one is ready.
+  - New buildings' geometry is generated a few at a time.
+  - Props are only rebuilt for the chunks that changed.
 
 ## Architecture
 

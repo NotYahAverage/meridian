@@ -104,8 +104,6 @@ export class PropRenderer {
   private furnitureChunks = new Map<number, Bucket[]>();
   private furnitureKey = '';
   private furnitureTimer = 0;
-  private lastRoadProps = -1;
-  private lastBldProps = -1;
   private lastKey = '';
   private needAssemble = true;
   private frustum = new THREE.Frustum();
@@ -148,18 +146,21 @@ export class PropRenderer {
   private collectDirty(): void {
     for (const ch of this.city.nature.dirtyChunks) this.dirty.add(ch);
     this.city.nature.dirtyChunks.clear();
-    if (this.roads.propsVersion !== this.lastRoadProps) {
-      this.lastRoadProps = this.roads.propsVersion;
-      for (const ch of this.roads.chunkProps.keys()) this.dirty.add(ch);
-    }
-    if (this.buildings.propsVersion !== this.lastBldProps) {
-      this.lastBldProps = this.buildings.propsVersion;
-      for (const ch of this.buildings.chunkProps.keys()) this.dirty.add(ch);
-    }
+    // Only the chunks whose road or building props actually changed.
+    for (const ch of this.roads.changedProps) this.dirty.add(ch);
+    this.roads.changedProps.clear();
+    for (const ch of this.buildings.changedProps) this.dirty.add(ch);
+    this.buildings.changedProps.clear();
   }
 
   private buildChunk(ch: number): ChunkProps {
-    const cp = emptyChunk();
+    // Reuse the chunk's own buffers (rebuilds are frequent while the city grows).
+    const cp = this.chunks[ch] ?? emptyChunk();
+    for (const b of cp.trees) b.n = 0;
+    for (const b of cp.cars) b.n = 0;
+    cp.lights.n = cp.signals.n = cp.walkPoles.n = cp.cranes.n = cp.towers.n = 0;
+    cp.rotors.length = 0;
+    cp.smoke.length = 0;
     const nat = this.city.nature;
     const terrain = this.city.terrain;
     // Natural and planted trees (saplings grow to full size).
@@ -250,12 +251,13 @@ export class PropRenderer {
   update(camera: THREE.PerspectiveCamera, dt: number): void {
     this.collectDirty();
     this.refreshFurniture(dt);
-    let rebuilt = 0;
+    // A few milliseconds of chunk rebuilds a frame (the rest wait for the next).
+    const t0 = performance.now();
     for (const ch of this.dirty) {
       this.chunks[ch] = this.buildChunk(ch);
       this.dirty.delete(ch);
       this.needAssemble = true;
-      if (++rebuilt >= 12) break;
+      if (performance.now() - t0 > 3) break;
     }
     this.projScreen.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this.frustum.setFromProjectionMatrix(this.projScreen);

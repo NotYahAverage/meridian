@@ -28,6 +28,10 @@ function town(): City {
   return city;
 }
 
+type CpuUsage = { user: number; system: number };
+/** Node's process CPU counter (the project has no Node typings). */
+const cpu = (globalThis as unknown as { process: { cpuUsage(prev?: CpuUsage): CpuUsage } }).process;
+
 interface Run {
   frames: number;
   maxCount: number;
@@ -49,9 +53,11 @@ function run(city: City, hour: number, seconds: number, opts: { density?: number
   const out: Run = { frames: 0, maxCount: 0, near: 0, pairs: 0, offRoad: 0, checked: 0, ms: 0 };
   for (let f = 0; f < seconds / dt; f++) {
     city.signals.update(dt);
-    const t0 = performance.now();
+    // CPU time of this process (other test files running alongside don't inflate it).
+    const t0 = cpu.cpuUsage();
     ped.update(dt, focus, camera, 200, hour);
-    out.ms += performance.now() - t0;
+    const used = cpu.cpuUsage(t0);
+    out.ms += (used.user + used.system) / 1000;
     out.frames++;
     out.maxCount = Math.max(out.maxCount, ped.count);
     if (!opts.check || f % 15) continue;

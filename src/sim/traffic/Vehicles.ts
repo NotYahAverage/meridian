@@ -237,6 +237,8 @@ export class Vehicles {
   lodX = 0;
   lodZ = 0;
   lodRadius = 900;
+  /** Vehicles further than this (along either axis) from the focus aren't drawn. */
+  hiddenBeyond = 1600;
   /** Reroutes allowed this frame. */
   private rerouteBudget = 0;
   /** Finds a new way to a vehicle's destination from where it is, with that driver's knowledge of the roads. */
@@ -965,19 +967,26 @@ export class Vehicles {
     this.frame++;
     this.rerouteBudget = 3;
     const lodR2 = this.lodRadius * this.lodRadius;
+    // Distant vehicles skip frames, but never so many that a catch-up step exceeds half a second (no lost time).
+    const farMask = dt * 4 <= 0.5 ? 3 : dt * 2 <= 0.5 ? 1 : 0;
+    // (Up to 0.8 s for those out of sight, where nobody sees the coarser steps.)
+    const hideMask = dt * 8 <= 0.8 ? 7 : dt * 4 <= 0.8 ? 3 : farMask;
     for (let i = 0; i < this.max; i++) {
       if (!this.active[i]) continue;
       let step = dt + this.dtAcc[i];
       const dx = this.x[i] - this.lodX;
       const dz = this.z[i] - this.lodZ;
       const far = dx * dx + dz * dz > lodR2;
-      if (far && ((this.frame + i) & 3) !== 0) {
+      // Out of sight altogether (beyond the drawn area): less often still.
+      const hidden = far && Math.max(Math.abs(dx), Math.abs(dz)) > this.hiddenBeyond;
+      if (far && ((this.frame + i) & (hidden ? hideMask : farMask)) !== 0) {
         this.dtAcc[i] = step;
         continue;
       }
       this.dtAcc[i] = 0;
       // Distant vehicles move in coarser steps (but keep up).
-      if (step > (far ? 0.5 : 0.25)) step = far ? 0.5 : 0.25;
+      const cap = hidden ? 0.8 : far ? 0.5 : 0.25;
+      if (step > cap) step = cap;
       if (this.park[i] === Park.PullingIn || this.park[i] === Park.Parked) this.updatePark(i, step);
       else if (this.turning[i]) this.updateTurn(i, step);
       else this.updateDrive(i, step);
@@ -1051,12 +1060,15 @@ export class Vehicles {
     // Room on the other side (don't block the junction).
     const nkey = this.key(nseg.id, next.dir, this.nextLane[i]);
     const tailList = this.lanes.get(nkey);
-    const need = (this.incoming.get(nkey) ?? 0) - (this.reserved[i] === nkey ? VEHICLE_LENGTH[this.model[i]] + 2 : 0) + VEHICLE_LENGTH[this.model[i]] + 2;
+    // Room for the car clear of the crosswalk on the far side too (never stopped across it).
+    const cwOut = hasCrosswalk(this.layout, node, nseg) ? CROSSWALK_INSET + 1.8 : 0;
+    const need = (this.incoming.get(nkey) ?? 0) - (this.reserved[i] === nkey ? VEHICLE_LENGTH[this.model[i]] + 2 : 0) + VEHICLE_LENGTH[this.model[i]] + 2 + cwOut;
     if (tailList && tailList.length) {
       const tail = tailList[0];
       // A standing queue blocks the way out; traffic driving off doesn't.
       const space = this.d[tail] - this.half(tail) - this.entryTrim(nseg, next);
-      if (space < need - (this.speed[tail] > 2 ? Math.min(need - 2, this.speed[tail] * 2) : 0)) return Held.Full;
+      // (Where there's a crosswalk beyond, only with room to stop clear of it whatever happens ahead.)
+      if (space < need - (this.speed[tail] > 2 && !cwOut ? Math.min(need - 2, this.speed[tail] * 2) : 0)) return Held.Full;
     } else if (need > nseg.length - nseg.trimA - nseg.trimB + VEHICLE_LENGTH[this.model[i]] + 4) return Held.Full;
     const J = this.junction(node);
     const lay = this.layout.get(node);
@@ -1823,17 +1835,33 @@ export class Vehicles {
 
   // ── Questions ─────────────────────────────────────────────────────────────
 
-  /** Removes vehicles whose remaining route uses a removed segment. */
+  /**
+   * A road has gone: drivers whose way used it find another from where they are (if there
+   * is one); those on it, or with no other way, leave the map.
+   */
   onSegmentRemoved(segId: number): void {
     for (let i = 0; i < this.max; i++) {
       if (!this.active[i]) continue;
       const r = this.routes[i]!;
-      for (let k = this.leg[i]; k < r.legs.length; k++) {
-        if (r.legs[k].segId === segId) {
-          this.despawn(i);
-          break;
-        }
+      const k = this.leg[i];
+      let uses = false;
+      for (let j = k; j < r.legs.length && !uses; j++) if (r.legs[j].segId === segId) uses = true;
+      if (!uses) continue;
+      if (this.turning[i] || this.committed[i] || r.legs[k].segId === segId || r.legs[r.legs.length - 1].segId === segId || !this.replan) {
+        this.despawn(i);
+        continue;
       }
+      const next = this.replan(i, r, k, this.d[i], (id) => (id === segId ? 1e6 : this.knownCongestion(id)));
+      if (!next || next.legs.length < 2 || next.legs.some((l) => l.segId === segId)) {
+        this.despawn(i);
+        continue;
+      }
+      const legs = r.legs.slice(0, k).concat(next.legs);
+      legs[k] = r.legs[k];
+      this.routes[i] = { legs, cost: next.cost, length: next.length };
+      this.planKey[i] = -1;
+      this.gateLeg[i] = -1;
+      this.rerouted++;
     }
   }
 

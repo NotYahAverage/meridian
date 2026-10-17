@@ -162,7 +162,12 @@ export class Mobility {
 
   private *cycle(): Generator<void, void, void> {
     const city = this.city;
-    city.walk.ensure();
+    // Wait (a while) for a rebuild of the walking network in progress, rather than use the old one.
+    for (let waits = 0; city.walk.stale && waits < 120; waits++) {
+      city.walk.ensure();
+      yield;
+    }
+    city.walk.finish();
     const r = this.buildZones();
     yield;
     // Walking times only change with the roads: keep last time's, and walk out only from new zones.

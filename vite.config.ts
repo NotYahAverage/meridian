@@ -32,5 +32,7 @@ export default defineConfig({
     // Some tests generate full terrain and round-trip saves; give them room on busy machines.
     // Generating the full-size world and saving/loading it takes a few seconds per city.
     testTimeout: 120_000,
+    // Shared test towns are built in beforeAll hooks, alongside long traffic runs in other files.
+    hookTimeout: 120_000,
   },
 });

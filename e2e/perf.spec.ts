@@ -22,7 +22,12 @@ test('large city frame times', async ({ page }) => {
   await game(page, `
     const orig = g.frame.bind(g);
     g.__cpu = [];
-    g.frame = (dt) => { const s = performance.now(); orig(dt); g.__cpu.push(performance.now() - s); };
+    g.__calls = [];
+    g.__tris = [];
+    // Count every pass of a frame (shadows, scene, post), not just the last.
+    const info = g.renderer.renderer.info;
+    info.autoReset = false;
+    g.frame = (dt) => { info.reset(); const s = performance.now(); orig(dt); g.__cpu.push(performance.now() - s); g.__calls.push(info.render.calls); g.__tris.push(info.render.triangles); };
     g.setSpeed(3);
     if (${JSON.stringify(process.env.PERF_EVAL ?? '')}) eval(${JSON.stringify(process.env.PERF_EVAL ?? '')});
   `);
@@ -41,11 +46,12 @@ test('large city frame times', async ({ page }) => {
     await page.waitForTimeout(2500);
     const r = await game<{ fps: number; p50: number; p95: number; cpu50: number; cpu95: number; calls: number; tris: number }>(page, `
       g.__cpu = [];
+      g.__calls = [];
+      g.__tris = [];
       const ts = [];
       await new Promise((res) => { let last = performance.now(); const f = (t) => { ts.push(t - last); last = t; if (ts.length < 240) requestAnimationFrame(f); else res(); }; requestAnimationFrame(f); });
       const q = (a, p) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length * p)]; };
-      const info = g.renderer.renderer.info.render;
-      return { fps: 1000 / (ts.reduce((a, x) => a + x, 0) / ts.length), p50: q(ts, 0.5), p95: q(ts, 0.95), cpu50: q(g.__cpu, 0.5), cpu95: q(g.__cpu, 0.95), calls: info.calls, tris: info.triangles };
+      return { fps: 1000 / (ts.reduce((a, x) => a + x, 0) / ts.length), p50: q(ts, 0.5), p95: q(ts, 0.95), cpu50: q(g.__cpu, 0.5), cpu95: q(g.__cpu, 0.95), calls: q(g.__calls, 0.5), tris: q(g.__tris, 0.5) };
     `);
     results.push(`${name.padEnd(9)} fps ${r.fps.toFixed(0).padStart(4)}  frame p50 ${r.p50.toFixed(1)} p95 ${r.p95.toFixed(1)} ms  cpu p50 ${r.cpu50.toFixed(1)} p95 ${r.cpu95.toFixed(1)} ms  draws ${r.calls} tris ${(r.tris / 1e6).toFixed(2)}M`);
     await shot(page, `perf-${name}`);

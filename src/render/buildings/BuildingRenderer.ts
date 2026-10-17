@@ -170,6 +170,8 @@ export class BuildingRenderer {
   /** Empty driveways by building id, in world space (cars arriving there can pull in). */
   readonly driveways = new Map<number, BuildingProp>();
   propsVersion = 0;
+  /** Chunks whose props changed since the prop renderer last looked. */
+  readonly changedProps = new Set<number>();
   /** Per-building overlay value provider (0 = none, else 1–255). */
   overlayValue: ((b: Building) => number) | null = null;
   private stateTimer = 0;
@@ -238,16 +240,38 @@ export class BuildingRenderer {
   /** Rebuilds dirty chunks within a time budget (ms). */
   rebuild(budgetMs = 6): void {
     const t0 = performance.now();
+    const over = () => performance.now() - t0 > budgetMs;
     for (const ch of this.dirty) {
+      // New buildings' geometry is generated a few at a time; the chunk is merged (and its old mesh
+      // replaced) once all of it is ready, so a burst of new buildings never stalls a frame.
+      if (!this.prepare(ch, over)) break;
       this.dirty.delete(ch);
       this.rebuildChunk(ch);
-      if (performance.now() - t0 > budgetMs) break;
+      if (over()) break;
     }
-    if (this.propsDirty.size) {
-      for (const ch of this.propsDirty) this.rebuildProps(ch);
-      this.propsDirty.clear();
-      this.propsVersion++;
+    let changed = false;
+    for (const ch of this.propsDirty) {
+      if (this.dirty.has(ch)) continue;
+      this.rebuildProps(ch);
+      this.propsDirty.delete(ch);
+      changed = true;
     }
+    if (changed) this.propsVersion++;
+  }
+
+  /** Generates any missing geometry for a chunk's buildings until `over()`; true when all is ready. */
+  private prepare(ch: number, over: () => boolean): boolean {
+    for (const id of this.chunks[ch].ids) {
+      const b = this.city.buildings.get(id);
+      if (!b) continue;
+      const c = this.cache.get(id);
+      if (c && c.lod && c.sig === buildingSignature(b)) continue;
+      if (over()) return false;
+      const geo = this.geometryFor(b, ch);
+      const cached = this.cache.get(id)!;
+      cached.lod ??= lodGeometry(b, geo);
+    }
+    return true;
   }
 
   get pending(): number {
@@ -344,6 +368,7 @@ export class BuildingRenderer {
       }
     }
     this.chunkProps.set(ch, list);
+    this.changedProps.add(ch);
   }
 
   /** Writes per-building state into the texture (throttled). */

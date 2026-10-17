@@ -177,19 +177,74 @@ export class WalkNetwork {
     return this.layout.net;
   }
 
+  /**
+   * In the running game the rebuild after a road edit is spread over a few frames (see
+   * `step`), and until it's done everything keeps using the previous network. Off by
+   * default: then a rebuild happens at once, when first needed.
+   */
+  sliced = false;
+  private job: Generator<void, void, void> | null = null;
+  private jobFor = -1;
+  private jobNet = -1;
+
+  /** Finishes any rebuild now (for results that must reflect the roads as they are). */
+  finish(): void {
+    if (!this.stale) return;
+    this.job = null;
+    this.build();
+  }
+
+  /** True while the network is behind the roads (a sliced rebuild is still under way). */
+  get stale(): boolean {
+    return this.builtFor !== this.layout.version || this.builtNet !== this.net.version;
+  }
+
   /** Rebuilds the graph if the roads changed since it was last built. */
   ensure(): void {
-    if (this.builtFor === this.layout.version && this.builtNet === this.net.version) return;
+    if (!this.stale) return;
+    // Spread over frames once there's a network to use meanwhile.
+    if (this.sliced && this.nodeCount > 0) {
+      this.startJob();
+      return;
+    }
+    this.job = null;
     this.build();
+  }
+
+  /** Advances a sliced rebuild by up to `budgetMs`. */
+  step(budgetMs: number): void {
+    if (!this.stale) return;
+    if (!this.sliced || this.nodeCount === 0) {
+      this.ensure();
+      return;
+    }
+    this.startJob();
+    const t0 = performance.now();
+    while (this.job && performance.now() - t0 < budgetMs) {
+      if (this.job.next().done) this.job = null;
+    }
+  }
+
+  private startJob(): void {
+    if (this.job && this.jobFor === this.layout.version && this.jobNet === this.net.version) return;
+    this.jobFor = this.layout.version;
+    this.jobNet = this.net.version;
+    this.job = this.buildJob();
   }
 
   // ── Construction ──────────────────────────────────────────────────────────
 
   private build(): void {
-    this.builtFor = this.layout.version;
-    this.builtNet = this.net.version;
-    this.version++;
+    const job = this.buildJob();
+    while (!job.next().done);
+  }
+
+  /** Builds the graph, pausing now and then; the result replaces the old one only at the end. */
+  private *buildJob(): Generator<void, void, void> {
+    const forLayout = this.layout.version;
+    const forNet = this.net.version;
     const net = this.net;
+    let work = 0;
     const nx: number[] = [], nz: number[] = [];
     const ends = new Map<number, number>();
     const E = {
@@ -231,6 +286,7 @@ export class WalkNetwork {
     // 1. Sidewalks: each side of each road, split where people cross quiet streets mid-block.
     const innerRing = this.innerRingSides();
     for (const seg of net.segments.values()) {
+      if (++work % 200 === 0) yield;
       const rt = ROAD_TYPES[seg.type];
       if (rt.sidewalk <= 0) continue;
       const sa = crossingS(seg, 0), sb = crossingS(seg, 1);
@@ -278,6 +334,7 @@ export class WalkNetwork {
 
     // 2. Junction corners, bends and dead ends.
     for (const lay of this.layout.nodes.values()) {
+      if (++work % 200 === 0) yield;
       const arms = lay.arms;
       if (lay.kind === 'isolated') continue;
       if (lay.kind === 'end') {
@@ -348,7 +405,11 @@ export class WalkNetwork {
       }
     }
 
+    yield;
     // 3. Pack into typed arrays and build the adjacency lists.
+    this.builtFor = forLayout;
+    this.builtNet = forNet;
+    this.version++;
     const n = nx.length, m = E.kind.length;
     this.nodeCount = n;
     this.nodeX = Float64Array.from(nx);

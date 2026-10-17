@@ -144,6 +144,9 @@ export class WorldRenderer {
     city.vehicles.lodZ = focus.z;
     city.vehicles.lodRadius = Math.max(600, Math.min(camDist * 1.2, 1000));
     this.vehicles.update(city.vehicles, camera, focus, simDt);
+    // After a road edit the walking network is rebuilt a few milliseconds a frame (no stutter in big cities).
+    city.walk.sliced = true;
+    city.walk.step(3);
     // People on foot live around the camera's focus; they only move while the game runs.
     city.pedestrians.update(simDt, focus, camera.position, camDist, env.hour);
     this.pedestrians.update(city.pedestrians, camera.position, camDist, city.weather);

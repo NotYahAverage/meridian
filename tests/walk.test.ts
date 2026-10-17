@@ -237,3 +237,35 @@ describe('walk signals', () => {
     expect(city.signals.untilWalk(node.id, arms[0])).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe('walking network rebuilds', () => {
+  it('in the running game, spread over frames, keeping the old network until the new one is ready', () => {
+    const city = town();
+    const walk = city.walk;
+    walk.ensure();
+    const before = walk.version, edges = walk.edgeCount;
+    walk.sliced = true;
+    // A new street, and a road taken away.
+    road(city, 1100, 1500, 1300, 1500);
+    const gone = [...city.roads.segments.values()].find((s) => s.type === 'street')!;
+    bulldozeRoad(city, gone.id);
+    walk.ensure();
+    // Still the old one, and still usable (even where its road has gone).
+    expect(walk.version).toBe(before);
+    expect(walk.edgeCount).toBe(edges);
+    for (let e = 0; e < walk.edgeCount; e++) walk.pointOnEdge(e, 1);
+    let steps = 0;
+    while (walk.version === before && steps < 1000) {
+      walk.step(0.01);
+      steps++;
+    }
+    expect(walk.version).toBe(before + 1);
+    expect(steps).toBeGreaterThan(1);
+    // The same as a rebuild done at once.
+    const sliced = walk.edgeCount;
+    walk.sliced = false;
+    (walk as unknown as { builtFor: number }).builtFor = -1;
+    walk.ensure();
+    expect(walk.edgeCount).toBe(sliced);
+  });
+});
