@@ -221,10 +221,19 @@ export class City {
     this.districts = new Districts(opts.seed);
     this.namer = new StreetNamer(opts.seed);
     this.paths = new Pathfinder(this.roads, this.layout);
-    this.traffic = new TrafficModel(this.roads, this.paths);
+    this.traffic = new TrafficModel(this.roads, this.paths, this.layout);
     this.paths.congestion = (id) => this.traffic.multiplier(id);
     this.signals = new Signals(this.layout);
     this.vehicles = new Vehicles(this.roads, this.layout, this.signals, this.terrain);
+    // Drivers know the usual traffic, and replan from where they are when stuck.
+    this.vehicles.knownCongestion = (id) => this.traffic.multiplier(id);
+    this.vehicles.replan = (_i, route, k, d, cost) => {
+      const leg = route.legs[k];
+      const seg = this.roads.segments.get(leg.segId);
+      const last = route.legs[route.legs.length - 1];
+      if (!seg) return null;
+      return this.paths.findAhead({ segId: seg.id, s: leg.dir === 1 ? d : seg.length - d }, leg.dir, { segId: last.segId, s: last.s1 }, cost);
+    };
     this.transit = new Transit(this);
     this.mobility = new Mobility(this);
     this.trips = new TripGenerator({

@@ -150,6 +150,8 @@ export function tickCity(city: City): void {
     const r = city.demandJob.next();
     if (r.done) {
       city.demandJob = null;
+      // Junction delays phase in with the other getting-around effects in older cities.
+      city.traffic.delayScale = city.mobility.phase;
       city.traffic.setDemand(r.value);
     }
   }

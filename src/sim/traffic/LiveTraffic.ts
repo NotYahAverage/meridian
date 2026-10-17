@@ -6,8 +6,13 @@ import { SERVICE_BY_ID } from '../services/ServiceTypes';
 import { BUS, type TransitLine } from '../transit/Transit';
 import { BuildingState } from '../types';
 import type { RoutePoint } from './Pathfinder';
-import { timeOfDayFactor } from './TripGenerator';
+import { ROAD_TYPES } from '../roads/RoadTypes';
+import type { RoadSegment } from '../roads/RoadNetwork';
+import { pickCarColor, pickCarModel, timeOfDayFactor } from './TripGenerator';
 import { Purpose, VM } from './Vehicles';
+
+/** Vehicles kept back from the city-wide count for busy roads near the camera. */
+const LOCAL_RESERVE = 400;
 
 const SERVICE_MODEL: Record<string, { model: number; color: number }> = {
   garbage: { model: VM.garbage, color: 0x2f7d4a },
@@ -35,7 +40,8 @@ export class LiveTraffic {
     const s = this.city.stats;
     if (s.population <= 0 && s.jobs <= 0) return 0;
     const base = s.population * 0.075 + s.employed * 0.03 + 6;
-    return Math.min(MAX_VEHICLES, Math.round(base * timeOfDayFactor(hour) * this.density));
+    // Some room is kept for the busy roads near the camera (topUpLocal).
+    return Math.min(MAX_VEHICLES - LOCAL_RESERVE, Math.round(base * timeOfDayFactor(hour) * this.density));
   }
 
   update(dtReal: number, speedMult: number, hour: number): void {
@@ -44,8 +50,8 @@ export class LiveTraffic {
     const city = this.city;
     const simDt = dtReal * Math.min(speedMult, 3);
     const tod = timeOfDayFactor(hour);
-    const road = city.weather.roadSpeed();
-    city.vehicles.congestion = (id) => city.traffic.multiplier(id, tod) / road;
+    // Drivers slow down in bad weather; congestion is left to the queues themselves.
+    city.vehicles.speedScale = city.weather.roadSpeed();
     city.signals.update(simDt);
 
     const target = this.targetCount(hour);
@@ -57,6 +63,13 @@ export class LiveTraffic {
         if (!t) continue;
         this.spawn(t.from, t.to, t.model, t.color, t.purpose);
       }
+    }
+
+    // Busy roads near the camera get the cars their traffic implies, so queues form where the city's traffic really is.
+    this.localTimer -= simDt;
+    if (this.localTimer <= 0) {
+      this.localTimer = 0.4;
+      this.topUpLocal(tod);
     }
 
     this.busTimer -= simDt;
@@ -77,6 +90,65 @@ export class LiveTraffic {
     const route = this.city.paths.find(from, to);
     if (!route || route.length < 30) return -1;
     return this.city.vehicles.spawn({ route, model, color, purpose, onArrive, tag });
+  }
+
+  private localTimer = 0;
+  private near: { at: number; x: number; z: number; segs: RoadSegment[]; wide: RoadSegment[] } = { at: -1, x: 0, z: 0, segs: [], wide: [] };
+  /** Extra cars spawned for busy roads near the camera. */
+  localSpawns = 0;
+
+  /**
+   * How many cars each direction of a road should hold just now (its share of the
+   * city's traffic), with queues where demand is near or over capacity.
+   */
+  expectedOn(seg: RoadSegment, tod: number): number {
+    const city = this.city;
+    const rt = ROAD_TYPES[seg.type];
+    const x = city.traffic.ratio(seg.id) * tod;
+    const q = ((city.traffic.volume.get(seg.id) ?? 0) * tod * this.density) / (seg.oneway !== 0 ? 1 : 2);
+    const len = Math.max(0, seg.length - seg.trimA - seg.trimB);
+    const free = ((q / 3600) * len) / rt.speed;
+    const lanes = rt.lanes * (seg.oneway !== 0 ? 2 : 1);
+    return Math.min((lanes * len) / 7.5, free * (1 + 3 * Math.max(0, x - 0.8)));
+  }
+
+  private topUpLocal(tod: number): void {
+    const city = this.city;
+    const v = city.vehicles;
+    if (v.count >= MAX_VEHICLES - 50 || !city.traffic.volume.size) return;
+    const fx = v.lodX, fz = v.lodZ;
+    const near = this.near;
+    if (near.at !== city.roads.version || Math.hypot(fx - near.x, fz - near.z) > 60) {
+      near.at = city.roads.version;
+      near.x = fx;
+      near.z = fz;
+      const R = 420, W = 1100;
+      near.segs = city.roads.segmentsIn(fx - R, fz - R, fx + R, fz + R).filter((s) => !s.ring);
+      near.wide = city.roads.segmentsIn(fx - W, fz - W, fx + W, fz + W).filter((s) => (city.traffic.volume.get(s.id) ?? 0) > 0);
+    }
+    if (!near.segs.length || !near.wide.length) return;
+    for (let tries = 0; tries < 3; tries++) {
+      const seg = near.segs[Math.floor(this.rng.next() * near.segs.length)];
+      const dir: 1 | -1 = seg.oneway !== 0 ? (seg.oneway as 1 | -1) : this.rng.chance(0.5) ? 1 : -1;
+      const want = this.expectedOn(seg, tod);
+      if (want < 0.6) continue;
+      const lanes = ROAD_TYPES[seg.type].lanes * (seg.oneway !== 0 ? 2 : 1);
+      let have = 0;
+      for (let lane = 0; lane < lanes; lane++) have += v.inLane(seg.id, dir, lane);
+      if (have >= want - 0.4) continue;
+      // Somewhere else busy, a little way off.
+      let to: RoadSegment | null = null;
+      for (let k = 0; k < 6 && !to; k++) {
+        const c = near.wide[Math.floor(this.rng.next() * near.wide.length)];
+        if (c.id !== seg.id && (c.cx - seg.cx) ** 2 + (c.cz - seg.cz) ** 2 > 250 * 250) to = c;
+      }
+      if (!to) continue;
+      const s = dir === 1 ? seg.trimA + 2 : seg.length - seg.trimB - 2;
+      const route = city.paths.find({ segId: seg.id, s }, { segId: to.id, s: to.length / 2 });
+      if (!route || route.legs[0].dir !== dir || route.length < 120) continue;
+      const rng = this.rng;
+      if (v.spawn({ route, model: pickCarModel(rng), color: pickCarColor(rng), purpose: Purpose.Commute }) >= 0) this.localSpawns++;
+    }
   }
 
   /** Buses currently driving each line. */

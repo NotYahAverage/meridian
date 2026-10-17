@@ -251,7 +251,8 @@ export class Pedestrians {
     this.hour = hour;
     this.focusX = focus.x;
     this.focusZ = focus.z;
-    // Too far out to see anyone: everybody waits where they are.
+    // Too far out to see anyone: everybody waits where they are (and drivers stop looking out for them).
+    if (camDist > 560) this.city.vehicles.setPeople(focus.x, focus.z, this.crossOut, 0, this.zebraOut, 0);
     if (camDist > 560 || dt <= 0) return;
     this.city.walk.ensure();
     this.routeBudget = 8;
@@ -272,6 +273,39 @@ export class Pedestrians {
       if (!this.active[i]) continue;
       this.step(i, dt, camera);
     }
+    this.publishPeople();
+  }
+
+  private crossOut = new Float32Array(512);
+  private zebraOut = new Float32Array(256);
+
+  /** Tells drivers who is out on the road, and who is waiting at a zebra crossing. */
+  private publishPeople(): void {
+    let n = 0, z = 0;
+    const crossing = (k: number) => k === SEG.signal || k === SEG.zebra || k === SEG.informal;
+    for (let i = 0; i < MAX_PEOPLE; i++) {
+      if (!this.active[i]) continue;
+      const st = this.state[i];
+      const p = this.paths[i];
+      if (!p) continue;
+      if (st === PedState.Walk || st === PedState.Follow) {
+        const who = st === PedState.Follow && this.leader[i] >= 0 ? this.leader[i] : i;
+        const lp = this.paths[who];
+        if (!lp || !crossing(lp.kind[this.seg[who]]) || n >= 256) continue;
+        this.crossOut[n * 2] = this.x[i];
+        this.crossOut[n * 2 + 1] = this.z[i];
+        n++;
+      } else if (st === PedState.WaitCross && z < 64) {
+        const next = this.seg[i] + 1;
+        if (next >= p.n - 1 || p.kind[next] !== SEG.zebra) continue;
+        this.zebraOut[z * 4] = p.pts[next * 2];
+        this.zebraOut[z * 4 + 1] = p.pts[next * 2 + 1];
+        this.zebraOut[z * 4 + 2] = p.pts[next * 2 + 2];
+        this.zebraOut[z * 4 + 3] = p.pts[next * 2 + 3];
+        z++;
+      }
+    }
+    this.city.vehicles.setPeople(this.focusX, this.focusZ, this.crossOut, n, this.zebraOut, z);
   }
 
   // ── Who's around ──────────────────────────────────────────────────────────
@@ -930,6 +964,8 @@ export class Pedestrians {
       }
       const k = p.kind[next];
       if ((k === SEG.signal || k === SEG.zebra || k === SEG.informal) && !this.mayCross(i, p, next)) {
+        // Press the button.
+        if (k === SEG.signal) this.city.signals.request(p.node[next], p.seg[next]);
         this.u[i] = l;
         this.state[i] = PedState.WaitCross;
         this.waited[i] = 0;

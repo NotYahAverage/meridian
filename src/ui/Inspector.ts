@@ -9,7 +9,7 @@ import { type Citizen, citizenOf } from '../sim/population/Citizens';
 import { Errand, PauseWhy, PedState } from '../sim/walk/Pedestrians';
 import { WALK_SPEED } from '../sim/walk/WalkNetwork';
 import { bulldozeBuilding, bulldozeRoad, removeStop } from '../sim/CityCommands';
-import { Purpose, VEHICLE_MODELS } from '../sim/traffic/Vehicles';
+import { Held, Purpose, VEHICLE_MODELS } from '../sim/traffic/Vehicles';
 import { POLICY_BY_ID } from '../sim/policies/Policies';
 import { lineProblemText } from '../sim/transit/Transit';
 import { metroProblemText } from '../sim/transit/Metro';
@@ -59,6 +59,16 @@ const MODEL_LABEL: Record<(typeof VEHICLE_MODELS)[number], string> = {
   police: 'Police car',
   ambulance: 'Ambulance',
   bus: 'City bus',
+};
+
+/** Why a vehicle is standing still. */
+const HELD_TEXT: Record<number, string> = {
+  [Held.None]: 'Stopped',
+  [Held.Red]: 'Waiting at a red light',
+  [Held.GiveWay]: 'Giving way',
+  [Held.Full]: 'Waiting for space ahead',
+  [Held.Queue]: 'In a queue',
+  [Held.People]: 'Letting someone cross',
 };
 
 /** What a vehicle is doing, in plain words. */
@@ -463,7 +473,7 @@ export class Inspector {
       const kmh = Math.round(v.speed[sel.id] * 3.6);
       const remaining = route.legs.length - v.legOf(sel.id);
       body.append(
-        kv('Speed', kmh < 2 ? (v.braking[sel.id] ? 'Stopped' : 'Idle') : `${kmh} km/h`),
+        kv('Speed', kmh < 2 ? HELD_TEXT[v.held[sel.id]] ?? 'Stopped' : `${kmh} km/h`),
         kv('On', here?.name || 'Unnamed road'),
       );
       if (line) {

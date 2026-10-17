@@ -161,9 +161,10 @@ describe('people on foot', () => {
 
   it('thin out at night', () => {
     city.pedestrians.clear();
-    const day = run(city, 13, 40).maxCount;
+    // A busier town than this small one would be, so the counts are big enough to compare.
+    const day = run(city, 13, 40, { density: 3 }).maxCount;
     city.pedestrians.clear();
-    const night = run(city, 3, 40).maxCount;
+    const night = run(city, 3, 40, { density: 3 }).maxCount;
     expect(night).toBeLessThan(day * 0.6);
   });
 

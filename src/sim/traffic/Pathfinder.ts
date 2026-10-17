@@ -44,9 +44,14 @@ export class Pathfinder {
   private cacheVersion = -1;
   /** Travel-time multiplier per segment id (≥ 1). */
   congestion: (segId: number) => number = () => 1;
+  /**
+   * Seconds to get through the junction at the end of a segment, arriving at its b end
+   * (atB) or its a end; from the traffic model. Without it, a flat delay per kind of junction.
+   */
+  junctionDelay: ((segId: number, atB: boolean) => number) | null = null;
   searches = 0;
   /** Compact adjacency (edges leaving each node) for shortest-path trees. */
-  private graph: { net: number; layout: number; start: Int32Array; to: Int32Array; seg: Int32Array; base: Float64Array; pen: Float64Array } | null = null;
+  private graph: { net: number; layout: number; start: Int32Array; to: Int32Array; seg: Int32Array; base: Float64Array } | null = null;
   /** Edge travel times including congestion, as of the last refreshCosts(). */
   private edgeCost = new Float64Array(0);
   private costsFresh = false;
@@ -69,7 +74,12 @@ export class Pathfinder {
     return (seg.length * fraction) / rt.speed * this.congestion(seg.id);
   }
 
-  private nodePenalty(nodeId: number): number {
+  /** Delay crossing the junction at `toNode` after driving along `seg`. */
+  private approachDelay(seg: RoadSegment, toNode: number): number {
+    return this.junctionDelay ? this.junctionDelay(seg.id, seg.b === toNode) : this.nodePenalty(toNode);
+  }
+
+  nodePenalty(nodeId: number): number {
     const lay = this.layout.get(nodeId);
     if (!lay) return 0;
     if (lay.control === 'signal') return SIGNAL_PENALTY;
@@ -129,14 +139,14 @@ export class Pathfinder {
     const s0end = path.startDir === 1 ? fs.length : 0;
     legs.push({ segId: fs.id, dir: path.startDir, s0: fromS, s1: s0end });
     length += Math.abs(s0end - fromS);
-    cost += this.segTime(fs, Math.abs(s0end - fromS) / Math.max(1, fs.length));
+    cost += this.segTime(fs, Math.abs(s0end - fromS) / Math.max(1, fs.length)) + this.approachDelay(fs, path.startDir === 1 ? fs.b : fs.a);
     for (let i = 0; i < path.segs.length; i++) {
       const seg = this.net.segments.get(path.segs[i])!;
       const fromNode = path.nodes[i];
       const dir: 1 | -1 = seg.a === fromNode ? 1 : -1;
       legs.push({ segId: seg.id, dir, s0: dir === 1 ? 0 : seg.length, s1: dir === 1 ? seg.length : 0 });
       length += seg.length;
-      cost += this.segTime(seg) + this.nodePenalty(fromNode);
+      cost += this.segTime(seg) + this.approachDelay(seg, dir === 1 ? seg.b : seg.a);
     }
     const s1start = path.endDir === 1 ? 0 : ts.length;
     legs.push({ segId: ts.id, dir: path.endDir, s0: s1start, s1: toS });
@@ -150,6 +160,7 @@ export class Pathfinder {
     fromS: number,
     ts: RoadSegment,
     toS: number,
+    onlyDir: 0 | 1 | -1 = 0,
   ): { nodes: number[]; segs: number[]; startDir: 1 | -1; endDir: 1 | -1 } | null {
     this.ensure();
     this.searches++;
@@ -182,8 +193,8 @@ export class Pathfinder {
       heap.push(nid, cost + h(nid));
     };
     // Starting: leave the origin segment toward either end (one-way roads only forward).
-    if (fs.oneway !== -1) open(fs.b, this.segTime(fs, (fs.length - fromS) / Math.max(1, fs.length)), -1, 0);
-    if (fs.oneway !== 1) open(fs.a, this.segTime(fs, fromS / Math.max(1, fs.length)), -2, 0);
+    if (fs.oneway !== -1 && onlyDir !== -1) open(fs.b, this.segTime(fs, (fs.length - fromS) / Math.max(1, fs.length)) + this.approachDelay(fs, fs.b), -1, 0);
+    if (fs.oneway !== 1 && onlyDir !== 1) open(fs.a, this.segTime(fs, fromS / Math.max(1, fs.length)) + this.approachDelay(fs, fs.a), -2, 0);
 
     const toA = ts.oneway === -1 ? Infinity : this.segTime(ts, toS / Math.max(1, ts.length));
     const toB = ts.oneway === 1 ? Infinity : this.segTime(ts, (ts.length - toS) / Math.max(1, ts.length));
@@ -210,14 +221,13 @@ export class Pathfinder {
         bestDir = -1;
       }
       const node = net.nodes.get(nid)!;
-      const pen = this.nodePenalty(nid);
       for (const sid of node.segs) {
         if (sid === fs.id || sid === ts.id) continue;
         const seg = net.segments.get(sid)!;
         if (seg.oneway !== 0 && !RoadNetwork.allows(seg, nid)) continue;
         const other = seg.a === nid ? seg.b : seg.a;
         if (closed[other] === this.gen) continue;
-        open(other, gc + this.segTime(seg) + pen, nid, sid);
+        open(other, gc + this.segTime(seg) + this.approachDelay(seg, other), nid, sid);
       }
     }
     if (bestEnd < 0) return null;
@@ -241,6 +251,25 @@ export class Pathfinder {
     return { nodes, segs, startDir, endDir: bestDir };
   }
 
+  /**
+   * A route from a point part way along a segment, carrying on in the direction of
+   * travel (no turning round), with the given travel-time multipliers instead of the
+   * usual ones. Not cached: for drivers changing their minds.
+   */
+  findAhead(from: RoutePoint, dir: 1 | -1, to: RoutePoint, mult: (segId: number) => number): Route | null {
+    const fs = this.net.segments.get(from.segId);
+    const ts = this.net.segments.get(to.segId);
+    if (!fs || !ts || fs.id === ts.id) return null;
+    const saved = this.congestion;
+    this.congestion = mult;
+    try {
+      const found = this.search(fs, from.s, ts, to.s, dir);
+      return found ? this.buildRoute(fs, from.s, ts, to.s, found) : null;
+    } finally {
+      this.congestion = saved;
+    }
+  }
+
   /** Rebuilds the compact graph when roads or junctions changed. */
   private ensureGraph(): NonNullable<Pathfinder['graph']> {
     const net = this.net;
@@ -256,10 +285,9 @@ export class Pathfinder {
     }
     for (let i = 0; i < n; i++) start[i + 1] += start[i];
     const m = start[n];
-    const to = new Int32Array(m), seg = new Int32Array(m), base = new Float64Array(m), pen = new Float64Array(n);
+    const to = new Int32Array(m), seg = new Int32Array(m), base = new Float64Array(m);
     const fill = start.slice(0, n);
     for (const node of net.nodes.values()) {
-      pen[node.id] = this.nodePenalty(node.id);
       for (const sid of node.segs) {
         const s = net.segments.get(sid);
         if (!s || !(s.oneway === 0 || RoadNetwork.allows(s, node.id))) continue;
@@ -269,7 +297,7 @@ export class Pathfinder {
         base[e] = s.length / ROAD_TYPES[s.type].speed;
       }
     }
-    this.graph = { net: net.version, layout: this.layout.version, start, to, seg, base, pen };
+    this.graph = { net: net.version, layout: this.layout.version, start, to, seg, base };
     this.costsFresh = false;
     return this.graph;
   }
@@ -283,7 +311,8 @@ export class Pathfinder {
       const sid = gr.seg[e];
       let k = mult.get(sid);
       if (k === undefined) mult.set(sid, (k = this.congestion(sid)));
-      this.edgeCost[e] = gr.base[e] * k;
+      // Driving the segment, then getting through the junction at its far end.
+      this.edgeCost[e] = gr.base[e] * k + this.approachDelay(this.net.segments.get(sid)!, gr.to[e]);
     }
     this.costsFresh = true;
   }
@@ -300,7 +329,7 @@ export class Pathfinder {
     this.ensure();
     const gr = this.ensureGraph();
     if (!this.costsFresh) this.refreshCosts();
-    const { start, to, seg, pen } = gr;
+    const { start, to, seg } = gr;
     const ec = this.edgeCost;
     const gen = ++this.gen;
     if (gen >= 0xfffffff0) {
@@ -324,13 +353,13 @@ export class Pathfinder {
       parentSeg[nid] = pSeg;
       heap.push(nid, cost);
     };
-    if (fs.oneway !== -1) open(fs.b, this.segTime(fs, (fs.length - from.s) / Math.max(1, fs.length)), -1, fs.id);
-    if (fs.oneway !== 1) open(fs.a, this.segTime(fs, from.s / Math.max(1, fs.length)), -2, fs.id);
+    if (fs.oneway !== -1) open(fs.b, this.segTime(fs, (fs.length - from.s) / Math.max(1, fs.length)) + this.approachDelay(fs, fs.b), -1, fs.id);
+    if (fs.oneway !== 1) open(fs.a, this.segTime(fs, from.s / Math.max(1, fs.length)) + this.approachDelay(fs, fs.a), -2, fs.id);
     while (heap.size) {
       const nid = heap.pop();
       if (closed[nid] === gen) continue;
       closed[nid] = gen;
-      const gc = g[nid] + pen[nid];
+      const gc = g[nid];
       for (let e = start[nid], end = start[nid + 1]; e < end; e++) {
         const other = to[e];
         if (closed[other] === gen) continue;

@@ -140,7 +140,7 @@ export class WorldRenderer {
     this.props.update(camera, dt);
     city.vehicles.lodX = focus.x;
     city.vehicles.lodZ = focus.z;
-    city.vehicles.lodRadius = Math.max(600, camDist * 1.2);
+    city.vehicles.lodRadius = Math.max(600, Math.min(camDist * 1.2, 1000));
     this.vehicles.update(city.vehicles, camera, focus);
     // People on foot live around the camera's focus; they only move while the game runs.
     city.pedestrians.update(simDt, focus, camera.position, camDist, env.hour);

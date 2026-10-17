@@ -84,7 +84,7 @@ export class VehicleRenderer {
         c[k * 3 + 1] = col.g;
         c[k * 3 + 2] = col.b;
         const ex = pool.extraData!;
-        ex[k * 2] = v.braking[i];
+        ex[k * 2] = v.braking[i] + (v.indicator[i] < 0 ? 2 : v.indicator[i] > 0 ? 4 : 0);
         ex[k * 2 + 1] = v.purpose[i] === Purpose.Service && (model === 6 || model === 7 || model === 8) ? 1 : v.purpose[i] === Purpose.Emergency ? 1 : 0;
         if (night > 0.2 && d2 < 520 * 520) {
           writeMatrix(beamM, beams * 16, x, y, z, v.heading[i], 1);

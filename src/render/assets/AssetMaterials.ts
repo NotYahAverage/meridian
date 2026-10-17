@@ -26,7 +26,8 @@ attribute float aMat;
 ${extras ? 'attribute vec2 aInst;' : ''}
 varying float vMat;
 varying vec2 vInst;
-varying float vSeed;`,
+varying float vSeed;
+varying float vSide;`,
       )
       .replace(
         '#include <color_vertex>',
@@ -36,6 +37,7 @@ if (aMat < 0.5) vColor.rgb *= instanceColor.rgb;
 #endif
 vMat = aMat;
 ${extras ? 'vInst = aInst;' : 'vInst = vec2(0.0);'}
+vSide = position.z;
 #ifdef USE_INSTANCING
 vSeed = fract(sin(dot(instanceMatrix[3].xz, vec2(12.9898, 78.233))) * 43758.5453);
 #else
@@ -49,6 +51,7 @@ vSeed = 0.0;
 varying float vMat;
 varying vec2 vInst;
 varying float vSeed;
+varying float vSide;
 uniform float uTime;
 uniform float uNight;
 uniform float uDesat;
@@ -62,10 +65,21 @@ vec3 a_emis = vec3(0.0);`,
         `#include <color_fragment>
 {
   int k = int(vMat + 0.5);
+  // vInst.x: brake lights (bit 0), then the turn signal (1 left, 2 right) blinking on that side's lamps.
+  float brake = mod(vInst.x, 2.0);
+  float ind = floor(vInst.x * 0.5 + 0.01);
+  float blinkSide = ind > 1.5 ? step(0.0, vSide) : ind > 0.5 ? step(vSide, 0.0) : 0.0;
+  float blink = blinkSide * step(0.45, fract(uTime * 1.5 + vSeed));
   if (k == 0) { a_rough = 0.32; a_metal = 0.25; }
   else if (k == 2) { a_rough = 0.06; a_metal = 0.75; }
-  else if (k == 3) { a_emis += vec3(1.0, 0.95, 0.82) * (0.1 + uNight * 3.0); a_rough = 0.2; }
-  else if (k == 4) { a_emis += vec3(1.0, 0.08, 0.04) * (0.08 + uNight * 0.9 + vInst.x * 1.8); }
+  else if (k == 3) {
+    a_emis += vec3(1.0, 0.95, 0.82) * (0.1 + uNight * 3.0) * (1.0 - blink) + vec3(1.0, 0.36, 0.0) * blink * (1.2 + uNight * 1.5);
+    a_rough = 0.2;
+  }
+  else if (k == 4) {
+    a_emis += mix(vec3(1.0, 0.08, 0.04) * (0.08 + uNight * 0.9 + brake * 1.8), vec3(1.0, 0.36, 0.0) * (1.2 + uNight * 1.5), blink);
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.9, 0.35, 0.02), blink);
+  }
   else if (k == 5) {
     float ph = step(0.5, fract(uTime * 2.2 + vSeed));
     vec3 lc = mix(vec3(1.0, 0.1, 0.08), vec3(0.15, 0.3, 1.0), ph);

@@ -324,20 +324,30 @@ export class PropRenderer {
 
   private updateSignalLamps(): void {
     const heads = this.roads.allSignals();
-    this.signalLamps.ensure(heads.length);
+    this.signalLamps.ensure(heads.length * 2);
     const m = this.signalLamps.matrices;
     const c = this.signalLamps.colors!;
     const sig = this.city.signals;
+    let n = 0;
     for (let i = 0; i < heads.length; i++) {
       const h = heads[i];
-      writeMatrix(m, i * 16, h.x, h.y, h.z, 0, 1);
+      writeMatrix(m, n * 16, h.x, h.y, h.z, 0, 1);
       const state = sig.lightFor(h.nodeId, h.segId);
       const col = state === 2 ? [0.1, 3.2, 0.9] : state === 1 ? [3.2, 1.9, 0.1] : [3.4, 0.15, 0.08];
-      c[i * 3] = col[0];
-      c[i * 3 + 1] = col[1];
-      c[i * 3 + 2] = col[2];
+      c[n * 3] = col[0];
+      c[n * 3 + 1] = col[1];
+      c[n * 3 + 2] = col[2];
+      n++;
+      // The left-turn arrow: a second, smaller green lamp below while it runs.
+      if (sig.arrowOn(h.nodeId, h.segId)) {
+        writeMatrix(m, n * 16, h.x, h.y - 0.55, h.z, 0, 0.8);
+        c[n * 3] = 0.1;
+        c[n * 3 + 1] = 3.2;
+        c[n * 3 + 2] = 0.9;
+        n++;
+      }
     }
-    this.signalLamps.commit(heads.length);
+    this.signalLamps.commit(n);
     this.updateWalkLamps();
   }
 

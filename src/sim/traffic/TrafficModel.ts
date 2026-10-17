@@ -1,3 +1,4 @@
+import type { RoadLayout } from '../roads/RoadLayout';
 import type { RoadNetwork } from '../roads/RoadNetwork';
 import { ROAD_TYPES, segmentCapacity } from '../roads/RoadTypes';
 import type { Pathfinder, RoutePoint } from './Pathfinder';
@@ -43,7 +44,17 @@ export class TrafficModel {
   private accUnreach = 0;
   private accTotal = 0;
 
-  constructor(private net: RoadNetwork, private paths: Pathfinder) {}
+  /** Seconds to get through the junction at each segment end, by approach (segId × 2, + 1 arriving at b). */
+  private delay = new Float32Array(0);
+  /** How far the junction delays have taken over from the old flat ones (phased in for older cities). */
+  delayScale = 1;
+  /** Length of the busy period that queues build over (hours), and the most any one junction can hold someone up (s). */
+  overflowHours = 0.1;
+  maxDelay = 90;
+
+  constructor(private net: RoadNetwork, private paths: Pathfinder, private layout?: RoadLayout) {
+    if (layout) paths.junctionDelay = (segId, atB) => this.junctionDelay(segId, atB);
+  }
 
   /** Research into roads and signals raises every road's capacity. */
   capacityScale = 1;
@@ -58,10 +69,154 @@ export class TrafficModel {
     return (this.volume.get(segId) ?? 0) / this.capacity(segId);
   }
 
-  /** Travel time multiplier from congestion (BPR-style curve). */
+  /**
+   * Travel time multiplier from congestion along the road itself (BPR-style curve).
+   * Most of the delay in a busy city is at junctions (below), so this is gentler once
+   * junction delays are in.
+   */
   multiplier(segId: number, demandScale = 1): number {
     const x = this.ratio(segId) * demandScale;
-    return Math.min(6, 1 + 0.45 * x * x * x * x);
+    return Math.min(6, 1 + (0.45 - 0.25 * this.delayScale) * x * x * x * x);
+  }
+
+  /** Seconds to get through the junction at the end of segment `segId` (its b end if atB). */
+  junctionDelay(segId: number, atB: boolean): number {
+    const k = segId * 2 + (atB ? 1 : 0);
+    if (k < this.delay.length && this.delay[k] > 0) return this.delay[k];
+    const seg = this.net.segments.get(segId);
+    const flat = seg ? this.paths.nodePenalty(atB ? seg.b : seg.a) : 0;
+    return flat;
+  }
+
+  /**
+   * Junction delays from the volumes just assigned: at lights, from the share of green
+   * each approach gets and how full it is (Webster's delay plus the overflow queue); at
+   * junctions without lights, minor roads wait for gaps in the major road's traffic;
+   * at roundabouts, entries wait for gaps in the circulating traffic. Phased in from
+   * the old flat delays by `delayScale`.
+   */
+  private computeDelays(): void {
+    const layout = this.layout;
+    if (!layout) return;
+    const net = this.net;
+    let maxSeg = 0;
+    for (const id of net.segments.keys()) maxSeg = Math.max(maxSeg, id);
+    if (this.delay.length < (maxSeg + 1) * 2) this.delay = new Float32Array((maxSeg + 1) * 2 + 64);
+    else this.delay.fill(0);
+    const k = this.delayScale;
+    const T = this.overflowHours;
+    // Queueing delay (s) at an approach with capacity `cap` (veh/h) and demand `q`, after a fixed part.
+    const queue = (cap: number, q: number) => {
+      const x = q / Math.max(1, cap);
+      return 900 * T * (x - 1 + Math.sqrt((x - 1) ** 2 + (4 * x) / (Math.max(1, cap) * T)));
+    };
+    const arms: { seg: number; atB: boolean; q: number; lanes: number; dx: number; dz: number; ring: boolean; cap: number }[] = [];
+    for (const lay of layout.nodes.values()) {
+      if (lay.kind !== 'junction' || lay.arms.length < 3 || lay.control === 'none') continue;
+      arms.length = 0;
+      for (const a of lay.arms) {
+        const seg = net.segments.get(a.segId);
+        if (!seg) continue;
+        const dirInto = a.atA ? -1 : 1;
+        if (seg.oneway !== 0 && seg.oneway !== dirInto) continue;
+        const rt = ROAD_TYPES[seg.type];
+        arms.push({
+          seg: seg.id,
+          atB: !a.atA,
+          q: (this.volume.get(seg.id) ?? 0) * (seg.oneway !== 0 ? 1 : 0.5),
+          lanes: rt.lanes * (seg.oneway !== 0 ? 2 : 1),
+          dx: a.dx,
+          dz: a.dz,
+          ring: !!seg.ring,
+          cap: segmentCapacity(rt),
+        });
+      }
+      if (!arms.length) continue;
+      const out = (a: (typeof arms)[number], d: number) => {
+        const flat = this.paths.nodePenalty(lay.nodeId);
+        this.delay[a.seg * 2 + (a.atB ? 1 : 0)] = Math.max(0.05, flat + k * (Math.min(this.maxDelay, d) - flat));
+      };
+      if (lay.control === 'signal') {
+        // Opposite approaches share a phase.
+        const phase = new Int32Array(arms.length).fill(-1);
+        let phases = 0;
+        for (let i = 0; i < arms.length; i++) {
+          if (phase[i] >= 0) continue;
+          phase[i] = phases;
+          let best = -1, bestDot = -0.6;
+          for (let j = 0; j < arms.length; j++) {
+            if (phase[j] >= 0) continue;
+            const dot = arms[i].dx * arms[j].dx + arms[i].dz * arms[j].dz;
+            if (dot < bestDot) {
+              bestDot = dot;
+              best = j;
+            }
+          }
+          if (best >= 0) phase[best] = phases;
+          phases++;
+        }
+        const y = new Float64Array(phases);
+        for (let i = 0; i < arms.length; i++) y[phase[i]] = Math.max(y[phase[i]], arms[i].q / this.capacityScale / (arms[i].lanes * 1800));
+        let Y = 0;
+        for (let p = 0; p < phases; p++) Y += y[p];
+        const lost = 5 * phases;
+        const C = Math.max(30, Math.min(120, (1.5 * lost + 5) / (1 - Math.min(0.9, Y))));
+        for (let i = 0; i < arms.length; i++) {
+          const a = arms[i];
+          // A short link from another set of lights: coordinated, so traffic carries on through.
+          const link = net.segments.get(a.seg)!;
+          if (link.length - link.trimA - link.trimB < 30 && layout.get(link.a)?.control === 'signal' && layout.get(link.b)?.control === 'signal') {
+            out(a, 2);
+            continue;
+          }
+          const gC = Math.max(0.12, (1 - lost / C) * (Y > 0.01 ? y[phase[i]] / Y : 1 / phases));
+          const cap = a.lanes * 1800 * gC * this.capacityScale;
+          const x = a.q / cap;
+          const d1 = (0.5 * C * (1 - gC) ** 2) / (1 - Math.min(1, x) * gC);
+          out(a, d1 + queue(cap, a.q));
+        }
+      } else if (lay.control === 'roundabout') {
+        let circulating = 0;
+        for (const a of arms) if (!a.ring) circulating += a.q * 0.5;
+        for (const a of arms) {
+          if (a.ring) {
+            out(a, 0.5);
+            continue;
+          }
+          const cap = 1130 * Math.exp(-0.001 * circulating) * (a.lanes >= 2 ? 1.75 : 1) * this.capacityScale;
+          out(a, 3600 / cap + queue(cap, a.q) + 3);
+        }
+      } else {
+        // Give way: the two biggest roads (the straightest pair among equals) have priority.
+        let bi = 0, bj = 1, best = -Infinity;
+        for (let i = 0; i < arms.length; i++) {
+          for (let j = i + 1; j < arms.length; j++) {
+            const dot = arms[i].dx * arms[j].dx + arms[i].dz * arms[j].dz;
+            const score = arms[i].cap + arms[j].cap - dot * 200;
+            if (score > best) {
+              best = score;
+              bi = i;
+              bj = j;
+            }
+          }
+        }
+        const major = arms.length > 1 ? arms[bi].q + arms[bj].q : 0;
+        for (let i = 0; i < arms.length; i++) {
+          const a = arms[i];
+          if (i === bi || i === bj) {
+            out(a, 1 + Math.min(20, major / 600));
+            continue;
+          }
+          // Gap acceptance: critical gap 6 s, follow-up 3.3 s.
+          const qc = Math.max(1, major);
+          const c = (qc * Math.exp((-qc * 6) / 3600)) / (1 - Math.exp((-qc * 3.3) / 3600));
+          // However busy the main road, someone always lets a few out.
+          const cap = Math.max(250, c * Math.min(2, a.lanes) * 0.9) * this.capacityScale;
+          const x = a.q / cap;
+          out(a, 3600 / cap + 900 * T * (x - 1 + Math.sqrt((x - 1) ** 2 + ((3600 / cap) * x) / (450 * T))) + 5);
+        }
+      }
+    }
   }
 
   /** Replaces the demand set; a new assignment cycle starts. */
@@ -225,6 +380,7 @@ export class TrafficModel {
     const next = this.next;
     for (let k = 0; k < next.length; k++) if (next[k] > 0) this.volume.set(k, next[k]);
     next.fill(0);
+    this.computeDelays();
     this.totalTrips = this.accTotal;
     this.routedTrips = this.accTrips;
     this.unreachableTrips = this.accUnreach;
