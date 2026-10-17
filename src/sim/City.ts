@@ -245,6 +245,8 @@ export class City {
     });
     this.live = new LiveTraffic(this);
     this.pedestrians = new Pedestrians(this);
+    // Drivers parking near the camera get out and walk in.
+    this.vehicles.onParked = (_i, x, z, h, b, purpose) => void this.pedestrians.fromCar(x, z, h, b, purpose);
     this.spawner = new Spawner(this.roads, this.terrain, this.zones, this.buildings, (x, z) => this.landValue.at(x, z));
     // Attractions are few: keep a list (refreshed when coverage is) instead of searching every building nearby.
     let sights: { version: number; list: { x: number; z: number; w: number }[] } = { version: -1, list: [] };

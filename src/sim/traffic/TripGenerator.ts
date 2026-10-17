@@ -24,6 +24,8 @@ export interface TripSample {
   purpose: Purpose;
   model: number;
   color: number;
+  /** The building the trip ends at, if any. */
+  dest?: number;
 }
 
 const CAR_COLORS: [number, number][] = [
@@ -37,10 +39,19 @@ export function pickCarColor(rng: Rng): number {
 
 export function pickCarModel(rng: Rng): number {
   const r = rng.next();
-  if (r < 0.4) return VM.sedan;
-  if (r < 0.65) return VM.hatchback;
-  if (r < 0.9) return VM.suv;
+  if (r < 0.32) return VM.sedan;
+  if (r < 0.52) return VM.hatchback;
+  if (r < 0.71) return VM.suv;
+  if (r < 0.82) return VM.mini;
+  if (r < 0.92) return VM.pickup;
   return VM.van;
+}
+
+export const TAXI_COLOR = 0xf2c12e;
+
+/** Some shoppers and visitors take a taxi. */
+function carOrTaxi(rng: Rng): { model: number; color: number } {
+  return rng.chance(0.14) ? { model: VM.taxi, color: TAXI_COLOR } : { model: pickCarModel(rng), color: pickCarColor(rng) };
 }
 
 /** Peak-hour vehicle trips generated per unit. */
@@ -271,6 +282,7 @@ export class TripGenerator {
         purpose: Purpose.Commute,
         model: pickCarModel(rng),
         color: pickCarColor(rng),
+        dest: (toWork ? job : home).id,
       };
     }
     const r2 = rng.next();
@@ -281,21 +293,26 @@ export class TripGenerator {
       const shop = near.length ? near[Math.floor(rng.next() * near.length)] : buildings.get(this.com[Math.floor(rng.next() * this.com.length)]);
       if (!shop) return null;
       const there = rng.chance(0.55);
+      const car = there ? carOrTaxi(rng) : { model: pickCarModel(rng), color: pickCarColor(rng) };
       return {
         from: this.pt(there ? home : shop),
         to: this.pt(there ? shop : home),
         purpose: Purpose.Shopping,
-        model: pickCarModel(rng),
-        color: pickCarColor(rng),
+        ...car,
+        dest: (there ? shop : home).id,
       };
     }
     if (r2 < 0.78 && (this.ind.length || this.com.length)) {
-      const truck = rng.chance(0.55) ? VM.truck : VM.van;
-      const color = truck === VM.truck ? rng.pick([0xe8e8e4, 0xd8d2c4, 0x35506e, 0x7a1f1f]) : rng.pick([0xf2f2f0, 0xe8e8e4, 0x9aa0a6]);
+      const tr = rng.next();
+      const truck = tr < 0.42 ? VM.truck : tr < 0.72 ? VM.delivery : VM.van;
+      const color =
+        truck === VM.truck ? rng.pick([0xe8e8e4, 0xd8d2c4, 0x35506e, 0x7a1f1f])
+        : truck === VM.delivery ? rng.pick([0xf2f2f0, 0xf2f2f0, 0xc23b2e, 0x2b5aa6, 0xe8a51f, 0x3a7d44])
+        : rng.pick([0xf2f2f0, 0xe8e8e4, 0x9aa0a6]);
       if (this.ind.length && this.com.length && rng.chance(0.55)) {
         const a = buildings.get(this.ind[Math.floor(rng.next() * this.ind.length)])!;
         const b = buildings.get(this.com[Math.floor(rng.next() * this.com.length)])!;
-        return { from: this.pt(a), to: this.pt(b), purpose: Purpose.Freight, model: truck, color };
+        return { from: this.pt(a), to: this.pt(b), purpose: Purpose.Freight, model: truck, color, dest: b.id };
       }
       if (out && this.ind.length && rng.chance(0.6)) {
         const a = buildings.get(this.ind[Math.floor(rng.next() * this.ind.length)])!;
@@ -305,14 +322,14 @@ export class TripGenerator {
       }
       if (out && this.com.length) {
         const b = buildings.get(this.com[Math.floor(rng.next() * this.com.length)])!;
-        return { from: out, to: this.pt(b), purpose: Purpose.Freight, model: truck, color };
+        return { from: out, to: this.pt(b), purpose: Purpose.Freight, model: truck, color, dest: b.id };
       }
     }
     if (out) {
       // Tourists head for the landmarks.
       if (this.sights.length && rng.chance(0.35)) {
         const b = buildings.get(this.sights[Math.floor(rng.next() * this.sights.length)].id);
-        if (b) return { from: out, to: this.pt(b), purpose: Purpose.Visitor, model: pickCarModel(rng), color: pickCarColor(rng) };
+        if (b) return { from: out, to: this.pt(b), purpose: Purpose.Visitor, ...carOrTaxi(rng), dest: b.id };
       }
       const pool = this.com.length + this.off.length > 0 ? [...this.com, ...this.off] : this.res;
       if (!pool.length) return null;
@@ -322,8 +339,8 @@ export class TripGenerator {
         from: inbound ? out : this.pt(b),
         to: inbound ? this.pt(b) : out,
         purpose: Purpose.Visitor,
-        model: pickCarModel(rng),
-        color: pickCarColor(rng),
+        ...carOrTaxi(rng),
+        dest: inbound ? b.id : undefined,
       };
     }
     return null;

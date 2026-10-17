@@ -418,10 +418,12 @@ function house(g: GeoBuilder, b: GenInput, r: Rng, k: Kit): void {
     roofOver(g, k, r, gx0, gz0, gx1, gz1, 2.9, { kind: k.look.roof === 'mansard' || k.look.roof === 'vault' ? 'flat' : k.look.roof });
     g.ground(gx0 + 0.3, 0, gx1 - 0.3, gz0, CONC(s), 0.05);
     if (r.chance(0.55)) g.prop({ kind: 'car', x: (gx0 + gx1) / 2, y: 0.05, z: gz0 * 0.45, rot: Math.PI / 2, variant: r.pick([VM.sedan, VM.suv, VM.hatchback]), color: r.pick(CAR_COLORS) });
+    else g.prop({ kind: 'driveway', x: (gx0 + gx1) / 2, y: 0.05, z: gz0 * 0.45, rot: Math.PI / 2 });
   } else {
     const dx = side > 0 ? x1 + 0.8 : x0 - 3.6;
     g.ground(dx, 0, dx + 2.8, z0 + 4, CONC(s), 0.05);
     if (r.chance(0.5)) g.prop({ kind: 'car', x: dx + 1.4, y: 0.05, z: 3.2, rot: Math.PI / 2, variant: r.pick([VM.sedan, VM.hatchback]), color: r.pick(CAR_COLORS) });
+    else g.prop({ kind: 'driveway', x: dx + 1.4, y: 0.05, z: 3.2, rot: Math.PI / 2 });
   }
   // Garden: greener movements plant more.
   if (r.chance(0.7)) fence(g, -w / 2 + 0.2, z1 + 1, w / 2 - 0.2, d - 0.2, r.range(1.1, 1.6), a.heavy > 0.3 ? shade(k.wallCol, 0.9) : hex(r.pick([0xcdb69a, 0xe8e6e0, 0x6b5a48])), [false, true, true, true]);

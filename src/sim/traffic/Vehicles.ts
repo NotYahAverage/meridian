@@ -8,11 +8,18 @@ import type { Terrain } from '../world/Terrain';
 import type { Route, RouteLeg } from './Pathfinder';
 import type { Sense, Signals, Turn } from './Signals';
 
-export const VEHICLE_MODELS = ['sedan', 'hatchback', 'suv', 'van', 'truck', 'garbage', 'firetruck', 'police', 'ambulance', 'bus'] as const;
+export const VEHICLE_MODELS = ['sedan', 'hatchback', 'suv', 'van', 'truck', 'garbage', 'firetruck', 'police', 'ambulance', 'bus', 'pickup', 'taxi', 'delivery', 'mini'] as const;
 export type VehicleModelName = (typeof VEHICLE_MODELS)[number];
 export const VM: Record<VehicleModelName, number> = Object.fromEntries(VEHICLE_MODELS.map((m, i) => [m, i])) as Record<VehicleModelName, number>;
 
-export const VEHICLE_LENGTH = [4.6, 4.0, 4.8, 5.2, 8.5, 8.0, 9.0, 4.8, 6.2, 12.0];
+export const VEHICLE_LENGTH = [4.6, 4.0, 4.8, 5.2, 8.5, 8.0, 9.0, 4.8, 6.2, 12.0, 5.3, 4.7, 6.4, 3.45];
+/** Width and height of each model (for distant boxes). */
+export const VEHICLE_WIDTH = [1.82, 1.76, 1.96, 2.0, 2.45, 2.45, 2.5, 1.84, 2.2, 2.55, 1.95, 1.84, 2.2, 1.64];
+export const VEHICLE_HEIGHT = [1.45, 1.5, 1.85, 2.25, 3.2, 3.3, 3.2, 1.6, 2.85, 3.3, 1.95, 1.65, 3.25, 1.5];
+/** Trucks and buses: slow to start and stop. */
+export const HEAVY_MODEL = VEHICLE_MODELS.map((m) => m === 'truck' || m === 'garbage' || m === 'firetruck' || m === 'bus' || m === 'delivery');
+/** Vehicles that park at the end of their trip (rather than vanishing), when near the camera. */
+const PARKS = VEHICLE_MODELS.map((m) => ['sedan', 'hatchback', 'suv', 'van', 'pickup', 'taxi', 'delivery', 'mini'].includes(m));
 
 export enum Purpose {
   Commute = 0,
@@ -31,6 +38,8 @@ export interface VehicleSpawn {
   color: number;
   purpose: Purpose;
   tag?: number;
+  /** The building the trip ends at, if any. */
+  dest?: number;
   onArrive?: () => void;
   /** Called on arrival; returning a new route keeps the vehicle going after `dwell` seconds. */
   next?: (i: number) => { route: Route; dwell: number } | null;
@@ -63,6 +72,23 @@ const SAMPLES = 12;
 const CONFLICT_DIST = 2.4;
 /** People (and zebra crossings) are only looked for this close to where they're simulated. */
 const PEOPLE_RANGE = 420;
+/** Cars this close to the camera's focus park at the end of their trip, and their drivers walk inside. */
+const PARK_RANGE = 380;
+
+/** What a vehicle is doing at the end of its trip. */
+export enum Park {
+  None = 0,
+  /** Heading for the kerb. */
+  Kerb = 1,
+  /** Heading for a driveway. */
+  Driveway = 2,
+  /** Turning into the driveway. */
+  PullingIn = 3,
+  /** Parked (and, at the end, fading away). */
+  Parked = 4,
+  /** Not parking: vanishes on arrival as before. */
+  Never = 5,
+}
 
 /** A junction where drivers claim their way across: the paths through it and who goes first. */
 interface Junction {
@@ -128,6 +154,21 @@ export class Vehicles {
   readonly serial: Uint32Array;
   /** Seconds left standing still (buses at stops). */
   readonly hold: Float32Array;
+  /** End-of-trip parking state (Park). */
+  readonly park: Uint8Array;
+  /** 1 while visible; falls to 0 as a parked car fades away. */
+  readonly fade: Float32Array;
+  /** Destination building of each vehicle (0 = none). */
+  readonly dest: Int32Array;
+  private parkT: Float32Array;
+  private latTarget: Float32Array;
+  /** Driveway spot (x, z, heading) for vehicles pulling in. */
+  private spot: Float32Array;
+  /** Where a vehicle arriving at a building can park off the road (an empty driveway), if anywhere. */
+  arrivalSpot: ((buildingId: number) => { x: number; z: number; rot: number } | null) | null = null;
+  /** A car has parked near the camera: its driver gets out. */
+  onParked: ((i: number, x: number, z: number, heading: number, buildingId: number, purpose: Purpose) => void) | null = null;
+  parked = 0;
   private routes: (Route | null)[];
   private leg: Int32Array;
   private d: Float32Array;
@@ -235,6 +276,12 @@ export class Vehicles {
     this.held = new Uint8Array(max);
     this.serial = new Uint32Array(max);
     this.hold = new Float32Array(max);
+    this.park = new Uint8Array(max);
+    this.fade = new Float32Array(max);
+    this.dest = new Int32Array(max);
+    this.parkT = new Float32Array(max);
+    this.latTarget = new Float32Array(max);
+    this.spot = new Float32Array(max * 3);
     this.routes = new Array(max).fill(null);
     this.leg = new Int32Array(max);
     this.d = new Float32Array(max);
@@ -445,6 +492,11 @@ export class Vehicles {
     this.color[i] = sp.color;
     this.purpose[i] = sp.purpose;
     this.tag[i] = sp.tag ?? 0;
+    this.dest[i] = sp.dest ?? 0;
+    this.park[i] = Park.None;
+    this.fade[i] = 1;
+    this.parkT[i] = 0;
+    this.latTarget[i] = 0;
     this.routes[i] = route;
     this.leg[i] = 0;
     this.d[i] = d0;
@@ -486,7 +538,7 @@ export class Vehicles {
     const r = (k: number) => hash(s, k);
     // One "assertiveness" trait colours several habits; the rest vary independently.
     const bold = r(1);
-    const heavy = model >= 4;
+    const heavy = HEAVY_MODEL[model];
     this.vfac[i] = 0.9 + bold * 0.14 + (r(2) - 0.5) * 0.08;
     this.headway[i] = (heavy ? 1.7 : 1.05) + (1 - bold) * 0.7 + r(3) * 0.2;
     this.amax[i] = (heavy ? 0.9 : 1.6) + bold * 0.9 + r(4) * 0.3;
@@ -521,6 +573,8 @@ export class Vehicles {
     this.unreserve(i);
     this.turning[i] = 0;
     this.committed[i] = 0;
+    this.park[i] = Park.None;
+    this.hold[i] = 0;
     this.active[i] = 0;
     this.routes[i] = null;
     const cb = this.callbacks.get(i);
@@ -844,6 +898,7 @@ export class Vehicles {
         const j = list[k];
         const dist = stop - this.d[j];
         if (dist > 60) break;
+        if (this.park[j] === Park.Parked) continue;
         // Moving toward the line in time to use the green, or waiting at it.
         if (this.speed[j] < 0.5 && dist > 45) continue;
         out.near++;
@@ -923,7 +978,8 @@ export class Vehicles {
       this.dtAcc[i] = 0;
       // Distant vehicles move in coarser steps (but keep up).
       if (step > (far ? 0.5 : 0.25)) step = far ? 0.5 : 0.25;
-      if (this.turning[i]) this.updateTurn(i, step);
+      if (this.park[i] === Park.PullingIn || this.park[i] === Park.Parked) this.updatePark(i, step);
+      else if (this.turning[i]) this.updateTurn(i, step);
       else this.updateDrive(i, step);
     }
   }
@@ -1310,6 +1366,13 @@ export class Vehicles {
     let go = false;
     if (isLast) {
       mustStopAt = dEnd;
+      if (this.park[i] === Park.None && distToEnd < 60) this.planPark(i, seg, route, k);
+      if (this.park[i] === Park.Kerb || this.park[i] === Park.Driveway) {
+        // Signal and ease over to the kerb (or toward the driveway) for the last stretch.
+        this.indicator[i] = 1;
+        if (this.park[i] === Park.Kerb) this.latTarget[i] = distToEnd < 35 ? this.kerbLat(seg) : 0;
+        v0 = Math.min(v0, 2 + distToEnd * 0.35);
+      }
     } else if (distToEnd < LOOKAHEAD) {
       this.planTurn(i, seg, route, k);
       const J = this.junction(this.exitNode(seg, leg));
@@ -1400,15 +1463,15 @@ export class Vehicles {
     // Lane changes and signals.
     this.lcCool[i] -= dt;
     this.laneChange(i, seg, route, k, dt);
-    if (this.lcTarget[i] < 0 && Math.abs(this.lat[i]) < 0.15) {
+    if (this.lcTarget[i] < 0 && Math.abs(this.lat[i] - this.latTarget[i]) < 0.15 && (this.park[i] === Park.None || this.park[i] === Park.Never)) {
       const t = !isLast && (distToEnd < 45 || this.committed[i]) ? this.turnAt(route, k) : 0;
       this.indicator[i] = t;
     }
-    // Ease across into the new lane.
-    if (this.lat[i] !== 0) {
-      const l = this.lat[i];
+    // Ease across into the new lane (or over to the kerb).
+    if (this.lat[i] !== this.latTarget[i]) {
+      const l = this.lat[i] - this.latTarget[i];
       const step = (0.8 + Math.min(1, Math.abs(l)) * 0.7) * dt * Math.min(1, 0.4 + nv / 6);
-      this.lat[i] = Math.abs(l) <= step ? 0 : l - Math.sign(l) * step;
+      this.lat[i] = Math.abs(l) <= step ? this.latTarget[i] : this.lat[i] - Math.sign(l) * step;
     }
 
     if (isLast) {
@@ -1417,6 +1480,7 @@ export class Vehicles {
         const cont = this.continuations.get(i);
         const next = cont ? cont(i) : null;
         if (next && this.reroute(i, next.route, next.dwell)) return;
+        if (this.startParking(i, seg, leg)) return;
         this.despawn(i, true);
         return;
       }
@@ -1435,6 +1499,125 @@ export class Vehicles {
       this.anchorD[i] = pos;
       this.wait[i] = 0;
     } else if (v < 0.3) this.wait[i] += dt;
+  }
+
+  // ── Parking ───────────────────────────────────────────────────────────────
+
+  /** Decides how a car near the camera ends its trip: into an empty driveway close by, or at the kerb. */
+  private planPark(i: number, seg: RoadSegment, route: Route, k: number): void {
+    const dx = this.x[i] - this.lodX, dz = this.z[i] - this.lodZ;
+    if (!PARKS[this.model[i]] || !this.dest[i] || this.continuations.has(i) || dx * dx + dz * dz > PARK_RANGE * PARK_RANGE) {
+      this.park[i] = Park.Never;
+      return;
+    }
+    const p = this.purpose[i];
+    if (p !== Purpose.Commute && p !== Purpose.Shopping && p !== Purpose.Visitor && p !== Purpose.Freight && p !== Purpose.MoveIn) {
+      this.park[i] = Park.Never;
+      return;
+    }
+    this.park[i] = Park.Kerb;
+    const leg = route.legs[k];
+    const spot = this.arrivalSpot?.(this.dest[i]);
+    if (spot && this.model[i] !== VM.delivery) {
+      // Where the driveway meets the road, on our side of it.
+      const end = this.dEnd[i];
+      let best = -1, bd = 1e9;
+      for (let d = Math.max(this.d[i] + 4, end - 30); d <= end + 18 && d < seg.length - this.exitTrim(seg, leg); d += 1) {
+        this.lanePos(seg, leg.dir, this.lane[i], d, this.tmpA);
+        const e = Math.hypot(this.tmpA.x - spot.x, this.tmpA.z - spot.z);
+        if (e < bd) {
+          bd = e;
+          best = d;
+        }
+      }
+      // It has to be on our right, a short turn away.
+      this.lanePos(seg, leg.dir, this.lane[i], best, this.tmpA);
+      const side = (spot.x - this.tmpA.x) * -this.tmpA.tz + (spot.z - this.tmpA.z) * this.tmpA.tx;
+      if (best > 0 && bd < 14 && side > 2) {
+        this.park[i] = Park.Driveway;
+        this.dEnd[i] = Math.max(this.d[i] + 2, best - 5);
+        this.spot[i * 3] = spot.x;
+        this.spot[i * 3 + 1] = spot.z;
+        this.spot[i * 3 + 2] = spot.rot;
+      }
+    }
+  }
+
+  /** Lateral offset from the kerb lane's centre to a car parked against the kerb. */
+  private kerbLat(seg: RoadSegment): number {
+    const rt = ROAD_TYPES[seg.type];
+    return rt.laneWidth / 2 + rt.gutter - 1.05;
+  }
+
+  /** Arrived: pull into the driveway, or stay at the kerb a while. Returns false if it should just go. */
+  private startParking(i: number, seg: RoadSegment, leg: RouteLeg): boolean {
+    if (this.park[i] !== Park.Kerb && this.park[i] !== Park.Driveway) return false;
+    // The trip is over as far as the city is concerned.
+    const cb = this.callbacks.get(i);
+    this.callbacks.delete(i);
+    cb?.();
+    this.parkT[i] = 0;
+    this.speed[i] = Math.min(this.speed[i], 2.5);
+    if (this.park[i] === Park.Driveway) {
+      this.laneRemove(i);
+      this.place(i, seg, leg);
+      const a = { x: this.x[i], z: this.z[i], tx: Math.cos(this.heading[i]), tz: Math.sin(this.heading[i]) };
+      const sx = this.spot[i * 3], sz = this.spot[i * 3 + 1], rot = this.spot[i * 3 + 2];
+      // Nose in: come to rest with the car's centre on the spot, facing into the lot.
+      const b = { x: sx, z: sz, tx: Math.cos(rot), tz: Math.sin(rot) };
+      this.tLen[i] = this.curve(a, b, this.tp, i * 6);
+      this.tT[i] = 0;
+      this.park[i] = Park.PullingIn;
+    } else {
+      this.park[i] = Park.Parked;
+      this.speed[i] = 0;
+      this.lat[i] = this.latTarget[i];
+      this.place(i, seg, leg);
+      // On a road with more lanes, others go round it; on a one-lane street it's tucked in at the kerb, out of the way.
+      if (this.lanesOf(seg) < 2) this.laneRemove(i);
+      else this.hold[i] = 1e6;
+    }
+    this.indicator[i] = 0;
+    this.parked++;
+    return true;
+  }
+
+  /** Pulling into a driveway, then standing parked until it fades away. */
+  private updatePark(i: number, dt: number): void {
+    if (this.park[i] === Park.PullingIn) {
+      const len = this.tLen[i];
+      const rest = (1 - this.tT[i]) * len;
+      const v = Math.max(0.6, Math.min(this.speed[i] + dt, 2.5, Math.sqrt(2 * 1.5 * rest)));
+      this.speed[i] = v;
+      this.braking[i] = rest < 2 ? 1 : 0;
+      this.tT[i] = Math.min(1, this.tT[i] + (v * dt) / len);
+      const o = i * 6, p = this.tp, t = this.tT[i], u = 1 - t;
+      const x = u * u * p[o] + 2 * u * t * p[o + 2] + t * t * p[o + 4];
+      const z = u * u * p[o + 1] + 2 * u * t * p[o + 3] + t * t * p[o + 5];
+      const hx = 2 * u * (p[o + 2] - p[o]) + 2 * t * (p[o + 4] - p[o + 2]);
+      const hz = 2 * u * (p[o + 3] - p[o + 1]) + 2 * t * (p[o + 5] - p[o + 3]);
+      this.x[i] = x;
+      this.z[i] = z;
+      if (hx * hx + hz * hz > 1e-6) this.heading[i] = Math.atan2(hz, hx);
+      this.y[i] = Math.max(this.terrain.heightAt(x, z), this.terrain.roadHeightAt(x, z)) + 0.12;
+      if (this.tT[i] >= 1) {
+        this.park[i] = Park.Parked;
+        this.speed[i] = 0;
+      }
+      return;
+    }
+    // Parked: the driver gets out after a moment; the car stays a little while, then fades.
+    const before = this.parkT[i];
+    this.parkT[i] += dt;
+    this.speed[i] = 0;
+    this.braking[i] = 0;
+    if (before < 1.2 && this.parkT[i] >= 1.2) this.onParked?.(i, this.x[i], this.z[i], this.heading[i], this.dest[i], this.purpose[i] as Purpose);
+    const stay = 9 + hash(this.serial[i], i) * 10;
+    const dx = this.x[i] - this.lodX, dz = this.z[i] - this.lodZ;
+    if (this.parkT[i] > stay || dx * dx + dz * dz > (PARK_RANGE + 250) ** 2) {
+      this.fade[i] -= dt / 1.2;
+      if (this.fade[i] <= 0) this.despawn(i);
+    }
   }
 
   /** Speed for the bend in the road ahead (this driver's comfortable cornering). */

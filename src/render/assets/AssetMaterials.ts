@@ -23,11 +23,41 @@ export function createAssetMaterial(key: string, opts: { instanceExtras?: boolea
         '#include <common>',
         `#include <common>
 attribute float aMat;
-${extras ? 'attribute vec2 aInst;' : ''}
+${extras ? 'attribute vec4 aInst;\nattribute vec2 aWheel;' : ''}
 varying float vMat;
 varying vec2 vInst;
 varying float vSeed;
-varying float vSide;`,
+varying float vSide;
+varying float vFade;
+vec2 a_rot2(vec2 p, float a) { float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }`,
+      )
+      .replace(
+        '#include <beginnormal_vertex>',
+        `#include <beginnormal_vertex>
+${extras ? `{
+  // Wheels turn about their axles; the body pitches and rolls about the axle height.
+  float a_pk = aInst.w;
+  float a_pitch = (floor(a_pk / 256.0) - 100.0) * 0.001;
+  float a_roll = (mod(a_pk, 256.0) - 100.0) * 0.001;
+  if (aMat > 6.5) objectNormal.xy = a_rot2(objectNormal.xy, -aInst.z);
+  else { objectNormal.xy = a_rot2(objectNormal.xy, a_pitch); objectNormal.yz = a_rot2(objectNormal.yz, a_roll); }
+}` : ''}`,
+      )
+      .replace(
+        '#include <begin_vertex>',
+        `#include <begin_vertex>
+${extras ? `{
+  float a_pk = aInst.w;
+  float a_pitch = (floor(a_pk / 256.0) - 100.0) * 0.001;
+  float a_roll = (mod(a_pk, 256.0) - 100.0) * 0.001;
+  if (aMat > 6.5) transformed.xy = aWheel + a_rot2(transformed.xy - aWheel, -aInst.z);
+  else {
+    vec3 a_q = transformed - vec3(0.0, 0.55, 0.0);
+    a_q.xy = a_rot2(a_q.xy, a_pitch);
+    a_q.yz = a_rot2(a_q.yz, a_roll);
+    transformed = a_q + vec3(0.0, 0.55, 0.0);
+  }
+}` : ''}`,
       )
       .replace(
         '#include <color_vertex>',
@@ -36,7 +66,7 @@ varying float vSide;`,
 if (aMat < 0.5) vColor.rgb *= instanceColor.rgb;
 #endif
 vMat = aMat;
-${extras ? 'vInst = aInst;' : 'vInst = vec2(0.0);'}
+${extras ? 'vInst = aInst.xy;\nvFade = floor(aInst.y * 0.5 + 0.01) / 50.0;' : 'vInst = vec2(0.0);\nvFade = 0.0;'}
 vSide = position.z;
 #ifdef USE_INSTANCING
 vSeed = fract(sin(dot(instanceMatrix[3].xz, vec2(12.9898, 78.233))) * 43758.5453);
@@ -52,6 +82,7 @@ varying float vMat;
 varying vec2 vInst;
 varying float vSeed;
 varying float vSide;
+varying float vFade;
 uniform float uTime;
 uniform float uNight;
 uniform float uDesat;
@@ -64,6 +95,8 @@ vec3 a_emis = vec3(0.0);`,
         '#include <color_fragment>',
         `#include <color_fragment>
 {
+  // Fading away (a parked car leaving the scene): dissolve.
+  if (vFade > 0.0 && fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715)))) < vFade) discard;
   int k = int(vMat + 0.5);
   // vInst.x: brake lights (bit 0), then the turn signal (1 left, 2 right) blinking on that side's lamps.
   float brake = mod(vInst.x, 2.0);
@@ -83,7 +116,7 @@ vec3 a_emis = vec3(0.0);`,
   else if (k == 5) {
     float ph = step(0.5, fract(uTime * 2.2 + vSeed));
     vec3 lc = mix(vec3(1.0, 0.1, 0.08), vec3(0.15, 0.3, 1.0), ph);
-    float flashOn = ${extras ? 'vInst.y' : '0.0'};
+    float flashOn = ${extras ? 'mod(vInst.y, 2.0)' : '0.0'};
     a_emis += lc * (0.2 + flashOn * 3.5);
     diffuseColor.rgb = mix(diffuseColor.rgb, lc, 0.6);
   }
@@ -178,7 +211,7 @@ export class Pool {
     private geo: THREE.BufferGeometry,
     private material: THREE.Material,
     capacity: number,
-    private opts: { shadows?: boolean; colors?: boolean; extras?: boolean; depth?: THREE.Material } = {},
+    private opts: { shadows?: boolean; colors?: boolean; extras?: boolean | number; depth?: THREE.Material } = {},
   ) {
     this.capacity = capacity;
     this.mesh = this.create(capacity);
@@ -187,7 +220,8 @@ export class Pool {
   private create(cap: number): THREE.InstancedMesh {
     const geo = this.opts.extras ? this.geo.clone() : this.geo;
     if (this.opts.extras) {
-      this.extras = new THREE.InstancedBufferAttribute(new Float32Array(cap * 2), 2);
+      const size = this.opts.extras === true ? 2 : (this.opts.extras as number);
+      this.extras = new THREE.InstancedBufferAttribute(new Float32Array(cap * size), size);
       this.extras.setUsage(THREE.DynamicDrawUsage);
       geo.setAttribute('aInst', this.extras);
     }
@@ -243,7 +277,7 @@ export class Pool {
     }
     if (this.extras) {
       this.extras.clearUpdateRanges();
-      this.extras.addUpdateRange(0, count * 2);
+      this.extras.addUpdateRange(0, count * this.extras.itemSize);
       this.extras.needsUpdate = true;
     }
   }

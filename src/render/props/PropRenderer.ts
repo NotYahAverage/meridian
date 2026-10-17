@@ -8,12 +8,16 @@ import type { BuildingRenderer } from '../buildings/BuildingRenderer';
 import { WALK_LAMP_Y } from '../roads/RoadMeshBuilder';
 import type { RoadRenderer } from '../roads/RoadRenderer';
 import { WalkLight } from '../../sim/traffic/Signals';
+import { BuildingState, Zone } from '../../sim/types';
 import { walkLampGeometry, walkLampTexture, walkSignalGeometry } from './WalkSignalGeometry';
+import { allFurniture } from './StreetFurniture';
 
 const TREE_HI: AssetName[] = ['oak', 'maple', 'pine', 'bush'];
 const HI_TREE_DIST = 620;
 const CAR_DIST = 1100;
 const LIGHT_DIST = 1700;
+const FURNITURE_DIST = 650;
+const FURNITURE: AssetName[] = ['bench', 'bin', 'planter'];
 
 interface Bucket {
   m: Float32Array;
@@ -21,8 +25,8 @@ interface Bucket {
   n: number;
 }
 
-function bucket(): Bucket {
-  return { m: new Float32Array(64 * 16), c: new Float32Array(64 * 3), n: 0 };
+function bucket(cap = 64): Bucket {
+  return { m: new Float32Array(cap * 16), c: new Float32Array(cap * 3), n: 0 };
 }
 
 function push(b: Bucket, x: number, y: number, z: number, rot: number, s: number, r = 1, g = 1, bl = 1, sy = s): void {
@@ -55,14 +59,15 @@ interface ChunkProps {
 
 function emptyChunk(): ChunkProps {
   return {
-    trees: TREE_HI.map(bucket),
-    lights: bucket(),
-    signals: bucket(),
-    walkPoles: bucket(),
-    cranes: bucket(),
-    towers: bucket(),
+    // Sparse kinds start small (they grow as needed): a chunk is rebuilt often while the city grows.
+    trees: TREE_HI.map(() => bucket()),
+    lights: bucket(16),
+    signals: bucket(4),
+    walkPoles: bucket(4),
+    cranes: bucket(2),
+    towers: bucket(2),
     rotors: [],
-    cars: VEHICLE_MODELS.map(bucket),
+    cars: VEHICLE_MODELS.map(() => bucket(4)),
     smoke: [],
   };
 }
@@ -94,6 +99,11 @@ export class PropRenderer {
   private towers: Pool;
   private rotors: Pool;
   private cars: Pool[];
+  private furniture: Pool[];
+  /** Street furniture per chunk (bench, bin, planter buckets), refreshed when roads, buildings or stops change. */
+  private furnitureChunks = new Map<number, Bucket[]>();
+  private furnitureKey = '';
+  private furnitureTimer = 0;
   private lastRoadProps = -1;
   private lastBldProps = -1;
   private lastKey = '';
@@ -125,7 +135,8 @@ export class PropRenderer {
     this.rotors = new Pool(assets.get('wind_rotor'), propMat, 16, { shadows: true });
     const carMat = createAssetMaterial('parked');
     this.cars = VEHICLE_MODELS.map((m) => new Pool(assets.get(m), carMat, 256, { colors: true, shadows: true }));
-    for (const p of [...this.treeHi, ...this.treeLo, this.lights, this.signals, this.signalLamps, this.walkPoles, this.handLamps, this.walkLamps, this.cranes, this.towers, this.rotors, ...this.cars]) {
+    this.furniture = FURNITURE.map((n) => new Pool(assets.get(n), propMat, 256, { shadows: true }));
+    for (const p of [...this.treeHi, ...this.treeLo, this.lights, this.signals, this.signalLamps, this.walkPoles, this.handLamps, this.walkLamps, this.cranes, this.towers, this.rotors, ...this.cars, ...this.furniture]) {
       this.group.add(p.mesh);
     }
   }
@@ -208,8 +219,37 @@ export class PropRenderer {
     return cp;
   }
 
+  /** Re-lays the street furniture when roads, buildings or bus stops have changed (at most every few seconds). */
+  private refreshFurniture(dt: number): void {
+    this.furnitureTimer -= dt;
+    if (this.furnitureTimer > 0) return;
+    this.furnitureTimer = 3;
+    // Only what furniture depends on: the roads, the stops, and which buildings with a frontage that gets any are open.
+    let sig = 0;
+    for (const b of this.city.buildings.all.values()) {
+      if (b.state !== BuildingState.Active) continue;
+      const z = b.zone;
+      if (b.kind === 'zoned' && z !== Zone.Commercial && z !== Zone.CommercialHigh && z !== Zone.Office && z !== Zone.ResHigh && z !== Zone.ResMed) continue;
+      sig = (sig * 31 + b.id * 7 + b.segId + b.floors) | 0;
+    }
+    const key = `${this.roads.propsVersion}:${this.city.transit.stops.size}:${sig}`;
+    if (key === this.furnitureKey) return;
+    this.furnitureKey = key;
+    this.furnitureChunks.clear();
+    for (const f of allFurniture(this.city)) {
+      const cx = Math.floor(f.x / CHUNK_SIZE), cz = Math.floor(f.z / CHUNK_SIZE);
+      if (cx < 0 || cz < 0 || cx >= CHUNKS || cz >= CHUNKS) continue;
+      const ch = cz * CHUNKS + cx;
+      let list = this.furnitureChunks.get(ch);
+      if (!list) this.furnitureChunks.set(ch, (list = FURNITURE.map(() => bucket(8))));
+      push(list[f.kind], f.x, f.y, f.z, f.rot, 1);
+    }
+    this.needAssemble = true;
+  }
+
   update(camera: THREE.PerspectiveCamera, dt: number): void {
     this.collectDirty();
+    this.refreshFurniture(dt);
     let rebuilt = 0;
     for (const ch of this.dirty) {
       this.chunks[ch] = this.buildChunk(ch);
@@ -270,6 +310,7 @@ export class PropRenderer {
     const cranes: Bucket[] = [];
     const towers: Bucket[] = [];
     const cars: Bucket[][] = VEHICLE_MODELS.map(() => []);
+    const furn: Bucket[][] = FURNITURE.map(() => []);
     this.visibleRotors = [];
     this.emitters = [];
     for (const { ch, d } of vis) {
@@ -282,6 +323,8 @@ export class PropRenderer {
         loPine.push(cp.trees[2]);
       }
       if (d < CAR_DIST) for (let k = 0; k < cars.length; k++) cars[k].push(cp.cars[k]);
+      const fc = d < FURNITURE_DIST ? this.furnitureChunks.get(ch) : undefined;
+      if (fc) for (let k = 0; k < FURNITURE.length; k++) furn[k].push(fc[k]);
       if (d < LIGHT_DIST) {
         lights.push(cp.lights);
         signals.push(cp.signals);
@@ -301,6 +344,7 @@ export class PropRenderer {
     copy(this.cranes, cranes, false);
     copy(this.towers, towers, false);
     for (let k = 0; k < cars.length; k++) copy(this.cars[k], cars[k], true);
+    for (let k = 0; k < FURNITURE.length; k++) copy(this.furniture[k], furn[k], false);
   }
 
   private spin = 0;

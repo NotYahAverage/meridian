@@ -66,7 +66,8 @@ export interface Mat {
 }
 
 export interface BuildingProp {
-  kind: 'tree' | 'bush' | 'car' | 'smoke' | 'steam' | 'rotor' | 'fountain' | 'crane';
+  /** `driveway` marks an empty driveway (where an arriving car can park); it isn't drawn. */
+  kind: 'tree' | 'bush' | 'car' | 'smoke' | 'steam' | 'rotor' | 'fountain' | 'crane' | 'driveway';
   x: number;
   y: number;
   z: number;

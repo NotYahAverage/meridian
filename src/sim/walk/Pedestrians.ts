@@ -160,6 +160,8 @@ export interface PedStats {
   crossings: number;
   /** People who gave up waiting for a gap and crossed anyway. */
   forced: number;
+  /** Drivers who got out of a parked car and walked in. */
+  fromCars: number;
 }
 
 export interface PedExit {
@@ -217,7 +219,7 @@ export class Pedestrians {
   private tz = new Float32Array(MAX_PEOPLE);
   private free: number[] = [];
   count = 0;
-  readonly stats: PedStats = { spawned: 0, arrived: 0, boarded: 0, alighted: 0, redLight: 0, crossings: 0, forced: 0 };
+  readonly stats: PedStats = { spawned: 0, arrived: 0, boarded: 0, alighted: 0, redLight: 0, crossings: 0, forced: 0, fromCars: 0 };
   /** Recent departures (for the inspector when the person it shows goes indoors). */
   readonly exits: PedExit[] = [];
   /** Visual density (the traffic density setting). */
@@ -1255,6 +1257,39 @@ export class Pedestrians {
       for (let k = 0; k < n; k++) this.alight(b.x, b.z);
     }
     this.dwellSeen = seen;
+  }
+
+  /**
+   * A car has parked near the camera: its driver gets out on the kerb side and walks in.
+   * Someone who lives there going home, works there arriving for work, or (for shops and
+   * the like) someone from the homes around.
+   */
+  fromCar(x: number, z: number, heading: number, buildingId: number, purpose: Purpose): boolean {
+    if (this.free.length < 8 || this.routeBudget <= 0) return false;
+    if ((x - this.focusX) ** 2 + (z - this.focusZ) ** 2 > BUBBLE * BUBBLE) return false;
+    const city = this.city, pop = city.population;
+    const to = city.buildings.get(buildingId);
+    if (!to) return false;
+    let errand = Errand.Shop, k = 0, hh = -1;
+    if (to.kind === 'zoned' && isResidential(to.zone)) {
+      errand = Errand.Home;
+      hh = this.sampleHousehold((h) => pop.home[h] === buildingId, 300);
+    } else if (purpose === Purpose.Commute || purpose === Purpose.Freight) {
+      errand = Errand.Work;
+      hh = this.sampleHousehold((h) => pop.job[h * 2] === buildingId || pop.job[h * 2 + 1] === buildingId, 300);
+      if (hh >= 0) k = pop.job[hh * 2] === buildingId ? 0 : 1;
+    }
+    if (hh < 0) hh = this.sampleHousehold((h) => this.bubble.ids.has(pop.home[h]), 200);
+    if (hh < 0) return false;
+    // The kerb-side door (on the right, for right-hand traffic).
+    const dx = x - Math.sin(heading) * 1.15, dz = z + Math.cos(heading) * 1.15;
+    const here = city.walk.nearest(dx, dz, 30);
+    if (!here) return false;
+    const path = this.pathFrom(dx, dz, here, to, 5 * 60);
+    if (!path) return false;
+    if (this.launchIndex(path, hh, k, errand, 0, to.id, false) < 0) return false;
+    this.stats.fromCars++;
+    return true;
   }
 
   private alight(bx: number, bz: number): void {

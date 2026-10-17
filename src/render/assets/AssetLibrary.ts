@@ -3,7 +3,8 @@ import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometr
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export const ASSET_NAMES = [
-  'sedan', 'hatchback', 'suv', 'van', 'truck', 'garbage', 'firetruck', 'police', 'ambulance', 'bus', 'bus_stop',
+  'sedan', 'hatchback', 'suv', 'van', 'truck', 'garbage', 'firetruck', 'police', 'ambulance', 'bus', 'pickup', 'taxi', 'delivery', 'mini', 'bus_stop',
+  'bench', 'bin', 'planter',
   'oak', 'maple', 'pine', 'bush', 'tree_lod', 'pine_lod', 'streetlight', 'signal', 'crane', 'wind_tower', 'wind_rotor',
   'airliner', 'sailboat', 'motorboat', 'container_ship',
   'person_adult', 'person_dress', 'person_child', 'person_lo',
@@ -11,7 +12,7 @@ export const ASSET_NAMES = [
 export type AssetName = (typeof ASSET_NAMES)[number];
 
 /** Material role baked into the `aMat` vertex attribute. */
-export const MATK = { tint: 0, fixed: 1, glass: 2, headlight: 3, taillight: 4, lightbar: 5, lamp: 6 } as const;
+export const MATK = { tint: 0, fixed: 1, glass: 2, headlight: 3, taillight: 4, lightbar: 5, lamp: 6, wheel: 7 } as const;
 
 function materialKind(name: string): number {
   if (name.startsWith('Body')) return MATK.tint;
@@ -20,6 +21,7 @@ function materialKind(name: string): number {
   if (name.startsWith('Taillight')) return MATK.taillight;
   if (name.startsWith('Lightbar')) return MATK.lightbar;
   if (name.startsWith('Lamp')) return MATK.lamp;
+  if (name.startsWith('Tire') || name.startsWith('Rim')) return MATK.wheel;
   return MATK.fixed;
 }
 
@@ -116,9 +118,43 @@ export class AssetLibrary {
     });
     if (!parts.length) return null;
     const merged = mergeGeometries(parts, false);
+    if (merged) tagWheels(merged);
     merged?.computeBoundingSphere();
     return merged;
   }
+}
+
+/**
+ * Gives every wheel vertex its axle (x, height) in `aWheel`, so the vehicle shader can
+ * spin it: wheel parts are grouped into axles by where they sit along the vehicle.
+ */
+export function tagWheels(g: THREE.BufferGeometry): void {
+  const pos = g.getAttribute('position');
+  const mat = g.getAttribute('aMat');
+  const n = pos.count;
+  const out = new Float32Array(n * 2);
+  const idx: number[] = [];
+  for (let i = 0; i < n; i++) if (Math.round(mat.getX(i)) === MATK.wheel) idx.push(i);
+  idx.sort((a, b) => pos.getX(a) - pos.getX(b));
+  let k = 0;
+  while (k < idx.length) {
+    let e = k + 1;
+    while (e < idx.length && pos.getX(idx[e]) - pos.getX(idx[e - 1]) < 0.08) e++;
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (let j = k; j < e; j++) {
+      const i = idx[j];
+      x0 = Math.min(x0, pos.getX(i));
+      x1 = Math.max(x1, pos.getX(i));
+      y0 = Math.min(y0, pos.getY(i));
+      y1 = Math.max(y1, pos.getY(i));
+    }
+    for (let j = k; j < e; j++) {
+      out[idx[j] * 2] = (x0 + x1) / 2;
+      out[idx[j] * 2 + 1] = (y0 + y1) / 2;
+    }
+    k = e;
+  }
+  g.setAttribute('aWheel', new THREE.BufferAttribute(out, 2));
 }
 
 /** A person model, kept indexed, with its parts tagged for the people shader (aSlot, aLimb, aOpt). */
@@ -250,10 +286,10 @@ function box(w: number, h: number, d: number, x: number, y: number, z: number, c
 function fallback(name: AssetName): THREE.BufferGeometry {
   const grey: [number, number, number] = [0.6, 0.6, 0.6];
   const parts: THREE.BufferGeometry[] = [];
-  const L: Record<string, number> = { sedan: 4.6, hatchback: 4, suv: 4.8, police: 4.8, van: 5.2, ambulance: 6.2, truck: 8.5, garbage: 8, firetruck: 9, bus: 12 };
+  const L: Record<string, number> = { sedan: 4.6, hatchback: 4, suv: 4.8, police: 4.8, van: 5.2, ambulance: 6.2, truck: 8.5, garbage: 8, firetruck: 9, bus: 12, pickup: 5.3, taxi: 4.7, delivery: 6.4, mini: 3.45 };
   if (name in L) {
     const len = L[name];
-    const tall = ['van', 'ambulance', 'truck', 'garbage', 'firetruck', 'bus'].includes(name) ? 2.6 : 1.1;
+    const tall = ['van', 'ambulance', 'truck', 'garbage', 'firetruck', 'bus', 'delivery'].includes(name) ? 2.6 : 1.1;
     parts.push(box(len, tall * 0.55, 1.8, 0, 0.35 + tall * 0.27, 0, [0.8, 0.8, 0.8], MATK.tint));
     parts.push(box(len * 0.55, tall * 0.42, 1.6, -len * 0.05, 0.35 + tall * 0.75, 0, [0.08, 0.1, 0.12], MATK.glass));
   } else if (name === 'oak' || name === 'maple' || name === 'tree_lod' || name === 'bush') {
@@ -274,6 +310,14 @@ function fallback(name: AssetName): THREE.BufferGeometry {
   } else if (name === 'bus_stop') {
     parts.push(box(3.8, 0.1, 1.6, 0, 2.45, 0, [0.42, 0.43, 0.45], MATK.fixed));
     parts.push(box(3.8, 2.0, 0.05, 0, 1.2, -0.7, [0.06, 0.08, 0.1], MATK.glass));
+  } else if (name === 'bench') {
+    parts.push(box(1.8, 0.06, 0.45, 0, 0.46, 0, [0.55, 0.38, 0.22], MATK.fixed));
+    parts.push(box(1.8, 0.35, 0.05, 0, 0.75, 0.24, [0.55, 0.38, 0.22], MATK.fixed));
+  } else if (name === 'bin') {
+    parts.push(box(0.5, 0.95, 0.5, 0, 0.47, 0, [0.13, 0.24, 0.17], MATK.fixed));
+  } else if (name === 'planter') {
+    parts.push(box(1.4, 0.55, 0.7, 0, 0.27, 0, [0.6, 0.59, 0.56], MATK.fixed));
+    parts.push(box(1.2, 0.4, 0.55, 0, 0.75, 0, [0.18, 0.3, 0.1], MATK.fixed));
   } else if (name === 'streetlight') {
     parts.push(box(0.15, 8.2, 0.15, 0, 4.1, 0, [0.16, 0.17, 0.18], MATK.fixed));
     parts.push(box(1.9, 0.08, 0.08, 0.9, 8, 0, [0.16, 0.17, 0.18], MATK.fixed));

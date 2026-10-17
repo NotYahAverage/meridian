@@ -105,10 +105,12 @@ export const house: Gen = (g, b, r) => {
     g.gable(gx0, gz0, gx1, gz1, 2.9, 1.2, false, roofM, mat(wall, P.TRIM, s), 0.3);
     g.ground(gx0 + 0.3, 0, gx1 - 0.3, gz0, CONC(s), 0.05);
     if (r.chance(0.55)) g.prop({ kind: 'car', x: (gx0 + gx1) / 2, y: 0.05, z: gz0 * 0.45, rot: Math.PI / 2, variant: r.pick([VM.sedan, VM.suv, VM.hatchback]), color: r.pick(CAR_COLORS) });
+    else g.prop({ kind: 'driveway', x: (gx0 + gx1) / 2, y: 0.05, z: gz0 * 0.45, rot: Math.PI / 2 });
   } else {
     const dx = side > 0 ? x1 + 0.8 : x0 - 3.6;
     g.ground(dx, 0, dx + 2.8, z0 + 4, CONC(s), 0.05);
     if (r.chance(0.5)) g.prop({ kind: 'car', x: dx + 1.4, y: 0.05, z: 3.2, rot: Math.PI / 2, variant: r.pick([VM.sedan, VM.hatchback]), color: r.pick(CAR_COLORS) });
+    else g.prop({ kind: 'driveway', x: dx + 1.4, y: 0.05, z: 3.2, rot: Math.PI / 2 });
   }
   g.ground(px - 0.6, 0, px + 0.6, z0 - 1.3, PAVE(s), 0.045);
   // Back yard: fence, maybe a pool and patio, trees.

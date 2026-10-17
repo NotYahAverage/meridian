@@ -192,7 +192,10 @@ export function buildSegment(
     (!crossB && ctrlB === 'signal' ? 32 : 0) |
     // Dashed give-way lines where traffic yields instead of stopping at a light.
     (giveWay(ctrlA) ? 64 : 0) |
-    (giveWay(ctrlB) ? 128 : 0);
+    (giveWay(ctrlB) ? 128 : 0) |
+    // Turn arrows: the movements open to traffic arriving at each end (left 1, straight on 2, right 4).
+    (turnMask(net, layout, seg, false) << 8) |
+    (turnMask(net, layout, seg, true) << 11);
   const len = s1 - s0;
   const bands = profile(rt);
   if (rt.medianKind === 'barrier' && (crossA || crossB)) {
@@ -367,6 +370,34 @@ function emitSegmentProps(out: RoadGeo, seg: RoadSegment, rt: RoadType, s0: numb
       }
     }
   }
+}
+
+/**
+ * Which ways traffic arriving at one end of a segment can go at the junction there:
+ * left 1, straight on 2, right 4 (0 for plain joins and dead ends, and where it can't arrive).
+ */
+export function turnMask(net: RoadNetwork, layout: RoadLayout, seg: RoadSegment, atB: boolean): number {
+  if (seg.ring) return 0;
+  const node = atB ? seg.b : seg.a;
+  const lay = layout.get(node);
+  if (!lay || lay.kind !== 'junction' || lay.arms.length < 3 || lay.control === 'roundabout') return 0;
+  if (seg.oneway !== 0 && seg.oneway !== (atB ? 1 : -1)) return 0;
+  const mine = lay.arms.find((a) => a.segId === seg.id && a.atA === !atB);
+  if (!mine) return 0;
+  // Arriving: travelling toward the node, against the arm's outward direction.
+  const ix = -mine.dx, iz = -mine.dz;
+  let mask = 0;
+  for (const a of lay.arms) {
+    if (a === mine) continue;
+    const o = net.segments.get(a.segId);
+    if (!o || (o.oneway !== 0 && o.oneway !== (a.atA ? 1 : -1))) continue;
+    const cross = ix * a.dz - iz * a.dx;
+    const dot = ix * a.dx + iz * a.dz;
+    if (cross > 0.35) mask |= 4;
+    else if (cross < -0.35) mask |= 1;
+    else if (dot > 0) mask |= 2;
+  }
+  return mask;
 }
 
 /** Builds junction surface, corner sidewalks and signal poles for a node. */

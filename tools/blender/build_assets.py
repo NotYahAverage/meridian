@@ -8,6 +8,7 @@ Run:  blender --background --factory-startup --python tools/blender/build_assets
 
 Material names carry meaning for the game's asset loader:
   Body*      tintable paint (multiplied by per-instance colour)
+  Tire*/Rim* the wheels: they spin about their axle in the vehicle shader
   Glass*     reflective glass
   Headlight  emissive white at night
   Taillight  emissive red at night
@@ -70,6 +71,10 @@ PALETTE = {
     "BoxGrey": (0.45, 0.46, 0.47, 1),
     "BoxTeal": (0.05, 0.38, 0.4, 1),
     "Antifoul": (0.36, 0.07, 0.06, 1),
+    "RimLug": (0.12, 0.12, 0.13, 1),
+    "BinGreen": (0.13, 0.24, 0.17, 1),
+    "Soil": (0.2, 0.14, 0.09, 1),
+    "Checker": (0.05, 0.05, 0.05, 1),
 }
 
 
@@ -215,6 +220,12 @@ def wheels(b, xs, half_track, r, width=0.24, dual_rear=False):
             y = side * half_track
             b.cylinder(r, r, width, (x, y, r), M("Tire"), segments=12, axis="Y")
             b.cylinder(r * 0.6, r * 0.6, width + 0.02, (x, y, r), M("Rim"), segments=8, axis="Y")
+            # Wheel nuts (and a hub) on the outer face, so the wheels are seen to turn.
+            yo = y + side * (width / 2 + 0.02)
+            for k in range(5):
+                a = k * 2 * math.pi / 5
+                b.box((r * 0.13, 0.03, r * 0.13), (x + math.cos(a) * r * 0.32, yo, r + math.sin(a) * r * 0.32), M("RimLug"))
+            b.box((r * 0.36, 0.025, r * 0.08), (x, yo - side * 0.005, r), M("RimLug"))
             if dual_rear and x < 0:
                 b.cylinder(r, r, width, (x, y - side * 0.28, r), M("Tire"), segments=12, axis="Y")
 
@@ -402,7 +413,89 @@ def build_vehicles():
     wheels(b, (3.4, -2.4, -3.6), W / 2 - 0.2, 0.5, width=0.3, dual_rear=True)
     objs.append(b.finish(smooth_angle=35))
     objs.append(city_bus())
+    objs += extra_vehicles()
     return objs
+
+
+def extra_vehicles():
+    objs = []
+    # Pickup: crew cab and an open bed.
+    b = Builder("pickup")
+    L, W, wr = 5.3, 1.95, 0.4
+    xs = (1.65, -1.75)
+    upper = [(2.65, 0.92), (2.6, 1.1), (2.2, 1.2), (1.25, 1.24), (1.2, 1.24), (-2.6, 1.22), (-2.65, 0.9)]
+    b.prism(arched_profile(wr * 0.95, xs, wr, upper), W, M("Body"), bevel=0.06, segments=2)
+    b.box((L - 0.5, W - 0.3, 0.18), (0, 0, wr + 0.05), M("Trim"))
+    for x in xs:
+        b.box((wr * 2.3, W - 0.42, 0.5), (x, 0, wr + 0.1), M("Trim"))
+    b.frustum((-0.45, 1.25, W / 2 - 0.08, 1.24), (-0.4, 0.55, W / 2 - 0.22, 1.9), M("Body"), M("Glass"))
+    b.box((0.95, W - 0.38, 0.06), (0.08, 0, 1.92), M("Body"))
+    # The bed: a dark floor inside painted sides.
+    b.box((2.05, W - 0.22, 0.04), (-1.55, 0, 1.26), M("Trim"))
+    for side in (-1, 1):
+        b.box((2.1, 0.08, 0.42), (-1.55, side * (W / 2 - 0.04), 1.44), M("Body"))
+    b.box((0.08, W, 0.42), (-2.6, 0, 1.44), M("Body"))
+    b.box((0.08, W, 0.42), (-0.5, 0, 1.44), M("Body"))
+    for side in (-1, 1):
+        b.box((0.08, 0.36, 0.13), (2.63, side * (W / 2 - 0.28), 1.0), M("Headlight"))
+        b.box((0.08, 0.14, 0.32), (-2.66, side * (W / 2 - 0.12), 1.36), M("Taillight"))
+        b.box((0.16, 0.2, 0.11), (1.1, side * (W / 2 + 0.07), 1.35), M("Body"))
+    b.box((0.2, W, 0.22), (2.66, 0, 0.62), M("Chrome"), bevel=0.04, segments=1)
+    b.box((0.2, W, 0.22), (-2.7, 0, 0.62), M("Trim"), bevel=0.04, segments=1)
+    b.box((0.06, W * 0.5, 0.22), (2.68, 0, 0.95), M("Trim"))
+    wheels(b, xs, W / 2 - 0.15, wr)
+    objs.append(b.finish(smooth_angle=35))
+
+    # Taxi: a four-door saloon with a lit roof sign and a chequered band (the body takes taxi yellow).
+    taxi = car("taxi", 4.7, 1.84,
+               [(2.35, 0.62), (2.29, 0.78), (1.93, 0.86), (1.02, 0.94), (-1.62, 0.97), (-2.22, 0.93), (-2.35, 0.66)],
+               (1.02, -1.64, 0.94, 0.26, -1.06, 1.42), 0.33, 1.45, doors=4)
+    b = Builder("taxi_sign")
+    b.box((0.36, 0.95, 0.2), (-0.38, 0, 1.56), M("Lamp"), bevel=0.04, segments=1)
+    b.box((0.4, 1.0, 0.04), (-0.38, 0, 1.45), M("Trim"))
+    for side in (-1, 1):
+        for k in range(12):
+            if k % 2 == 0:
+                b.box((0.16, 0.012, 0.07), (-1.55 + k * 0.27, side * 0.927, 0.78), M("Checker"))
+    sign = b.finish(smooth_angle=30)
+    join(taxi, sign)
+    objs.append(taxi)
+
+    # Delivery van: a cab with a tall box body (the box takes the company colour).
+    b = Builder("delivery")
+    W = 2.1
+    xs = (2.0, -1.9)
+    b.box((6.2, 1.1, 0.3), (0, 0, 0.62), M("DarkSteel"))
+    b.prism([(1.55, 0.45), (3.15, 0.45), (3.15, 1.0), (3.0, 1.25), (2.35, 1.35), (1.85, 2.3), (1.55, 2.3)], W - 0.05, M("White"), bevel=0.06)
+    b.prism([(2.4, 1.37), (1.9, 2.22), (1.84, 2.22), (2.34, 1.37)], W - 0.3, M("Glass"))
+    b.box((4.5, W + 0.1, 2.55), (-0.75, 0, 1.95), M("Body"), bevel=0.05)
+    b.box((4.52, W + 0.12, 0.08), (-0.75, 0, 0.72), M("Trim"))
+    b.box((0.04, W - 0.1, 2.3), (-3.01, 0, 1.95), M("Trim"))
+    for side in (-1, 1):
+        b.box((0.6, 0.03, 0.5), (2.2, side * (W / 2 - 0.02), 1.75), M("Glass"))
+        b.box((0.06, 0.34, 0.13), (3.15, side * (W / 2 - 0.3), 1.0), M("Headlight"))
+        b.box((0.06, 0.18, 0.4), (-3.02, side * (W / 2 - 0.1), 1.0), M("Taillight"))
+        b.box((0.1, 0.06, 0.32), (2.4, side * (W / 2 + 0.1), 1.8), M("Trim"))
+    b.box((0.16, W, 0.22), (3.18, 0, 0.6), M("Trim"), bevel=0.04, segments=1)
+    for x in xs:
+        b.box((0.9, W - 0.4, 0.5), (x, 0, 0.5), M("Trim"))
+    wheels(b, xs, W / 2 - 0.18, 0.4, width=0.26)
+    objs.append(b.finish(smooth_angle=35))
+
+    # Small city car.
+    objs.append(car("mini", 3.45, 1.64,
+                    [(1.72, 0.58), (1.68, 0.74), (1.4, 0.84), (0.72, 0.92), (-1.68, 0.96), (-1.72, 0.62)],
+                    (0.72, -1.6, 0.92, 0.05, -1.52, 1.5), 0.29, 1.12))
+    return objs
+
+
+def join(a, b):
+    """Merges object b into a (same origin)."""
+    bpy.ops.object.select_all(action="DESELECT")
+    a.select_set(True)
+    b.select_set(True)
+    bpy.context.view_layer.objects.active = a
+    bpy.ops.object.join()
 
 
 def city_bus():
@@ -770,6 +863,44 @@ def bus_stop():
     b.cylinder(0.05, 0.05, 2.9, (w / 2 + 0.8, -d / 2 - 0.2, 1.45 + 0.06), M("DarkSteel"), segments=8)
     b.box((0.06, 0.55, 0.55), (w / 2 + 0.8, -d / 2 - 0.2, 2.75), M("SignBlue"))
     return b.finish(smooth_angle=30)
+
+
+def bench():
+    """Park bench along X, seat facing -Y; origin at ground centre."""
+    b = Builder("bench")
+    L = 1.8
+    for k in range(3):
+        b.box((L, 0.12, 0.04), (0, -0.16 + k * 0.15, 0.46), M("Wood"), bevel=0.01, segments=1)
+    for k in range(2):
+        b.box((L, 0.04, 0.12), (0, 0.24, 0.66 + k * 0.17), M("Wood"), bevel=0.01, segments=1)
+    for x in (-L / 2 + 0.2, L / 2 - 0.2):
+        b.box((0.06, 0.48, 0.05), (x, 0.0, 0.42), M("DarkSteel"))
+        b.box((0.06, 0.05, 0.44), (x, -0.2, 0.22), M("DarkSteel"))
+        b.box((0.06, 0.05, 0.86), (x, 0.24, 0.43), M("DarkSteel"))
+        b.box((0.06, 0.32, 0.05), (x, -0.02, 0.62), M("DarkSteel"))
+    return b.finish(smooth_angle=30)
+
+
+def litter_bin():
+    """Street litter bin."""
+    b = Builder("bin")
+    b.cylinder(0.26, 0.24, 0.85, (0, 0, 0.47), M("BinGreen"), segments=12)
+    b.cylinder(0.29, 0.29, 0.06, (0, 0, 0.92), M("DarkSteel"), segments=12)
+    b.cylinder(0.2, 0.2, 0.05, (0, 0, 0.97), M("Trim"), segments=12)
+    b.cylinder(0.2, 0.2, 0.04, (0, 0, 0.03), M("DarkSteel"), segments=12)
+    return b.finish(smooth_angle=50)
+
+
+def planter():
+    """Concrete planter with a shrub."""
+    b = Builder("planter")
+    b.box((1.4, 0.7, 0.55), (0, 0, 0.275), M("Concrete"), bevel=0.04, segments=1)
+    b.box((1.28, 0.58, 0.04), (0, 0, 0.53), M("Soil"))
+    random.seed(41)
+    for k in range(7):
+        x = -0.45 + k * 0.15
+        b.sphere(0.24 + random.random() * 0.08, (x, (random.random() - 0.5) * 0.18, 0.72 + random.random() * 0.12), M("BushLeaf" if k % 2 else "LeafLight"), subdiv=1, jitter=0.03)
+    return b.finish(smooth_angle=60)
 
 
 def streetlight():
@@ -1235,6 +1366,9 @@ def main():
     objs.append(tree_lod("tree_lod"))
     objs.append(tree_lod("pine_lod", pine_shape=True))
     objs.append(bus_stop())
+    objs.append(bench())
+    objs.append(litter_bin())
+    objs.append(planter())
     objs.append(streetlight())
     objs.append(traffic_signal())
     objs.append(crane())
@@ -1252,6 +1386,7 @@ def main():
     print(f"{len(objs)} assets, {total} triangles total")
     if PREVIEW:
         render_closeup([o for o in objs if o.name in ("sedan", "hatchback", "suv", "bus", "bus_stop")], PREVIEW.replace(".png", "_cars.png"))
+        render_closeup([o for o in objs if o.name in ("pickup", "taxi", "delivery", "mini", "bench", "bin", "planter")], PREVIEW.replace(".png", "_street.png"))
         render_closeup([o for o in objs if o.name == "airliner"], PREVIEW.replace(".png", "_plane.png"), spacing=0, distance=46.0)
         render_closeup([o for o in objs if o.name in ("sailboat", "motorboat")], PREVIEW.replace(".png", "_boats.png"), spacing=12.0, distance=24.0)
         render_closeup([o for o in objs if o.name == "container_ship"], PREVIEW.replace(".png", "_ship.png"), spacing=0, distance=150.0)

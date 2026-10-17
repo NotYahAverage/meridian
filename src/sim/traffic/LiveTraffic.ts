@@ -61,7 +61,7 @@ export class LiveTraffic {
       for (let k = 0; k < n; k++) {
         const t = city.trips.sample(this.rng, hour);
         if (!t) continue;
-        this.spawn(t.from, t.to, t.model, t.color, t.purpose);
+        this.spawn(t.from, t.to, t.model, t.color, t.purpose, undefined, 0, t.dest);
       }
     }
 
@@ -86,10 +86,10 @@ export class LiveTraffic {
     city.vehicles.update(simDt);
   }
 
-  spawn(from: RoutePoint, to: RoutePoint, model: number, color: number, purpose: Purpose, onArrive?: () => void, tag = 0): number {
+  spawn(from: RoutePoint, to: RoutePoint, model: number, color: number, purpose: Purpose, onArrive?: () => void, tag = 0, dest?: number): number {
     const route = this.city.paths.find(from, to);
     if (!route || route.length < 30) return -1;
-    return this.city.vehicles.spawn({ route, model, color, purpose, onArrive, tag });
+    return this.city.vehicles.spawn({ route, model, color, purpose, onArrive, tag, dest });
   }
 
   private localTimer = 0;

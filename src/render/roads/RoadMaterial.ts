@@ -137,7 +137,10 @@ float stripes(float x) {
       float dv = cell * dir;
       float shaft = step(abs(du), 0.13) * step(-2.4, dv) * step(dv, 0.5);
       float head = step(0.5, dv) * step(dv, 2.2) * step(abs(du), (2.2 - dv) * 0.42);
-      if (v > 9.0 && v < len - 9.0) mark = max(mark, max(shaft, head));
+      // (Clear of the turn arrows before the junction.)
+      bool turns = (dir > 0.0 ? mod(floor(flags / 256.0), 8.0) : mod(floor(flags / 2048.0), 8.0)) > 0.5;
+      float toEnd = dir > 0.0 ? len - v : v;
+      if (v > 9.0 && v < len - 9.0 && !(turns && toEnd < 18.0)) mark = max(mark, max(shaft, head));
     }
     if (kind == 0 && !ow) {
       float a = abs(u) - med;
@@ -188,6 +191,44 @@ float stripes(float x) {
       } else {
         if (inS && u < -med && ax < ah - 0.3) mark = max(mark, gS);
         if (inE && u > med && ax < ah - 0.3) mark = max(mark, gE);
+      }
+      // Turn arrows in each lane before a junction, on roads with more than one lane each way:
+      // left (and straight on) in the inside lane, right (and straight on) in the outside one.
+      float laneCount = ow ? lanes * 2.0 : lanes;
+      if (laneCount > 1.5 && len > 34.0) {
+        float tm = 0.0, dist = 0.0, across = -1.0;
+        float stopB = len - (ce ? 3.9 : 0.6) - 0.45, stopA = (cs ? 3.9 : 0.6) + 0.45;
+        if (ow) {
+          bool rev = mod(floor(flags / 8.0), 2.0) > 0.5;
+          float x = u + laneCount * lw * 0.5;
+          if (!rev) { tm = mod(floor(flags / 256.0), 8.0); dist = stopB - v; across = x; }
+          else { tm = mod(floor(flags / 2048.0), 8.0); dist = v - stopA; across = laneCount * lw - x; }
+        } else if (u > med) {
+          tm = mod(floor(flags / 256.0), 8.0); dist = stopB - v; across = ax - med;
+        } else if (u < -med) {
+          tm = mod(floor(flags / 2048.0), 8.0); dist = v - stopA; across = ax - med;
+        }
+        if (tm > 0.5 && dist > 6.0 && dist < 13.0 && across > 0.0 && across < laneCount * lw) {
+          float li = floor(across / lw);
+          float tdu = (fract(across / lw) - 0.5) * lw;
+          float tdv = 9.5 - dist;
+          bool hasL = mod(tm, 2.0) > 0.5, hasT = mod(floor(tm / 2.0), 2.0) > 0.5, hasR = tm > 3.5;
+          bool showL = li < 0.5 && hasL;
+          bool showR = li > laneCount - 1.5 && hasR;
+          if (showL || showR || hasT) {
+            float g = step(abs(tdu), 0.12) * step(-2.6, tdv) * step(tdv, hasT ? 0.6 : 0.35);
+            if (hasT) g = max(g, step(0.6, tdv) * step(tdv, 2.2) * step(abs(tdu), (2.2 - tdv) * 0.42));
+            if (showL) {
+              g = max(g, step(-0.95, tdu) * step(tdu, 0.0) * step(abs(tdv - 0.23), 0.12));
+              g = max(g, step(-1.5, tdu) * step(tdu, -0.95) * step(abs(tdv - 0.23), (tdu + 1.5) * 0.7));
+            }
+            if (showR) {
+              g = max(g, step(0.0, tdu) * step(tdu, 0.95) * step(abs(tdv - 0.23), 0.12));
+              g = max(g, step(0.95, tdu) * step(tdu, 1.5) * step(abs(tdv - 0.23), (1.5 - tdu) * 0.7));
+            }
+            mark = max(mark, g * (1.0 - smoothstep(0.08, 0.25, fwidth(v))));
+          }
+        }
       }
       mark *= 0.75 + 0.25 * n3;
     }

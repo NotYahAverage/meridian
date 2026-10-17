@@ -167,6 +167,8 @@ export class BuildingRenderer {
   private highlights = new Map<number, number>();
   /** Props per chunk (completed buildings only). */
   readonly chunkProps = new Map<number, BuildingProp[]>();
+  /** Empty driveways by building id, in world space (cars arriving there can pull in). */
+  readonly driveways = new Map<number, BuildingProp>();
   propsVersion = 0;
   /** Per-building overlay value provider (0 = none, else 1–255). */
   overlayValue: ((b: Building) => number) | null = null;
@@ -317,6 +319,7 @@ export class BuildingRenderer {
   private rebuildProps(ch: number): void {
     const list: BuildingProp[] = [];
     for (const id of this.chunks[ch].ids) {
+      this.driveways.delete(id);
       const b = this.city.buildings.get(id);
       if (!b) continue;
       const cached = this.cache.get(id);
@@ -325,6 +328,10 @@ export class BuildingRenderer {
       if (done) {
         for (const p of geo.props) {
           if ((p.kind === 'smoke' || p.kind === 'steam') && b.state !== BuildingState.Active) continue;
+          if (p.kind === 'driveway') {
+            this.driveways.set(id, p);
+            continue;
+          }
           list.push(p);
         }
       } else if (b.state === BuildingState.Construction || b.progress < 1) {

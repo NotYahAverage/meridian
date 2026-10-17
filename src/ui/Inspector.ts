@@ -52,13 +52,17 @@ const MODEL_LABEL: Record<(typeof VEHICLE_MODELS)[number], string> = {
   sedan: 'Sedan',
   hatchback: 'Hatchback',
   suv: 'SUV',
-  van: 'Delivery van',
+  van: 'Panel van',
   truck: 'Freight truck',
   garbage: 'Garbage truck',
   firetruck: 'Fire engine',
   police: 'Police car',
   ambulance: 'Ambulance',
   bus: 'City bus',
+  pickup: 'Pickup truck',
+  taxi: 'Taxi',
+  delivery: 'Delivery van',
+  mini: 'Small car',
 };
 
 /** Why a vehicle is standing still. */
@@ -77,11 +81,11 @@ function vehicleActivity(purpose: Purpose, model: string, hour: number): string 
     case Purpose.Commute:
       return hour >= 4 && hour < 12 ? 'Driving to work' : 'Driving home from work';
     case Purpose.Shopping:
-      return 'Out shopping';
+      return model === 'taxi' ? 'Taxi taking a shopper' : 'Out shopping';
     case Purpose.Freight:
       return 'Delivering goods';
     case Purpose.Visitor:
-      return 'Tourist visiting the sights';
+      return model === 'taxi' ? 'Taxi with a fare' : 'Tourist visiting the sights';
     case Purpose.MoveIn:
       return 'Moving into the city';
     case Purpose.Transit:

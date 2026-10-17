@@ -73,6 +73,8 @@ export class WorldRenderer {
     this.water = new WaterRenderer(city.terrain);
     this.roads = new RoadRenderer(city);
     this.buildings = new BuildingRenderer(city);
+    // Cars arriving at a house with an empty driveway can pull into it.
+    city.vehicles.arrivalSpot = (id) => this.buildings.driveways.get(id) ?? null;
     this.props = new PropRenderer(city, assets, this.roads, this.buildings);
     this.vehicles = new VehicleRenderer(assets);
     this.pedestrians = new PedestrianRenderer(assets);
@@ -141,7 +143,7 @@ export class WorldRenderer {
     city.vehicles.lodX = focus.x;
     city.vehicles.lodZ = focus.z;
     city.vehicles.lodRadius = Math.max(600, Math.min(camDist * 1.2, 1000));
-    this.vehicles.update(city.vehicles, camera, focus);
+    this.vehicles.update(city.vehicles, camera, focus, simDt);
     // People on foot live around the camera's focus; they only move while the game runs.
     city.pedestrians.update(simDt, focus, camera.position, camDist, env.hour);
     this.pedestrians.update(city.pedestrians, camera.position, camDist, city.weather);
