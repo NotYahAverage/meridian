@@ -8,14 +8,16 @@ import type { Terrain } from '../world/Terrain';
 import type { Route, RouteLeg } from './Pathfinder';
 import type { Sense, Signals, Turn } from './Signals';
 
-export const VEHICLE_MODELS = ['sedan', 'hatchback', 'suv', 'van', 'truck', 'garbage', 'firetruck', 'police', 'ambulance', 'bus', 'pickup', 'taxi', 'delivery', 'mini'] as const;
+export const VEHICLE_MODELS = ['sedan', 'hatchback', 'suv', 'van', 'truck', 'garbage', 'firetruck', 'police', 'ambulance', 'bus', 'pickup', 'taxi', 'delivery', 'mini', 'bike'] as const;
 export type VehicleModelName = (typeof VEHICLE_MODELS)[number];
 export const VM: Record<VehicleModelName, number> = Object.fromEntries(VEHICLE_MODELS.map((m, i) => [m, i])) as Record<VehicleModelName, number>;
 
-export const VEHICLE_LENGTH = [4.6, 4.0, 4.8, 5.2, 8.5, 8.0, 9.0, 4.8, 6.2, 12.0, 5.3, 4.7, 6.4, 3.45];
+export const VEHICLE_LENGTH = [4.6, 4.0, 4.8, 5.2, 8.5, 8.0, 9.0, 4.8, 6.2, 12.0, 5.3, 4.7, 6.4, 3.45, 1.8];
 /** Width and height of each model (for distant boxes). */
-export const VEHICLE_WIDTH = [1.82, 1.76, 1.96, 2.0, 2.45, 2.45, 2.5, 1.84, 2.2, 2.55, 1.95, 1.84, 2.2, 1.64];
-export const VEHICLE_HEIGHT = [1.45, 1.5, 1.85, 2.25, 3.2, 3.3, 3.2, 1.6, 2.85, 3.3, 1.95, 1.65, 3.25, 1.5];
+export const VEHICLE_WIDTH = [1.82, 1.76, 1.96, 2.0, 2.45, 2.45, 2.5, 1.84, 2.2, 2.55, 1.95, 1.84, 2.2, 1.64, 0.6];
+export const VEHICLE_HEIGHT = [1.45, 1.5, 1.85, 2.25, 3.2, 3.3, 3.2, 1.6, 2.85, 3.3, 1.95, 1.65, 3.25, 1.5, 1.75];
+/** Bicycles ride their own line along the kerb (lane number), clear of the car lanes. */
+export const BIKE_LANE = 7;
 /** Trucks and buses: slow to start and stop. */
 export const HEAVY_MODEL = VEHICLE_MODELS.map((m) => m === 'truck' || m === 'garbage' || m === 'firetruck' || m === 'bus' || m === 'delivery');
 /** Vehicles that park at the end of their trip (rather than vanishing), when near the camera. */
@@ -251,6 +253,9 @@ export class Vehicles {
   /** Zebra crossings with someone waiting to cross: x0, z0, x1, z1 each. */
   private zebras = new Float32Array(256);
   private zebraN = 0;
+  /** Crossings with someone on them (x0, z0, x1, z1): nobody drives across one until it's clear. */
+  private occ = new Float32Array(512);
+  private occN = 0;
   private peopleX = 0;
   private peopleZ = 0;
   /** Stats. */
@@ -361,6 +366,7 @@ export class Vehicles {
 
   private laneOff(seg: RoadSegment, lane: number): number {
     const rt = ROAD_TYPES[seg.type];
+    if (lane === BIKE_LANE) return rt.asphaltHalf - 0.65;
     return seg.oneway !== 0 ? onewayLaneOffset(rt, lane) : laneOffset(rt, lane);
   }
 
@@ -410,6 +416,7 @@ export class Vehicles {
 
   /** Lane to start leg k in, coming from lane `from` of the previous leg (or a fresh spawn). */
   private entryLane(route: Route, k: number, from: number, turn: number): number {
+    if (from === BIKE_LANE) return BIKE_LANE;
     const seg = this.net.segments.get(route.legs[k].segId);
     if (!seg) return 0;
     const n = this.lanesOf(seg);
@@ -479,7 +486,7 @@ export class Vehicles {
     const dEnd = route.legs.length === 1 ? this.legD(seg, leg0, leg0.s1) : seg.length - this.exitTrim(seg, leg0);
     const r = this.laneRange(route, 0, dEnd - this.legD(seg, leg0, leg0.s0), this.range);
     // Buses and stopping vehicles start at the kerb; others anywhere they're happy to be.
-    const lane = n === 1 ? 0 : Math.max(r[0], Math.min(r[1], sp.purpose === Purpose.Transit ? n - 1 : (i * 7) % n));
+    const lane = sp.model === VM.bike ? BIKE_LANE : n === 1 ? 0 : Math.max(r[0], Math.min(r[1], sp.purpose === Purpose.Transit ? n - 1 : (i * 7) % n));
     const minD = this.entryTrim(seg, leg0) + 1;
     let d0 = this.legD(seg, leg0, leg0.s0);
     d0 = Math.max(d0, Math.min(minD, dEnd - 2));
@@ -551,6 +558,12 @@ export class Vehicles {
     this.alat[i] = (heavy ? 1.5 : 2.0) + bold * 0.9;
     this.gapK[i] = 1.25 - bold * 0.4;
     if (model === VM.bus) this.vfac[i] = 0.92;
+    if (model === VM.bike) {
+      this.alat[i] = 1.6;
+      this.gapMin[i] = 1.0;
+      this.headway[i] = 0.8;
+      this.amax[i] = 0.9 + bold * 0.4;
+    }
   }
 
   private reserve(i: number, key: number): void {
@@ -958,7 +971,7 @@ export class Vehicles {
     // Speed for the bend: from its radius and how hard this driver takes corners.
     const ang = Math.acos(Math.max(-1, Math.min(1, a.tx * b.tx + a.tz * b.tz)));
     const chord = Math.hypot(b.x - a.x, b.z - a.z);
-    const vmax = Math.min(ROAD_TYPES[seg.type].speed, ROAD_TYPES[nseg.type].speed) * this.vfac[i] * this.speedScale;
+    const vmax = this.model[i] === VM.bike ? 5 * this.speedScale : Math.min(ROAD_TYPES[seg.type].speed, ROAD_TYPES[nseg.type].speed) * this.vfac[i] * this.speedScale;
     this.vTurn[i] = ang < 0.12 ? vmax : Math.max(3.2, Math.min(vmax, Math.sqrt(this.alat[i] * (chord / (2 * Math.sin(ang / 2))))));
   }
 
@@ -1150,7 +1163,7 @@ export class Vehicles {
 
   /** Nearest person (or waiting zebra crossing) on the path ahead, as a distance from the front bumper. */
   private peopleAhead(i: number, extra: number): number {
-    if (!this.crossN && !this.zebraN) return Infinity;
+    if (!this.crossN && !this.zebraN && !this.occN) return Infinity;
     const x = this.x[i], z = this.z[i];
     if ((x - this.peopleX) ** 2 + (z - this.peopleZ) ** 2 > PEOPLE_RANGE * PEOPLE_RANGE) return Infinity;
     const hx = Math.cos(this.heading[i]), hz = Math.sin(this.heading[i]);
@@ -1164,6 +1177,11 @@ export class Vehicles {
       const side = Math.abs(-rx * hz + rz * hx);
       if (side > 2.5 + along * 0.04) continue;
       best = Math.min(best, along - half - 1.4);
+    }
+    // A crossing with someone on it: wait short of it until it's clear.
+    for (let q = 0; q < this.occN; q++) {
+      const t = rayHit(hx, hz, this.occ[q * 4] - x, this.occ[q * 4 + 1] - z, this.occ[q * 4 + 2] - x, this.occ[q * 4 + 3] - z);
+      if (t > half && t < reach) best = Math.min(best, t - half - 1.6);
     }
     // Someone waiting at a zebra on our way: stop for them if we comfortably can.
     const v = this.speed[i];
@@ -1187,7 +1205,7 @@ export class Vehicles {
 
   /** Same, along the rest of the curve through a junction (and the first metres beyond). */
   private peopleOnCurve(i: number, fromT: number, before: number): number {
-    if (!this.crossN && !this.zebraN) return Infinity;
+    if (!this.crossN && !this.zebraN && !this.occN) return Infinity;
     const o = i * 6, p = this.tp;
     if ((p[o + 4] - this.peopleX) ** 2 + (p[o + 5] - this.peopleZ) ** 2 > PEOPLE_RANGE * PEOPLE_RANGE) return Infinity;
     const len = this.tLen[i];
@@ -1212,10 +1230,39 @@ export class Vehicles {
           z = p[o + 5] + (ez / el) * e;
           s = (1 - fromT) * len + e;
         }
-        if ((x - cx) ** 2 + (z - cz) ** 2 < 2.0 * 2.0) {
+        // (Wide: stop before the crossing, not just short of the nearest person on it.)
+        if ((x - cx) ** 2 + (z - cz) ** 2 < 3.2 * 3.2) {
           best = Math.min(best, before + s - half - 0.8);
           break;
         }
+      }
+    }
+    // Crossings with people on them that the way through cuts across: stop short of the whole crossing.
+    if (this.occN) {
+      let px = 0, pz = 0, ps = 0;
+      for (let k = 0; k <= steps + 2; k++) {
+        let x: number, z: number, s: number;
+        if (k <= steps) {
+          const t = fromT + ((1 - fromT) * k) / steps, w = 1 - t;
+          x = w * w * p[o] + 2 * w * t * p[o + 2] + t * t * p[o + 4];
+          z = w * w * p[o + 1] + 2 * w * t * p[o + 3] + t * t * p[o + 5];
+          s = (t - fromT) * len;
+        } else {
+          const e = (k - steps) * 3.5;
+          x = p[o + 4] + (ex / el) * e;
+          z = p[o + 5] + (ez / el) * e;
+          s = (1 - fromT) * len + e;
+        }
+        if (k > 0) {
+          const dx = x - px, dz = z - pz, dl = Math.hypot(dx, dz) || 1;
+          for (let q = 0; q < this.occN; q++) {
+            const t = rayHit(dx / dl, dz / dl, this.occ[q * 4] - px, this.occ[q * 4 + 1] - pz, this.occ[q * 4 + 2] - px, this.occ[q * 4 + 3] - pz);
+            if (t >= 0 && t <= dl) best = Math.min(best, before + ps + t - half - 1.6);
+          }
+        }
+        px = x;
+        pz = z;
+        ps = s;
       }
     }
     return best;
@@ -1372,7 +1419,7 @@ export class Vehicles {
 
     // Free speed: the limit as this driver keeps to it, and the bends ahead.
     if (((this.frame + i) & 7) === 0) this.vCurve[i] = this.curveSpeed(i, seg, leg, d);
-    let v0 = Math.min(rt.speed * this.vfac[i] * this.speedScale, this.vCurve[i]);
+    let v0 = Math.min((this.model[i] === VM.bike ? 4.2 + this.vfac[i] * 1.8 - 1.6 : rt.speed * this.vfac[i]) * this.speedScale, this.vCurve[i]);
 
     let mustStopAt = Infinity;
     let go = false;
@@ -1649,7 +1696,7 @@ export class Vehicles {
 
   private laneChange(i: number, seg: RoadSegment, route: Route, k: number, dt: number): void {
     const n = this.lanesOf(seg);
-    if (n < 2) return;
+    if (n < 2 || this.lane[i] === BIKE_LANE) return;
     const d = this.d[i];
     const leg = route.legs[k];
     const isLast = k === route.legs.length - 1;
@@ -1807,13 +1854,13 @@ export class Vehicles {
     this.d[i] = d0;
     this.dEnd[i] = route.legs.length === 1 ? this.legD(seg, leg0, leg0.s1) : seg.length - this.exitTrim(seg, leg0);
     // Pulled in at the kerb.
-    this.lane[i] = n - 1;
+    this.lane[i] = this.lane[i] === BIKE_LANE ? BIKE_LANE : n - 1;
     this.lat[i] = 0;
     this.wait[i] = 0;
     this.hold[i] = dwell;
     this.committed[i] = 0;
     this.planKey[i] = -1;
-    this.laneInsert(this.key(seg.id, leg0.dir, n - 1), i);
+    this.laneInsert(this.key(seg.id, leg0.dir, this.lane[i]), i);
     this.place(i, seg, leg0);
     return true;
   }
@@ -1824,9 +1871,11 @@ export class Vehicles {
    * The pedestrians tell drivers where people are on the road (crossing it), and
    * which zebra crossings have someone waiting at the kerb (x0, z0, x1, z1 across the road).
    */
-  setPeople(focusX: number, focusZ: number, crossers: ArrayLike<number>, nCross: number, zebras: ArrayLike<number>, nZebra: number): void {
+  setPeople(focusX: number, focusZ: number, crossers: ArrayLike<number>, nCross: number, zebras: ArrayLike<number>, nZebra: number, occupied: ArrayLike<number> = [], nOcc = 0): void {
     this.peopleX = focusX;
     this.peopleZ = focusZ;
+    this.occN = Math.min(nOcc, this.occ.length / 4);
+    for (let k = 0; k < this.occN * 4; k++) this.occ[k] = occupied[k];
     this.crossN = Math.min(nCross, this.crossers.length / 2);
     for (let k = 0; k < this.crossN * 2; k++) this.crossers[k] = crossers[k];
     this.zebraN = Math.min(nZebra, this.zebras.length / 4);
@@ -1912,6 +1961,16 @@ export class Vehicles {
     this.claims.clear();
     this.lastOut.clear();
   }
+}
+
+/** Distance along the ray (hx, hz) from the origin to segment a–b (given relative to the origin), or -1. */
+function rayHit(hx: number, hz: number, ax: number, az: number, bx: number, bz: number): number {
+  const ex = bx - ax, ez = bz - az;
+  const den = hx * ez - hz * ex;
+  if (Math.abs(den) < 1e-4) return -1;
+  const t = (ax * ez - az * ex) / den;
+  const u = (ax * hz - az * hx) / den;
+  return u < 0 || u > 1 || t < 0 ? -1 : t;
 }
 
 function turnName(t: number): Turn {

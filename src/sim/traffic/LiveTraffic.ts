@@ -87,7 +87,7 @@ export class LiveTraffic {
   }
 
   spawn(from: RoutePoint, to: RoutePoint, model: number, color: number, purpose: Purpose, onArrive?: () => void, tag = 0, dest?: number): number {
-    const route = this.city.paths.find(from, to);
+    const route = model === VM.bike ? this.bikeRoute(from, to) : this.city.paths.find(from, to);
     if (!route || route.length < 30) return -1;
     return this.city.vehicles.spawn({ route, model, color, purpose, onArrive, tag, dest });
   }
@@ -149,6 +149,25 @@ export class LiveTraffic {
       const rng = this.rng;
       if (v.spawn({ route, model: pickCarModel(rng), color: pickCarColor(rng), purpose: Purpose.Commute }) >= 0) this.localSpawns++;
     }
+  }
+
+  /** A way by bike: never on highways, and quiet streets rather than busy main roads. */
+  bikeRoute(from: RoutePoint, to: RoutePoint): ReturnType<City['paths']['find']> {
+    const roads = this.city.roads;
+    if (from.segId === to.segId) {
+      // Along one road: straight there, if bikes may use it.
+      const s = roads.segments.get(from.segId);
+      return s && !ROAD_TYPES[s.type].freeway && ROAD_TYPES[s.type].sidewalk > 0 ? this.city.paths.find(from, to) : null;
+    }
+    const r = this.city.paths.findAhead(from, 0, to, (id) => {
+      const s = roads.segments.get(id);
+      if (!s) return 1;
+      const rt = ROAD_TYPES[s.type];
+      if (rt.freeway || rt.sidewalk <= 0) return 1e6;
+      // Cost by time at bike speed rather than the speed limit, and a busy road counts as longer.
+      return (rt.speed / 4.6) * (s.type === 'lane' || s.type === 'street' ? 1 : 1.35);
+    });
+    return r && r.cost < 1e5 ? r : null;
   }
 
   /** Buses currently driving each line. */

@@ -75,6 +75,8 @@ PALETTE = {
     "BinGreen": (0.13, 0.24, 0.17, 1),
     "Soil": (0.2, 0.14, 0.09, 1),
     "Checker": (0.05, 0.05, 0.05, 1),
+    "SkinTone": (0.78, 0.58, 0.45, 1),
+    "Helmet": (0.12, 0.13, 0.15, 1),
 }
 
 
@@ -414,6 +416,7 @@ def build_vehicles():
     objs.append(b.finish(smooth_angle=35))
     objs.append(city_bus())
     objs += extra_vehicles()
+    objs.append(bicycle())
     return objs
 
 
@@ -487,6 +490,44 @@ def extra_vehicles():
                     [(1.72, 0.58), (1.68, 0.74), (1.4, 0.84), (0.72, 0.92), (-1.68, 0.96), (-1.72, 0.62)],
                     (0.72, -1.6, 0.92, 0.05, -1.52, 1.5), 0.29, 1.12))
     return objs
+
+
+def bicycle():
+    """A bicycle with its rider, along X; the rider's top takes the tint. Wheels spin (Tire/Rim)."""
+    b = Builder("bike")
+    r = 0.34
+    xr, xf = -0.52, 0.52
+    for x in (xr, xf):
+        b.cylinder(r, r, 0.045, (x, 0, r), M("Tire"), segments=16, axis="Y")
+        b.cylinder(r * 0.86, r * 0.86, 0.05, (x, 0, r), M("Rim"), segments=16, axis="Y")
+        # Spokes (so the turning shows) and the hub.
+        for k in range(4):
+            a = k * math.pi / 4
+            tube(b, (x - math.cos(a) * r * 0.8, 0, r - math.sin(a) * r * 0.8), (x + math.cos(a) * r * 0.8, 0, r + math.sin(a) * r * 0.8), 0.012, 0.012, M("RimLug"), segments=4)
+    seat, bar = (-0.18, 0, 0.92), (0.38, 0, 0.98)
+    bb = (-0.02, 0, 0.32)
+    for p0, p1 in ((bb, seat), (bb, (0.33, 0, 0.82)), (seat, (0.33, 0, 0.82)), ((xr, 0, r), bb), ((xr, 0, r), seat), ((xf, 0, r), bar)):
+        tube(b, p0, p1, 0.022, 0.022, M("DarkSteel"), segments=6)
+    b.box((0.06, 0.5, 0.03), bar, M("DarkSteel"))
+    b.box((0.24, 0.12, 0.04), (seat[0] - 0.02, 0, seat[2] + 0.02), M("Trim"))
+    # The rider: hips on the saddle, leaning forward to the bars.
+    hip = (-0.2, 0, 1.0)
+    sh = (0.12, 0, 1.48)
+    tube(b, hip, sh, 0.15, 0.17, M("Body"), segments=10, squash=0.75)
+    b.sphere(0.115, (0.2, 0, 1.66), M("SkinTone"), subdiv=2)
+    b.sphere(0.13, (0.18, 0, 1.72), M("Helmet"), subdiv=2, scale=(1.15, 1, 0.75))
+    for side in (-1, 1):
+        y = side * 0.12
+        hand = (bar[0], side * 0.22, bar[2] + 0.02)
+        tube(b, (sh[0], y * 1.6, sh[2] - 0.05), hand, 0.05, 0.04, M("Body"), segments=6)
+        b.sphere(0.04, hand, M("SkinTone"))
+        # Legs to the pedals: one up, one down.
+        knee = (0.12, y, 0.72 if side > 0 else 0.6)
+        foot = (0.06 if side > 0 else -0.08, side * 0.14, 0.42 if side > 0 else 0.2)
+        tube(b, (hip[0], y, hip[2]), knee, 0.075, 0.06, M("Trim"), segments=6)
+        tube(b, knee, foot, 0.055, 0.045, M("Trim"), segments=6)
+        b.box((0.2, 0.08, 0.06), (foot[0] + 0.05, foot[1], foot[2] - 0.03), M("Trim"))
+    return b.finish(smooth_angle=40)
 
 
 def join(a, b):
@@ -1386,7 +1427,7 @@ def main():
     print(f"{len(objs)} assets, {total} triangles total")
     if PREVIEW:
         render_closeup([o for o in objs if o.name in ("sedan", "hatchback", "suv", "bus", "bus_stop")], PREVIEW.replace(".png", "_cars.png"))
-        render_closeup([o for o in objs if o.name in ("pickup", "taxi", "delivery", "mini", "bench", "bin", "planter")], PREVIEW.replace(".png", "_street.png"))
+        render_closeup([o for o in objs if o.name in ("bike", "taxi", "delivery", "mini", "bench", "bin", "planter")], PREVIEW.replace(".png", "_street.png"))
         render_closeup([o for o in objs if o.name == "airliner"], PREVIEW.replace(".png", "_plane.png"), spacing=0, distance=46.0)
         render_closeup([o for o in objs if o.name in ("sailboat", "motorboat")], PREVIEW.replace(".png", "_boats.png"), spacing=12.0, distance=24.0)
         render_closeup([o for o in objs if o.name == "container_ship"], PREVIEW.replace(".png", "_ship.png"), spacing=0, distance=150.0)

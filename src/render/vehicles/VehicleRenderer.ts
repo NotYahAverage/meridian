@@ -6,8 +6,9 @@ import { Pool, createAssetMaterial, writeMatrix } from '../assets/AssetMaterials
 import { globalUniforms, beyondDetail } from '../shared';
 
 const HI_DIST = 700;
+const VM_BIKE = VEHICLE_MODELS.indexOf('bike');
 /** Wheel radius of each model (for how fast the wheels turn). */
-const WHEEL_R = [0.33, 0.32, 0.39, 0.36, 0.5, 0.5, 0.5, 0.34, 0.38, 0.5, 0.4, 0.33, 0.4, 0.29];
+const WHEEL_R = [0.33, 0.32, 0.39, 0.36, 0.5, 0.5, 0.5, 0.34, 0.38, 0.5, 0.4, 0.33, 0.4, 0.29, 0.34];
 
 /** Draws moving vehicles: detailed models nearby, simple boxes far away, headlight pools at night. */
 export class VehicleRenderer {
@@ -137,7 +138,7 @@ export class VehicleRenderer {
         ex[k * 4 + 1] = flash + 2 * Math.round((1 - v.fade[i]) * 50);
         ex[k * 4 + 2] = this.spin[i];
         ex[k * 4 + 3] = Math.round(this.pitch[i] * 1000 + 100) * 256 + Math.round(this.roll[i] * 1000 + 100);
-        if (night > 0.2 && d2 < 520 * 520) {
+        if (night > 0.2 && d2 < 520 * 520 && model !== VM_BIKE) {
           writeMatrix(beamM, beams * 16, x, y, z, v.heading[i], 1);
           beams++;
         }

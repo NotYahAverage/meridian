@@ -1313,6 +1313,9 @@ canvas { touch-action: none; /* map */ }
 .mode-bar i { display: block; height: 100%; }
 .m-walk { background: #4ade80; }
 .m-transit { background: #f472b6; }
+.m-bike { background: #facc15; }
+.legend .lg.m-bike { background: none; }
+.legend .lg.m-bike::before { background: #facc15; }
 .m-car { background: #94a3b8; }
 .legend .lg.m-walk::before, .legend .lg.m-transit::before, .legend .lg.m-car::before { background: inherit; }
 .legend .lg.m-walk, .legend .lg.m-transit, .legend .lg.m-car { background: none; }

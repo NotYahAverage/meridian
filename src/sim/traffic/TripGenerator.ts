@@ -14,6 +14,8 @@ export interface TripContext {
   outsidePoint(): RoutePoint | null;
   /** Fraction of a worker's commute made by car (the rest walk or use transit). */
   carShare?(i: number, k: number): number;
+  /** Chance a worker cycles to work. */
+  bikeShare?(i: number, k: number): number;
   /** Fraction of a home's shopping trips made by car (the rest walk). */
   shopCarShare?(home: Building): number;
 }
@@ -48,6 +50,8 @@ export function pickCarModel(rng: Rng): number {
 }
 
 export const TAXI_COLOR = 0xf2c12e;
+/** Cyclists' tops (the bike's tint). */
+const JERSEYS = [0x2f6db5, 0xc0392b, 0x2e8b57, 0xf1c40f, 0x34495e, 0xe67e22, 0x8e44ad, 0xecf0f1, 0x16a085];
 
 /** Some shoppers and visitors take a taxi. */
 function carOrTaxi(rng: Rng): { model: number; color: number } {
@@ -270,8 +274,14 @@ export class TripGenerator {
     if (r < commuteW && this.employedHouseholds.length) {
       const h = this.employedHouseholds[Math.floor(rng.next() * this.employedHouseholds.length)];
       if (!pop.alive[h]) return null;
-      // Commuters who ride the bus don't drive.
-      if (this.ctx.carShare && !rng.chance(this.ctx.carShare(h, pop.job[h * 2] ? 0 : 1))) return null;
+      // Commuters who ride the bus don't drive; some cycle.
+      const k = pop.job[h * 2] ? 0 : 1;
+      let bike = false;
+      if (this.ctx.carShare && !rng.chance(this.ctx.carShare(h, k))) {
+        const c = this.ctx.carShare(h, k), b = this.ctx.bikeShare?.(h, k) ?? 0;
+        if (c >= 1 || !rng.chance(b / (1 - c))) return null;
+        bike = true;
+      }
       const home = buildings.get(pop.home[h]);
       const job = buildings.get(pop.job[h * 2] || pop.job[h * 2 + 1]);
       if (!home || !job || !home.segId || !job.segId) return null;
@@ -280,8 +290,8 @@ export class TripGenerator {
         from: this.pt(toWork ? home : job),
         to: this.pt(toWork ? job : home),
         purpose: Purpose.Commute,
-        model: pickCarModel(rng),
-        color: pickCarColor(rng),
+        model: bike ? VM.bike : pickCarModel(rng),
+        color: bike ? rng.pick(JERSEYS) : pickCarColor(rng),
         dest: (toWork ? job : home).id,
       };
     }

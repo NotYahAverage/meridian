@@ -3,7 +3,7 @@ import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometr
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export const ASSET_NAMES = [
-  'sedan', 'hatchback', 'suv', 'van', 'truck', 'garbage', 'firetruck', 'police', 'ambulance', 'bus', 'pickup', 'taxi', 'delivery', 'mini', 'bus_stop',
+  'sedan', 'hatchback', 'suv', 'van', 'truck', 'garbage', 'firetruck', 'police', 'ambulance', 'bus', 'pickup', 'taxi', 'delivery', 'mini', 'bike', 'bus_stop',
   'bench', 'bin', 'planter',
   'oak', 'maple', 'pine', 'bush', 'tree_lod', 'pine_lod', 'streetlight', 'signal', 'crane', 'wind_tower', 'wind_rotor',
   'airliner', 'sailboat', 'motorboat', 'container_ship',
@@ -310,6 +310,9 @@ function fallback(name: AssetName): THREE.BufferGeometry {
   } else if (name === 'bus_stop') {
     parts.push(box(3.8, 0.1, 1.6, 0, 2.45, 0, [0.42, 0.43, 0.45], MATK.fixed));
     parts.push(box(3.8, 2.0, 0.05, 0, 1.2, -0.7, [0.06, 0.08, 0.1], MATK.glass));
+  } else if (name === 'bike') {
+    parts.push(box(1.7, 0.05, 0.05, 0, 0.6, 0, [0.15, 0.15, 0.16], MATK.fixed));
+    parts.push(box(0.35, 0.6, 0.3, -0.1, 1.15, 0, [0.8, 0.8, 0.8], MATK.tint));
   } else if (name === 'bench') {
     parts.push(box(1.8, 0.06, 0.45, 0, 0.46, 0, [0.55, 0.38, 0.22], MATK.fixed));
     parts.push(box(1.8, 0.35, 0.05, 0, 0.75, 0.24, [0.55, 0.38, 0.22], MATK.fixed));

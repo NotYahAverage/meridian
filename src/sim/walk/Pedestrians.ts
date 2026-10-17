@@ -254,7 +254,7 @@ export class Pedestrians {
     this.focusX = focus.x;
     this.focusZ = focus.z;
     // Too far out to see anyone: everybody waits where they are (and drivers stop looking out for them).
-    if (camDist > 560) this.city.vehicles.setPeople(focus.x, focus.z, this.crossOut, 0, this.zebraOut, 0);
+    if (camDist > 560) this.city.vehicles.setPeople(focus.x, focus.z, this.crossOut, 0, this.zebraOut, 0, this.occOut, 0);
     if (camDist > 560 || dt <= 0) return;
     this.city.walk.ensure();
     this.routeBudget = 8;
@@ -280,10 +280,11 @@ export class Pedestrians {
 
   private crossOut = new Float32Array(512);
   private zebraOut = new Float32Array(256);
+  private occOut = new Float32Array(512);
 
   /** Tells drivers who is out on the road, and who is waiting at a zebra crossing. */
   private publishPeople(): void {
-    let n = 0, z = 0;
+    let n = 0, z = 0, o = 0;
     const crossing = (k: number) => k === SEG.signal || k === SEG.zebra || k === SEG.informal;
     for (let i = 0; i < MAX_PEOPLE; i++) {
       if (!this.active[i]) continue;
@@ -297,6 +298,18 @@ export class Pedestrians {
         this.crossOut[n * 2] = this.x[i];
         this.crossOut[n * 2 + 1] = this.z[i];
         n++;
+        // The crossing they're on is taken until they're off it.
+        const sg = this.seg[who];
+        const ax = lp.pts[sg * 2], az = lp.pts[sg * 2 + 1];
+        let dup = false;
+        for (let q = 0; q < o && !dup; q++) if (this.occOut[q * 4] === ax && this.occOut[q * 4 + 1] === az) dup = true;
+        if (!dup && o < 128) {
+          this.occOut[o * 4] = ax;
+          this.occOut[o * 4 + 1] = az;
+          this.occOut[o * 4 + 2] = lp.pts[sg * 2 + 2];
+          this.occOut[o * 4 + 3] = lp.pts[sg * 2 + 3];
+          o++;
+        }
       } else if (st === PedState.WaitCross && z < 64) {
         const next = this.seg[i] + 1;
         if (next >= p.n - 1 || p.kind[next] !== SEG.zebra) continue;
@@ -307,7 +320,7 @@ export class Pedestrians {
         z++;
       }
     }
-    this.city.vehicles.setPeople(this.focusX, this.focusZ, this.crossOut, n, this.zebraOut, z);
+    this.city.vehicles.setPeople(this.focusX, this.focusZ, this.crossOut, n, this.zebraOut, z, this.occOut, o);
   }
 
   // ── Who's around ──────────────────────────────────────────────────────────
@@ -1036,7 +1049,8 @@ export class Pedestrians {
   /** Whether person `i` may step onto crossing segment `s` now. */
   private mayCross(i: number, p: Path, s: number): boolean {
     const k = p.kind[s];
-    if (k === SEG.signal) return this.city.signals.walkLight(p.node[s], p.seg[s]) === WalkLight.Walk;
+    // At the lights: on the walking figure, and not while a car is still standing on the crossing (finishing its turn).
+    if (k === SEG.signal) return this.city.signals.walkLight(p.node[s], p.seg[s]) === WalkLight.Walk && !this.vehicleOn(p.pts[s * 2], p.pts[s * 2 + 1], p.pts[s * 2 + 2], p.pts[s * 2 + 3]);
     // No lights: look both ways for a gap.
     const mx = (p.pts[s * 2] + p.pts[s * 2 + 2]) / 2, mz = (p.pts[s * 2 + 1] + p.pts[s * 2 + 3]) / 2;
     const impatient = this.waited[i] > 14;
@@ -1045,6 +1059,23 @@ export class Pedestrians {
       return true;
     }
     return !this.trafficAt(mx, mz, k === SEG.zebra ? 22 : 32, impatient ? 1.6 : k === SEG.zebra ? 3.2 : 4.5);
+  }
+
+  /** Is a vehicle on the crossing from (ax, az) to (bx, bz) (within a couple of metres of it)? */
+  private vehicleOn(ax: number, az: number, bx: number, bz: number): boolean {
+    const v = this.city.vehicles;
+    const g = this.vgrid;
+    const ex = bx - ax, ez = bz - az, l2 = ex * ex + ez * ez || 1;
+    const x0 = Math.min(ax, bx) - 4, x1 = Math.max(ax, bx) + 4, z0 = Math.min(az, bz) - 4, z1 = Math.max(az, bz) + 4;
+    for (let cz = Math.max(0, Math.floor((z0 - g.oz) / g.cell)); cz <= Math.min(g.size - 1, Math.floor((z1 - g.oz) / g.cell)); cz++) {
+      for (let cx = Math.max(0, Math.floor((x0 - g.ox) / g.cell)); cx <= Math.min(g.size - 1, Math.floor((x1 - g.ox) / g.cell)); cx++) {
+        for (let j = g.head[cz * g.size + cx]; j >= 0; j = g.next[j]) {
+          const t = Math.max(0, Math.min(1, ((v.x[j] - ax) * ex + (v.z[j] - az) * ez) / l2));
+          if (Math.hypot(v.x[j] - (ax + ex * t), v.z[j] - (az + ez * t)) < 2.4) return true;
+        }
+      }
+    }
+    return false;
   }
 
   /** Is a vehicle within `r` of a point, about to reach it in under `horizon` seconds (or standing on it)? */

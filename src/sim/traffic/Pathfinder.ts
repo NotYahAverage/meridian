@@ -256,7 +256,7 @@ export class Pathfinder {
    * travel (no turning round), with the given travel-time multipliers instead of the
    * usual ones. Not cached: for drivers changing their minds.
    */
-  findAhead(from: RoutePoint, dir: 1 | -1, to: RoutePoint, mult: (segId: number) => number): Route | null {
+  findAhead(from: RoutePoint, dir: 0 | 1 | -1, to: RoutePoint, mult: (segId: number) => number): Route | null {
     const fs = this.net.segments.get(from.segId);
     const ts = this.net.segments.get(to.segId);
     if (!fs || !ts || fs.id === ts.id) return null;

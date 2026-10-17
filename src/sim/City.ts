@@ -241,6 +241,7 @@ export class City {
       population: this.population,
       outsidePoint: () => this.outsidePoint(),
       carShare: (i, k) => this.mobility.carShare(i, k),
+      bikeShare: (i, k) => this.mobility.bikeShare(i, k),
       shopCarShare: (b) => this.mobility.shopCarShare(b),
     });
     this.live = new LiveTraffic(this);

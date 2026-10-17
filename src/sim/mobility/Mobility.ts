@@ -29,6 +29,10 @@ const ZONES_PER_TICK = 60;
 const MAX_WALK_MIN = 45;
 /** Minutes to park, walk to and from the car. */
 const CAR_OVERHEAD = 4;
+/** Cycling: pace (m/s), how much longer the way is than the straight line, and the longest ride people take. */
+const BIKE_SPEED = 4.6;
+const BIKE_DETOUR = 1.3;
+const MAX_BIKE_MIN = 35;
 /** Shopping and park trips per household / resident per day. */
 const SHOP_TRIPS = 0.9;
 const PARK_TRIPS = 0.12;
@@ -71,6 +75,7 @@ interface Results {
   /** Per worker slot (household * 2 + k): chances of walking and of driving, and expected minutes. */
   slotWalk: Float32Array;
   slotCar: Float32Array;
+  slotBike: Float32Array;
   slotMin: Float32Array;
   /** Per home: total minutes, commuters, and how many walk / ride / drive (summed shares). */
   homes: Map<number, Float64Array>;
@@ -88,6 +93,8 @@ export interface MobilityStats {
   walk: number;
   transit: number;
   car: number;
+  /** Share of commuters who cycle. */
+  bike: number;
   /** Average commute (minutes). */
   avgCommute: number;
   /** Share of commuters with a trip over 45 minutes. */
@@ -276,6 +283,7 @@ export class Mobility {
       transit: new Uint16Array(Z * Z).fill(NONE),
       slotWalk: new Float32Array(slots),
       slotCar: new Float32Array(slots).fill(1),
+      slotBike: new Float32Array(slots),
       slotMin: new Float32Array(slots),
       homes: new Map(),
       shops: new Map(),
@@ -284,7 +292,7 @@ export class Mobility {
       zoneJobs: new Float32Array(Z),
       zoneShops: new Float32Array(Z),
       zoneShopWalk: new Float32Array(Z),
-      stats: { commuters: 0, walk: 0, transit: 0, car: 0, avgCommute: 0, longCommutes: 0, shopVisits: 0, shopOnFoot: 0, parkVisits: 0, crowdedParks: 0, visitsPerShopJob: 0, jobAccess: 0 },
+      stats: { commuters: 0, walk: 0, transit: 0, car: 0, bike: 0, avgCommute: 0, longCommutes: 0, shopVisits: 0, shopOnFoot: 0, parkVisits: 0, crowdedParks: 0, visitsPerShopJob: 0, jobAccess: 0 },
     };
   }
 
@@ -410,8 +418,11 @@ export class Mobility {
     const city = this.city;
     const pop = city.population;
     const share = city.transit.share;
-    const { Z, car, walk, transit, zoneOf, homes, stats } = r;
+    const { Z, car, walk, transit, zoneOf, homes, stats, zones } = r;
     let minutes = 0, long = 0;
+    // How happy people are to cycle from and to each zone (quiet streets yes, busy main roads no).
+    const safety = new Float32Array(Z);
+    for (let z = 0; z < Z; z++) safety[z] = this.bikeSafety(zones[z].rep);
     for (let i = 0; i < pop.count; i++) {
       if (i % HOUSEHOLDS_PER_TICK === HOUSEHOLDS_PER_TICK - 1) yield;
       if (!pop.alive[i]) continue;
@@ -432,26 +443,34 @@ export class Mobility {
         const alt = Math.min(carM + 5, trM * 1.15);
         let pWalk = 0;
         if (walkM <= MAX_WALK_MIN) pWalk = alt === Infinity ? 0.92 : 0.92 * sigmoid((alt - walkM * 1.5) / 3);
-        const pT = (1 - pWalk) * (trM < Infinity ? tShare : 0);
-        const pC = Math.max(0, 1 - pWalk - pT);
+        // Cycling: a few brave souls anywhere, many more where the streets feel safe, if it's not too far.
+        const za = zones[zh], zb = zones[zj];
+        const bikeM = (Math.hypot(za.x - zb.x, za.z - zb.z) * BIKE_DETOUR) / BIKE_SPEED / 60 + 2;
+        const willing = 0.04 + 0.22 * Math.min(safety[zh], safety[zj]);
+        const pB = bikeM <= MAX_BIKE_MIN && carM < Infinity ? (1 - pWalk) * willing * sigmoid((Math.min(alt, carM + 5) - bikeM * 1.3) / 4) : 0;
+        const pT = (1 - pWalk - pB) * (trM < Infinity ? tShare : 0);
+        const pC = Math.max(0, 1 - pWalk - pB - pT);
         const rideM = trM < Infinity ? trM : carM * 1.3;
         // (Modes nobody uses don't count, even when they'd take forever.)
-        let m = (pWalk > 0 ? pWalk * walkM : 0) + (pT > 0 ? pT * rideM : 0) + (pC > 0 ? pC * carM : 0);
+        let m = (pWalk > 0 ? pWalk * walkM : 0) + (pB > 0 ? pB * bikeM : 0) + (pT > 0 ? pT * rideM : 0) + (pC > 0 ? pC * carM : 0);
         if (!(m < 240)) m = 90;
         r.slotWalk[slot] = pWalk;
+        r.slotBike[slot] = pB;
         r.slotCar[slot] = pC;
         r.slotMin[slot] = m;
         let h = homes.get(pop.home[i]);
-        if (!h) homes.set(pop.home[i], (h = new Float64Array(5)));
+        if (!h) homes.set(pop.home[i], (h = new Float64Array(6)));
         h[0] += m;
         h[1] += 1;
         h[2] += pWalk;
         h[3] += pT;
         h[4] += pC;
+        h[5] += pB;
         stats.commuters++;
         stats.walk += pWalk;
         stats.transit += pT;
         stats.car += pC;
+        stats.bike += pB;
         minutes += m;
         if (m > 45) long++;
       }
@@ -462,6 +481,7 @@ export class Mobility {
       stats.walk /= stats.commuters;
       stats.transit /= stats.commuters;
       stats.car /= stats.commuters;
+      stats.bike /= stats.commuters;
     }
   }
 
@@ -590,10 +610,26 @@ export class Mobility {
   }
 
   /** How a home's commuters travel (shares that add up to 1). */
-  modesOf(b: Building): { walk: number; transit: number; car: number } | null {
+  modesOf(b: Building): { walk: number; transit: number; car: number; bike: number } | null {
     const h = this.live?.homes.get(b.id);
     if (!h || h[1] <= 0) return null;
-    return { walk: h[2] / h[1], transit: h[3] / h[1], car: h[4] / h[1] };
+    return { walk: h[2] / h[1], transit: h[3] / h[1], car: h[4] / h[1], bike: h[5] / h[1] };
+  }
+
+  /** Chance a worker cycles to work. */
+  bikeShare(i: number, k: number): number {
+    const r = this.live;
+    const slot = i * 2 + k;
+    return r && slot < r.slotBike.length ? r.slotBike[slot] : 0;
+  }
+
+  /** How safe a building's street feels to ride on (0–1): quiet streets, not busy main roads. */
+  bikeSafety(b: Building): number {
+    const seg = b.segId ? this.city.roads.segments.get(b.segId) : undefined;
+    if (!seg) return 0;
+    const kind: Record<string, number> = { lane: 1, street: 0.9, avenue: 0.45, boulevard: 0.35 };
+    const base = kind[seg.type] ?? 0;
+    return base * (1 - 0.6 * Math.min(1, this.city.traffic.ratio(seg.id)));
   }
 
   /** Access to the city's jobs from a building (0–1: the share of jobs, nearby ones counting most). */

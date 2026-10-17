@@ -57,7 +57,7 @@ describe('getting around', () => {
   it('has commuters choosing how to travel, and each home its own commute', () => {
     const s = city.mobility.stats!;
     expect(s.commuters).toBeGreaterThan(20);
-    expect(s.walk + s.transit + s.car).toBeCloseTo(1, 3);
+    expect(s.walk + s.bike + s.transit + s.car).toBeCloseTo(1, 3);
     // A small, mixed town: plenty walk.
     expect(s.walk).toBeGreaterThan(0.15);
     expect(s.avgCommute).toBeGreaterThan(1);
@@ -69,7 +69,7 @@ describe('getting around', () => {
       if (c === null) continue;
       withCommute++;
       const m = city.mobility.modesOf(b)!;
-      expect(m.walk + m.transit + m.car).toBeCloseTo(1, 3);
+      expect(m.walk + m.bike + m.transit + m.car).toBeCloseTo(1, 3);
     }
     expect(withCommute).toBeGreaterThan(3);
   });

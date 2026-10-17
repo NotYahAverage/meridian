@@ -63,6 +63,7 @@ const MODEL_LABEL: Record<(typeof VEHICLE_MODELS)[number], string> = {
   taxi: 'Taxi',
   delivery: 'Delivery van',
   mini: 'Small car',
+  bike: 'Cyclist',
 };
 
 /** Why a vehicle is standing still. */
@@ -79,6 +80,7 @@ const HELD_TEXT: Record<number, string> = {
 function vehicleActivity(purpose: Purpose, model: string, hour: number): string {
   switch (purpose) {
     case Purpose.Commute:
+      if (model === 'bike') return hour >= 4 && hour < 12 ? 'Cycling to work' : 'Cycling home from work';
       return hour >= 4 && hour < 12 ? 'Driving to work' : 'Driving home from work';
     case Purpose.Shopping:
       return model === 'taxi' ? 'Taxi taking a shopper' : 'Out shopping';
@@ -130,8 +132,8 @@ const ROLE_TEXT: Record<Citizen['role'], string> = {
 };
 
 /** How a home's commuters travel, biggest share first ("62% drive · 30% walk"). */
-function modeText(m: { walk: number; transit: number; car: number }): string {
-  const parts: [number, string][] = [[m.car, 'drive'], [m.walk, 'walk'], [m.transit, 'bus or metro']];
+function modeText(m: { walk: number; transit: number; car: number; bike?: number }): string {
+  const parts: [number, string][] = [[m.car, 'drive'], [m.walk, 'walk'], [m.bike ?? 0, 'cycle'], [m.transit, 'bus or metro']];
   return parts.filter(([v]) => v >= 0.01).sort((a, b) => b[0] - a[0]).map(([v, w]) => `${Math.round(v * 100)}% ${w}`).join(' · ');
 }
 
