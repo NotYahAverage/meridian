@@ -122,6 +122,13 @@ export class City {
   readonly people: People;
   /** Traffic demand being added up over several ticks (see tickCity). */
   demandJob: Generator<void, TripDemand[], void> | null = null;
+  /**
+   * The game runs the background jobs (traffic routing, trip demand, land value, coverage,
+   * getting around) between frames in small steps, instead of a slice inside every tick.
+   */
+  jobsInFrames = false;
+  /** Job steps owed (JOB_FINE per tick). */
+  jobDebt = 0;
   /** Periodic coverage and land-value refreshes in progress (a slice per tick). */
   coverageJob: Generator<void, void, void> | null = null;
   landValueJob: Generator<void, void, void> | null = null;

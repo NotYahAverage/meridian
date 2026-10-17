@@ -201,7 +201,10 @@ export class LandValue {
     while (!it.next().done);
   }
 
-  /** The same work as update(), one pass per next() so it can be spread over ticks. */
+  /**
+   * The same work as update(), one pass per next() so it can be spread over ticks
+   * (and with `rowsPerStep`, a band of rows of each pass per next()).
+   */
   *updateSteps(
     buildings: Buildings,
     net: RoadNetwork,
@@ -210,6 +213,7 @@ export class LandValue {
     blend = 0.3,
     transitStops: { x: number; z: number }[] = [],
     mods: LandValueMods = NO_MODS,
+    rowsPerStep = Infinity,
   ): Generator<void, void, void> {
     const tmp = this.tmp;
     const w = this.window(net);
@@ -218,8 +222,11 @@ export class LandValue {
       return;
     }
     // Every pass below visits only the window's cells.
-    const each = (fn: (i: number) => void) => {
-      for (let iz = w.iz0; iz <= w.iz1; iz++) for (let i = iz * GRID_RES + w.ix0, end = iz * GRID_RES + w.ix1; i <= end; i++) fn(i);
+    const each = function* (fn: (i: number) => void): Generator<void, void, void> {
+      for (let iz = w.iz0; iz <= w.iz1; iz++) {
+        for (let i = iz * GRID_RES + w.ix0, end = iz * GRID_RES + w.ix1; i <= end; i++) fn(i);
+        if ((iz - w.iz0) % rowsPerStep === rowsPerStep - 1 && iz < w.iz1) yield;
+      }
     };
     // ── Pollution ────────────────────────────────────────────────────────
     tmp.fill(0);
@@ -238,7 +245,7 @@ export class LandValue {
       }
     }
     const green = this.greenery(mods.trees, w);
-    each((i) => {
+    yield* each((i) => {
       const target = 1 - Math.exp(-Math.max(0, tmp[i]) * 1.4 * (1 - 0.3 * green[i]));
       this.pollution[i] = lerp(this.pollution[i], target, blend);
     });
@@ -265,7 +272,7 @@ export class LandValue {
         if (a > access[i]) access[i] = a;
       }
     }
-    each((i) => {
+    yield* each((i) => {
       this.noise[i] = lerp(this.noise[i], Math.min(1, tmp[i]) * (1 - 0.3 * green[i]), blend);
     });
     yield;
@@ -283,7 +290,7 @@ export class LandValue {
     const transit = this.transitAccess;
     transit.fill(0);
     for (const st of transitStops) this.splat(transit, st.x, st.z, 300, 1);
-    each((i) => {
+    yield* each((i) => {
       this.commerce[i] = 1 - Math.exp(-this.commerce[i]);
       this.garbage[i] = Math.min(1, this.garbage[i]);
     });
@@ -292,7 +299,7 @@ export class LandValue {
     // ── Land value ───────────────────────────────────────────────────────
     const g = coverage.grids;
     const scenic = this.scenicField();
-    each((i) => {
+    yield* each((i) => {
       let v = 0.24 + scenic[i] + (mods.bonus ?? 0);
       v += 0.24 * mods.parks(i) * g.park[i];
       v += 0.05 * green[i];

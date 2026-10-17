@@ -235,6 +235,14 @@ export class TrafficModel {
     }
     this.queue = this.cluster([...groups.values()]);
     this.cursor = 0;
+    if (this.queue.length === 0) {
+      // No trips at all: no traffic.
+      if (this.volume.size) {
+        this.volume.clear();
+        this.cycles++;
+      }
+      return;
+    }
     this.next.fill(0);
     // Route this cycle with the congestion the last one found.
     this.paths.refreshCosts();
@@ -290,18 +298,13 @@ export class TrafficModel {
 
   /**
    * Processes at least `budget` origins (more in big cities, so a cycle always
-   * finishes within about 40 ticks). Returns true when a cycle completed.
+   * finishes within about 40 ticks, before the next demand arrives; `fine` splits
+   * a tick's share into that many steps). Returns true when a cycle completed.
    */
-  step(budget: number): boolean {
-    budget = Math.max(budget, Math.ceil(this.queue.length / 40));
-    if (this.queue.length === 0) {
-      if (this.volume.size) {
-        this.volume.clear();
-        this.cycles++;
-        return true;
-      }
-      return false;
-    }
+  step(budget: number, fine = 1): boolean {
+    budget = Math.max(budget, Math.ceil(this.queue.length / (40 * fine)));
+    // Nothing queued: the last cycle's volumes stand until new demand arrives.
+    if (this.queue.length === 0) return false;
     const end = Math.min(this.queue.length, this.cursor + budget);
     for (; this.cursor < end; this.cursor++) this.assignGroup(this.queue[this.cursor]);
     if (this.cursor >= this.queue.length) {

@@ -90,6 +90,46 @@ const DEMAND_SLICE = 20_000;
 /** Services splatted per tick during the periodic coverage refresh. */
 const COVERAGE_SLICE = 150;
 
+/** In the game, each tick's share of background work is done in this many smaller steps. */
+export const JOB_FINE = 4;
+
+/** Traffic routing and getting around: a tick's share (or 1/JOB_FINE of it in the game). */
+function stepJobs(city: City): void {
+  const fine = city.jobsInFrames ? JOB_FINE : 1;
+  city.traffic.step(Math.ceil(14 / fine), fine);
+  city.mobility.fine = fine;
+  city.mobility.tick();
+}
+
+/** Coverage, land value and trip demand: one step each. */
+function stepLateJobs(city: City): void {
+  if (city.coverageJob && city.coverageJob.next().done) city.coverageJob = null;
+  if (city.landValueJob && city.landValueJob.next().done) city.landValueJob = null;
+  if (city.demandJob) {
+    const r = city.demandJob.next();
+    if (r.done) {
+      city.demandJob = null;
+      // Junction delays phase in with the other getting-around effects in older cities.
+      city.traffic.delayScale = city.mobility.phase;
+      city.traffic.setDemand(r.value);
+    }
+  }
+}
+
+/**
+ * The game, between frames: background job steps owed by past ticks, for up to
+ * `budgetMs` (always at least one when any are owed).
+ */
+export function advanceJobs(city: City, budgetMs: number): void {
+  const t0 = performance.now();
+  while (city.jobDebt > 0) {
+    stepJobs(city);
+    stepLateJobs(city);
+    city.jobDebt--;
+    if (performance.now() - t0 >= budgetMs) break;
+  }
+}
+
 /** Advances the city by one simulation tick (one game hour). */
 export function tickCity(city: City): void {
   city.clock.tick++;
@@ -116,8 +156,7 @@ export function tickCity(city: City): void {
   growBuildings(city);
   moveIn(city);
   matchJobs(city, 350);
-  city.traffic.step(14);
-  city.mobility.tick();
+  if (!city.jobsInFrames) stepJobs(city);
   checkGoals(city);
   const hour = city.clock.hour;
   city.disasters.tickHour();
@@ -127,15 +166,15 @@ export function tickCity(city: City): void {
     city.coverage.recompute(city.buildings);
     city.coverageDirty = false;
   } else if (hour === 9 && city.clock.day % 2 === 0) {
-    city.coverageJob = city.coverage.recomputeSteps(city.buildings, COVERAGE_SLICE);
+    city.coverageJob = city.coverage.recomputeSteps(city.buildings, city.jobsInFrames ? Math.ceil(COVERAGE_SLICE / JOB_FINE) : COVERAGE_SLICE);
   }
-  if (city.coverageJob && city.coverageJob.next().done) city.coverageJob = null;
+  if (!city.jobsInFrames && city.coverageJob && city.coverageJob.next().done) city.coverageJob = null;
   if (hour === 0) {
     daily(city);
     if (city.clock.day % DAYS_PER_MONTH === 0) monthly(city);
   } else if (hour === 14) {
     // Land value is worked out a pass per hour.
-    city.landValueJob = city.landValue.updateSteps(city.buildings, city.roads, city.coverage, city.traffic, 0.3, city.transit.servedStops(), landValueMods(city));
+    city.landValueJob = city.landValue.updateSteps(city.buildings, city.roads, city.coverage, city.traffic, 0.3, city.transit.servedStops(), landValueMods(city), city.jobsInFrames ? 24 : Infinity);
   } else if (hour === 19) {
     dailyLate(city);
   } else if (hour === 3) {
@@ -143,17 +182,27 @@ export function tickCity(city: City): void {
   } else if (hour === 4 && city.clock.day % 2 === 0) {
     city.trips.refresh();
     // Trip demand is added up a slice at a time over the next few hours in big cities.
-    city.demandJob = city.trips.demandSteps(DEMAND_SLICE);
+    city.demandJob = city.trips.demandSteps(city.jobsInFrames ? DEMAND_SLICE / JOB_FINE : DEMAND_SLICE);
   }
-  if (city.landValueJob && city.landValueJob.next().done) city.landValueJob = null;
-  if (city.demandJob) {
-    const r = city.demandJob.next();
-    if (r.done) {
-      city.demandJob = null;
-      // Junction delays phase in with the other getting-around effects in older cities.
-      city.traffic.delayScale = city.mobility.phase;
-      city.traffic.setDemand(r.value);
+  if (!city.jobsInFrames) {
+    if (city.landValueJob && city.landValueJob.next().done) city.landValueJob = null;
+    if (city.demandJob) {
+      const r = city.demandJob.next();
+      if (r.done) {
+        city.demandJob = null;
+        // Junction delays phase in with the other getting-around effects in older cities.
+        city.traffic.delayScale = city.mobility.phase;
+        city.traffic.setDemand(r.value);
+      }
     }
+    return;
+  }
+  // The game does these between frames; if it falls behind, catch up here so they keep pace with the clock.
+  city.jobDebt += JOB_FINE;
+  while (city.jobDebt > JOB_FINE * 3) {
+    stepJobs(city);
+    stepLateJobs(city);
+    city.jobDebt--;
   }
 }
 

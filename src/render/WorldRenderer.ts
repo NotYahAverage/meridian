@@ -142,7 +142,8 @@ export class WorldRenderer {
     this.props.update(camera, dt);
     city.vehicles.lodX = focus.x;
     city.vehicles.lodZ = focus.z;
-    city.vehicles.lodRadius = Math.max(600, Math.min(camDist * 1.2, 1000));
+    // Full-rate updates only where cars are big enough on screen for coarser steps to show.
+    city.vehicles.lodRadius = camDist < 500 ? Math.max(600, Math.min(camDist * 1.2, 1000)) : Math.max(220, 600 - (camDist - 500) * 0.38);
     this.vehicles.update(city.vehicles, camera, focus, simDt);
     // After a road edit the walking network is rebuilt a few milliseconds a frame (no stutter in big cities).
     city.walk.sliced = true;

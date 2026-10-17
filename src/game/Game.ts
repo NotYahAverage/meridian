@@ -19,11 +19,13 @@ import { WorldRenderer } from '../render/WorldRenderer';
 import { lotOBB } from '../sim/buildings/Buildings';
 import { City } from '../sim/City';
 import { generateBaseParallel } from '../sim/world/parallelTerrain';
-import { tickCity } from '../sim/CitySim';
+import { advanceJobs, tickCity } from '../sim/CitySim';
 import { DAY_CYCLE_SECONDS, TICK_SECONDS } from '../sim/constants';
 
 /** Simulation time allowed per rendered frame (ms). */
 const SIM_BUDGET_MS = 10;
+/** Background simulation jobs (routing, demand, land value…) get this much of each frame. */
+const JOBS_BUDGET_MS = 4;
 
 /** Classic camera: a Q / E press shorter than this is a tap (switch dock tab), not a hold (turn). */
 const TAP_MS = 220;
@@ -227,6 +229,7 @@ export class Game {
     this.world?.dispose();
     this.celebrations.length = 0;
     this.city = city;
+    city.jobsInFrames = true;
     this.world = new WorldRenderer(city, this.assets, this.renderer.scene);
     this.world.warmUp();
     this.world.icons.visible = this.settings.showIcons;
@@ -847,6 +850,8 @@ export class Game {
         n++;
       }
       if (this.tickAcc >= TICK_SECONDS) this.tickAcc = Math.min(this.tickAcc, TICK_SECONDS);
+      // Heavy background work in small steps, so a tick never makes a long frame.
+      advanceJobs(city, JOBS_BUDGET_MS);
       if (this.settings.dayNight) {
         this.hour = (this.hour + (dt * mult * 24) / DAY_CYCLE_SECONDS) % 24;
         // Daytime only: just after sunrise to just before sunset, round and round.

@@ -27,6 +27,7 @@ export interface RoutePoint {
 const MAX_SPEED = 25;
 const SIGNAL_PENALTY = 7;
 const YIELD_PENALTY = 4;
+const CACHE_MAX = 16000;
 
 /**
  * A* router over the road graph. Edge costs are travel times that include
@@ -50,6 +51,8 @@ export class Pathfinder {
    */
   junctionDelay: ((segId: number, atB: boolean) => number) | null = null;
   searches = 0;
+  hits = 0;
+  misses = 0;
   /** Compact adjacency (edges leaving each node) for shortest-path trees. */
   private graph: { net: number; layout: number; start: Int32Array; to: Int32Array; seg: Int32Array; base: Float64Array } | null = null;
   /** Edge travel times including congestion, as of the last refreshCosts(). */
@@ -119,8 +122,15 @@ export class Pathfinder {
       const found = this.search(fs, from.s, ts, to.s);
       if (!found) return null;
       cached = { ...found, version: net.version };
-      if (this.cache.size > 4000) this.cache.clear();
+      // Big cities have many more origin–destination pairs: keep the most recent ones.
+      if (this.cache.size >= CACHE_MAX) this.cache.delete(this.cache.keys().next().value!);
       this.cache.set(key, cached);
+      this.misses++;
+    } else {
+      // Recently used: to the back of the line.
+      this.cache.delete(key);
+      this.cache.set(key, cached);
+      this.hits++;
     }
     return this.buildRoute(fs, from.s, ts, to.s, cached);
   }

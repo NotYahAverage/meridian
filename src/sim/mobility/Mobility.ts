@@ -125,6 +125,9 @@ export class Mobility {
   phase = 1;
   private live: Results | null = null;
   private job: Generator<void, void, void> | null = null;
+  /** Work per step is divided by this (the game runs steps between frames, in smaller pieces). */
+  fine = 1;
+  private startedDay = -1;
   private walkScratch: Float32Array = new Float32Array(0);
   cycles = 0;
 
@@ -149,7 +152,8 @@ export class Mobility {
   /** One tick of work: a few zones' travel times, or a slice of commuters. */
   tick(): void {
     if (!this.job) {
-      if (this.live && this.city.clock.hour !== 2) return;
+      if (this.live && (this.city.clock.hour !== 2 || this.startedDay === this.city.clock.day)) return;
+      this.startedDay = this.city.clock.day;
       this.job = this.cycle();
     }
     if (this.job.next().done) this.job = null;
@@ -185,7 +189,7 @@ export class Mobility {
     for (let z = 0; z < r.Z; z++) {
       this.rows(r, z, fresh[z] === 1);
       walks += fresh[z];
-      if (++n >= ROWS_PER_TICK || walks >= 2) {
+      if (++n >= Math.max(1, ROWS_PER_TICK / this.fine) || walks >= (this.fine > 1 ? 1 : 2)) {
         n = walks = 0;
         yield;
       }
@@ -424,7 +428,7 @@ export class Mobility {
     const safety = new Float32Array(Z);
     for (let z = 0; z < Z; z++) safety[z] = this.bikeSafety(zones[z].rep);
     for (let i = 0; i < pop.count; i++) {
-      if (i % HOUSEHOLDS_PER_TICK === HOUSEHOLDS_PER_TICK - 1) yield;
+      if (i % (HOUSEHOLDS_PER_TICK / this.fine) === HOUSEHOLDS_PER_TICK / this.fine - 1) yield;
       if (!pop.alive[i]) continue;
       const zh = zoneOf.get(pop.home[i]);
       for (let k = 0; k < 2; k++) {
@@ -510,7 +514,7 @@ export class Mobility {
     const weights = new Float64Array(Math.max(1, shopZones.length));
     const footShare = new Float64Array(Math.max(1, shopZones.length));
     for (let zh = 0; zh < Z; zh++) {
-      if (zh % ZONES_PER_TICK === ZONES_PER_TICK - 1) yield;
+      if (zh % Math.ceil(ZONES_PER_TICK / this.fine) === Math.ceil(ZONES_PER_TICK / this.fine) - 1) yield;
       const zi = zones[zh];
       if (zi.households <= 0) continue;
       const row = zh * Z;
