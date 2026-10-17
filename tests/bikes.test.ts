@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { City } from '../src/sim/City';
+import { City } from '../src/sim/City';
 import { ROAD_TYPES } from '../src/sim/roads/RoadTypes';
 import { Stage } from '../src/sim/traffic/Signals';
 import { BIKE_LANE, Held, Purpose, VM } from '../src/sim/traffic/Vehicles';
@@ -7,6 +7,7 @@ import { makeCity, road, servicedGrid } from './helpers';
 import { fillZone } from '../src/sim/CityCommands';
 import { fastForward } from '../src/sim/CitySim';
 import { Zone } from '../src/sim/types';
+import { TICKS_PER_DAY } from '../src/sim/constants';
 
 const town = () => {
   const city = makeCity({ empty: true, unlimited: true });
@@ -136,5 +137,72 @@ describe('bike lanes', () => {
     expect(city.mobility.bikeSafety(fake)).toBe(1);
     const r = city.live.bikeRoute(pt(city, 905, 1250), pt(city, 1495, 1250))!;
     expect(r.legs.some((l) => l.segId === a.id)).toBe(true);
+  });
+});
+
+describe('residents asking for bike lanes', () => {
+  // A small town (homes along an avenue, shops and offices nearby).
+  const crowded = () => {
+    const city = new City({ name: 'Riders', seed: 1234, preset: 'lakes', flatTerrain: 10, unlimitedMoney: true, civSeed: 4242 });
+    servicedGrid(city);
+    const sp = city.terrain.spawn;
+    const x = sp.endX, z = sp.endZ;
+    road(city, x + 50, z + 120, x + 350, z + 120);
+    for (let k = 0; k < 3; k++) {
+      fillZone(city, x + 50 + k * 100, z + 40, Zone.ResMed);
+      fillZone(city, x + 50 + k * 100, z - 40, Zone.ResMed);
+      fillZone(city, x + 50 + k * 100, z + 160, k === 1 ? Zone.Office : Zone.Commercial);
+    }
+    fastForward(city, 24 * 60);
+    return city;
+  };
+
+  it('ask, and are pleased when you build them (and you pay)', () => {
+    const city = crowded();
+    const req = city.bikeRequests;
+    for (let m = 0; m < 4 && !req.open.length; m++) req.monthly();
+    expect(req.open.length).toBeGreaterThan(0);
+    expect(req.open.length).toBeLessThanOrEqual(2);
+    const r = req.open[0];
+    const seg = city.roads.getSegment(r.segId);
+    expect(seg.bikeLane).toBe(0);
+    const home = city.buildings.onSegment(seg.id).find((b) => b.residents > 0)!;
+    city.economy.unlimited = false;
+    city.economy.money = 1e6;
+    const money = city.economy.money;
+    expect(req.approve(r.id).ok).toBe(true);
+    expect(city.roads.getSegment(r.segId).bikeLane).toBe(r.kind);
+    expect(city.economy.money).toBeLessThan(money);
+    expect(req.moodOf(home)).toBeGreaterThan(0);
+    expect(req.forSegment(r.segId)).toBeUndefined();
+  });
+
+  it('are disappointed when you decline, and come back if ignored', async () => {
+    const { serializeCity, deserializeCity } = await import('../src/sim/save/Serializer');
+    const city = crowded();
+    const req = city.bikeRequests;
+    for (let m = 0; m < 4 && !req.open.length; m++) req.monthly();
+    const r = req.open[0];
+    const home = city.buildings.onSegment(r.segId).find((b) => b.residents > 0)!;
+    // Saved with the city.
+    const loaded = deserializeCity(JSON.parse(JSON.stringify(serializeCity(city))), { flatTerrain: 10 });
+    expect(loaded.bikeRequests.forSegment(r.segId)?.kind).toBe(r.kind);
+    req.decline(r.id);
+    expect(req.moodOf(home)).toBeLessThan(0);
+    // Not again from that street for a year.
+    for (let m = 0; m < 6; m++) {
+      req.monthly();
+      expect(req.forSegment(r.segId)).toBeUndefined();
+    }
+    // Another street's request, ignored: it lapses, then comes back asking again.
+    const other = req.open[0] ?? (req.monthly(), req.open[0]);
+    if (other) {
+      city.clock.tick = (other.until + 1) * TICKS_PER_DAY;
+      req.monthly();
+      expect(req.forSegment(other.segId)).toBeUndefined();
+      city.clock.tick += 200 * TICKS_PER_DAY;
+      for (let m = 0; m < 3 && !req.forSegment(other.segId); m++) req.monthly();
+      expect(req.forSegment(other.segId)?.asks).toBe(2);
+    }
   });
 });

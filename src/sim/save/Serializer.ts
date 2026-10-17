@@ -25,6 +25,7 @@ import { migrateToBigWorld } from './WorldMigration';
 import type { ResearchSave } from '../research/Research';
 import { hashStr } from '../research/Generate';
 import type { AchievementSave } from '../progress/Achievements';
+import type { BikeRequestsSave } from '../mobility/BikeRequests';
 import type { ScenarioState } from '../progress/Scenarios';
 
 export const SAVE_FORMAT = 'meridian-city';
@@ -132,6 +133,7 @@ export interface SaveData {
   design?: DesignSave;
   people?: PeopleSave;
   mobility?: MobilitySave;
+  bikeRequests?: BikeRequestsSave;
 }
 
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -262,6 +264,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
     design: city.design.serialize(),
     people: city.people.serialize(),
     mobility: city.mobility.serialize(),
+    bikeRequests: city.bikeRequests.serialize(),
   };
 }
 
@@ -431,6 +434,7 @@ export function deserializeCity(raw: SaveData, opts: { flatTerrain?: number; ter
   city.design.load(data.design);
   city.people.load(data.people);
   city.mobility.load(data.mobility);
+  city.bikeRequests.load(data.bikeRequests);
   return city;
 }
 

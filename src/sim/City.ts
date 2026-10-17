@@ -45,6 +45,7 @@ import { Achievements } from './progress/Achievements';
 import type { ScenarioState } from './progress/Scenarios';
 import { SERVICE_BY_ID } from './services/ServiceTypes';
 import { ZoneMap } from './zoning/ZoneMap';
+import { BikeRequests } from './mobility/BikeRequests';
 import { BuildingState, Problem } from './types';
 
 export type CityEvents = {
@@ -66,6 +67,7 @@ export type CityEvents = {
     | { type: 'promise'; group: GroupId; petition: number; kept: boolean }
     | { type: 'protest'; group: GroupId; protest: number }
     | { type: 'leaving'; group: GroupId; households: number };
+  bike: { type: 'request'; request: number } | { type: 'answer'; request: number; approved: boolean };
   research: { type: 'discovery' | 'decision' | 'failure' | 'milestone' | 'retrofit'; centerId: number; discoveryId?: string; recordId?: string; outcome?: string; milestoneId?: string };
 };
 
@@ -132,6 +134,8 @@ export class City {
   readonly pedestrians: Pedestrians;
   /** How people get around: travel times, commutes, shop customers, park visits, access. */
   readonly mobility: Mobility;
+  /** Residents' requests for bike lanes on their roads. */
+  readonly bikeRequests: BikeRequests;
   readonly zones: ZoneMap;
   readonly buildings = new Buildings();
   readonly population = new Population();
@@ -236,6 +240,7 @@ export class City {
     };
     this.transit = new Transit(this);
     this.mobility = new Mobility(this);
+    this.bikeRequests = new BikeRequests(this);
     this.trips = new TripGenerator({
       buildings: this.buildings,
       population: this.population,

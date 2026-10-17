@@ -50,6 +50,7 @@ import { buildDemoCity } from './demo';
 /** The daylight hours the daytime-only setting loops through (sunrise is at 6, sunset at 18). */
 const DAY_START = 6.25;
 const DAY_END = 17.75;
+import { BikeRequests } from '../sim/mobility/BikeRequests';
 import { Input } from './Input';
 
 export type GameState = 'boot' | 'menu' | 'playing';
@@ -279,6 +280,25 @@ export class Game {
           this.play('notify');
           if (p) this.ui.toasts.push({ severity: 'warning', icon: 'people', title: 'A petition needs an answer', text: `“${p.text}”`, onClick: () => this.ui.studio.open({ tab: 'people' }), tip: 'Click to answer' });
         }
+      }),
+      city.events.on('bike', (e) => {
+        if (this.state !== 'playing' || e.type !== 'request') return;
+        const r = city.bikeRequests.open.find((x) => x.id === e.request);
+        const seg = r ? city.roads.segments.get(r.segId) : undefined;
+        if (!r || !seg) return;
+        this.play('notify');
+        this.ui.toasts.push({
+          severity: 'info',
+          icon: 'bike',
+          title: r.asks > 1 ? 'Residents ask again for bike lanes' : 'Residents ask for bike lanes',
+          text: BikeRequests.text(r),
+          onClick: () => {
+            const mid = Math.floor(seg.poly.count / 2) * 2;
+            this.cam.flyTo(seg.poly.pts[mid], seg.poly.pts[mid + 1], 260);
+            this.select({ kind: 'road', id: seg.id });
+          },
+          tip: 'Click to see the street and answer',
+        });
       }),
       city.events.on('news', (ed) => {
         if (this.state === 'playing') this.ui.newsToast(ed);

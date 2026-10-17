@@ -561,6 +561,8 @@ function dailyBuildings(city: City): void {
       h += 12 * grids.police[ci] + 10 * grids.health[ci] + 9 * grids.education[ci];
       const parks = mobEffect > 0 ? mob.parkAccess(b) : null;
       h += 6 * grids.fire[ci] + parkWeight(b) * (parks === null ? grids.park[ci] : lerp(grids.park[ci], parks, mobEffect)) + policyMood(b);
+      // What became of the street's request for bike lanes.
+      h += city.bikeRequests.moodOf(b);
       h += (lv - 0.35) * 30;
       h -= lvMap.pollution[ci] * 38 + lvMap.noise[ci] * 16;
       h -= (tax.residential - 9) * 1.6;
@@ -987,6 +989,7 @@ function dailyNotices(city: City): void {
 
 function monthly(city: City): void {
   city.economy.closeMonth(city.clock.monthIndex);
+  city.bikeRequests.monthly();
   checkScenario(city);
   city.news.publish();
   const last = city.economy.history[city.economy.history.length - 1];

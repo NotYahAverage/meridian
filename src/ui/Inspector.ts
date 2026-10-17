@@ -22,6 +22,8 @@ import { BuildingState, Problem, ZONE_INFO, isResidential } from '../sim/types';
 import type { Selection } from '../tools/InspectTool';
 import { humanize } from '../tools/BulldozeTool';
 import { h } from './dom';
+import { BikeRequests } from '../sim/mobility/BikeRequests';
+import { BIKE_LANE } from '../sim/CityCommands';
 import { icon } from './icons';
 
 const PROBLEMS: [number, string, string][] = [
@@ -525,9 +527,36 @@ export class Inspector {
         h('div', { class: 'kv' }, h('span', null, 'Congestion'), meter(Math.min(1, ratio), ratio > 1 ? 'var(--bad)' : ratio > 0.7 ? 'var(--warn)' : 'var(--good)')),
         kv('Vehicles now', formatInt(city.vehicles.countOn(seg.id))),
         kv('Buildings served', formatInt(city.buildings.onSegment(seg.id).length)),
-        kv('Upkeep', `${formatMoney(seg.length * rt.upkeepPerMeter)}/month`),
+        kv('Upkeep', `${formatMoney(seg.length * (rt.upkeepPerMeter + BIKE_LANE.upkeepPerMeter[seg.bikeLane ?? 0]))}/month`),
       );
       if (ratio > 1) body.appendChild(h('div', { class: 'hint small' }, 'Over capacity: add parallel routes or upgrade to a wider road.'));
+      if (seg.bikeLane) body.appendChild(kv('Bike lanes', seg.bikeLane === 2 ? 'Protected' : 'Painted'));
+      const req = city.bikeRequests.forSegment(seg.id);
+      if (req) {
+        const cost = city.bikeRequests.costOf(req);
+        const left = Math.max(0, req.until - city.clock.day);
+        body.appendChild(
+          h('div', { class: 'insp-request' },
+            h('div', { class: 'section-title' }, req.asks > 1 ? 'Residents ask again' : 'Residents ask'),
+            h('div', { class: 'small' }, BikeRequests.text(req)),
+            h('div', { class: 'small muted' }, `${formatInt(req.residents)} people live along it · answer within ${left} days`),
+            h('div', { class: 'btn-row' },
+              h('button', {
+                class: 'btn primary',
+                onclick: () => {
+                  const r = city.bikeRequests.approve(req.id);
+                  if (r.ok) {
+                    this.game.play('build');
+                    this.game.flashMoney(-(r.cost ?? 0));
+                  } else this.game.toastError(r.error ?? 'Cannot build them');
+                  this.render();
+                },
+              }, icon('check', 14), `Build them · ${formatMoney(cost)}`),
+              h('button', { class: 'btn', onclick: () => { city.bikeRequests.decline(req.id); this.game.play('click'); this.render(); } }, icon('close', 14), 'Decline'),
+            ),
+          ),
+        );
+      }
       body.appendChild(
         h('div', { class: 'btn-row' },
           h('button', { class: 'btn', onclick: () => { this.game.ui.toolbar.select('roads'); } }, icon('upgrade', 14), 'Upgrade…'),
