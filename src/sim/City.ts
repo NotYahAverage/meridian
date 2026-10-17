@@ -129,6 +129,8 @@ export class City {
   jobsInFrames = false;
   /** Job steps owed (JOB_FINE per tick). */
   jobDebt = 0;
+  /** New trip demand waiting for the traffic cycle in progress to finish (game only). */
+  heldDemand: TripDemand[] | null = null;
   /** Periodic coverage and land-value refreshes in progress (a slice per tick). */
   coverageJob: Generator<void, void, void> | null = null;
   landValueJob: Generator<void, void, void> | null = null;

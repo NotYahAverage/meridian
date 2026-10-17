@@ -1,3 +1,4 @@
+import type { TripDemand } from './traffic/TrafficModel';
 import { clamp, formatInt, formatMoney, lerp } from '../core/math';
 import { isFreeway } from './roads/RoadTypes';
 import { checkScenario } from './progress/Scenarios';
@@ -109,11 +110,21 @@ function stepLateJobs(city: City): void {
     const r = city.demandJob.next();
     if (r.done) {
       city.demandJob = null;
-      // Junction delays phase in with the other getting-around effects in older cities.
-      city.traffic.delayScale = city.mobility.phase;
-      city.traffic.setDemand(r.value);
+      // At high speed the jobs can fall behind the clock: let the traffic cycle under way finish first.
+      if (city.traffic.pending > 0) city.heldDemand = r.value;
+      else applyDemand(city, r.value);
     }
   }
+  if (city.heldDemand && city.traffic.pending === 0) {
+    applyDemand(city, city.heldDemand);
+    city.heldDemand = null;
+  }
+}
+
+function applyDemand(city: City, trips: TripDemand[]): void {
+  // Junction delays phase in with the other getting-around effects in older cities.
+  city.traffic.delayScale = city.mobility.phase;
+  city.traffic.setDemand(trips);
 }
 
 /**
@@ -165,21 +176,21 @@ export function tickCity(city: City): void {
     city.coverageJob = null;
     city.coverage.recompute(city.buildings);
     city.coverageDirty = false;
-  } else if (hour === 9 && city.clock.day % 2 === 0) {
+  } else if (hour === 9 && city.clock.day % 2 === 0 && !(city.jobsInFrames && city.coverageJob)) {
     city.coverageJob = city.coverage.recomputeSteps(city.buildings, city.jobsInFrames ? Math.ceil(COVERAGE_SLICE / JOB_FINE) : COVERAGE_SLICE);
   }
   if (!city.jobsInFrames && city.coverageJob && city.coverageJob.next().done) city.coverageJob = null;
   if (hour === 0) {
     daily(city);
     if (city.clock.day % DAYS_PER_MONTH === 0) monthly(city);
-  } else if (hour === 14) {
+  } else if (hour === 14 && !(city.jobsInFrames && city.landValueJob)) {
     // Land value is worked out a pass per hour.
     city.landValueJob = city.landValue.updateSteps(city.buildings, city.roads, city.coverage, city.traffic, 0.3, city.transit.servedStops(), landValueMods(city), city.jobsInFrames ? 24 : Infinity);
   } else if (hour === 19) {
     dailyLate(city);
   } else if (hour === 3) {
     city.transit.updateRidership();
-  } else if (hour === 4 && city.clock.day % 2 === 0) {
+  } else if (hour === 4 && city.clock.day % 2 === 0 && !(city.jobsInFrames && city.demandJob)) {
     city.trips.refresh();
     // Trip demand is added up a slice at a time over the next few hours in big cities.
     city.demandJob = city.trips.demandSteps(city.jobsInFrames ? DEMAND_SLICE / JOB_FINE : DEMAND_SLICE);
@@ -197,13 +208,9 @@ export function tickCity(city: City): void {
     }
     return;
   }
-  // The game does these between frames; if it falls behind, catch up here so they keep pace with the clock.
-  city.jobDebt += JOB_FINE;
-  while (city.jobDebt > JOB_FINE * 3) {
-    stepJobs(city);
-    stepLateJobs(city);
-    city.jobDebt--;
-  }
+  // The game does these between frames. At high speed they may fall behind the clock (each
+  // finishes before it starts again), rather than slow every frame down to catch up.
+  city.jobDebt = Math.min(city.jobDebt + JOB_FINE, JOB_FINE * 24);
 }
 
 /** Land-value modifiers from the Clean Air Act and Park Rangers (city-wide or per district). */
