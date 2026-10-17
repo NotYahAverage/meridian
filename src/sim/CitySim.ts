@@ -88,6 +88,8 @@ export function projectEconomy(city: City): void {
 
 /** Households whose trips are added up per tick while recomputing traffic demand. */
 const DEMAND_SLICE = 20_000;
+/** Residents per step when the game works out transit ridership between frames. */
+const RIDERSHIP_SLICE = 60_000;
 /** Services splatted per tick during the periodic coverage refresh. */
 const COVERAGE_SLICE = 150;
 
@@ -106,6 +108,7 @@ function stepJobs(city: City): void {
 function stepLateJobs(city: City): void {
   if (city.coverageJob && city.coverageJob.next().done) city.coverageJob = null;
   if (city.landValueJob && city.landValueJob.next().done) city.landValueJob = null;
+  if (city.ridershipJob && city.ridershipJob.next().done) city.ridershipJob = null;
   if (city.demandJob) {
     const r = city.demandJob.next();
     if (r.done) {
@@ -189,7 +192,8 @@ export function tickCity(city: City): void {
   } else if (hour === 19) {
     dailyLate(city);
   } else if (hour === 3) {
-    city.transit.updateRidership();
+    if (!city.jobsInFrames) city.transit.updateRidership();
+    else if (!city.ridershipJob) city.ridershipJob = city.transit.ridershipSteps(RIDERSHIP_SLICE);
   } else if (hour === 4 && city.clock.day % 2 === 0 && !(city.jobsInFrames && city.demandJob)) {
     city.trips.refresh();
     // Trip demand is added up a slice at a time over the next few hours in big cities.

@@ -364,20 +364,31 @@ export class Transit {
 
   /** Daily mode choice for commuters (bus or metro). Fills `share` and line rider counts. */
   updateRidership(): void {
+    const it = this.ridershipSteps(Infinity);
+    while (!it.next().done);
+  }
+
+  /**
+   * The same as updateRidership(), `perStep` residents per next(). The results
+   * (shares, riders, waiting) are all replaced together at the end.
+   */
+  *ridershipSteps(perStep: number): Generator<void, void, void> {
     const city = this.city;
     this.refreshRoutes();
     this.metro.refresh();
     const pop = city.population;
-    if (this.share.length < pop.count * 2) this.share = new Float32Array(Math.max(256, pop.count * 4));
-    else this.share.fill(0);
-    this.totalRiders = 0;
-    this.busRiders = 0;
-    this.metro.totalRiders = 0;
-    this.modeShare = 0;
-    for (const line of this.lines.values()) line.ridersPerDay = 0;
-    for (const line of this.metro.lines.values()) line.ridersPerDay = 0;
-    for (const st of this.stops.values()) st.waiting = 0;
-    this.metro.waiting.clear();
+    const reset = () => {
+      if (this.share.length < pop.count * 2) this.share = new Float32Array(Math.max(256, pop.count * 4));
+      else this.share.fill(0);
+      this.totalRiders = 0;
+      this.busRiders = 0;
+      this.metro.totalRiders = 0;
+      this.modeShare = 0;
+      for (const line of this.lines.values()) line.ridersPerDay = 0;
+      for (const line of this.metro.lines.values()) line.ridersPerDay = 0;
+      for (const st of this.stops.values()) st.waiting = 0;
+      this.metro.waiting.clear();
+    };
 
     // Everything a commuter could ride, buses and trains alike.
     const rides: Ride[] = [];
@@ -413,7 +424,10 @@ export class Transit {
         },
       });
     }
-    if (!rides.length) return;
+    if (!rides.length) {
+      reset();
+      return;
+    }
 
     // Which rides each building can reach on foot, and how far it is to walk.
     const access = new Map<number, Access[]>();
@@ -437,7 +451,9 @@ export class Transit {
     let transitTrips = 0;
     const choices: { slot: number; ride: Ride; share: number; a: number }[] = [];
     const demand = new Map<Ride, number>();
+    if (perStep !== Infinity) yield;
     for (let i = 0; i < pop.count; i++) {
+      if (i % perStep === perStep - 1) yield;
       if (!pop.alive[i]) continue;
       const homeAccess = access.get(pop.home[i]);
       for (let k = 0; k < 2; k++) {
@@ -478,6 +494,7 @@ export class Transit {
       }
     }
     // Crowded lines lose riders until demand fits capacity.
+    reset();
     for (const c of choices) {
       const d = demand.get(c.ride) ?? 0;
       const s = c.share * (d > c.ride.capacity ? c.ride.capacity / d : 1);

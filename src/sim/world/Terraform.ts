@@ -336,11 +336,16 @@ export interface TerrainEdits {
   soil?: string;
 }
 
-function encodeRuns(cur: Float32Array, natural: Float32Array): EditRuns {
+function* encodeRuns(cur: Float32Array, natural: Float32Array, perStep: number): Generator<void, EditRuns, void> {
   const runs: EditRuns = [];
   let i = 0;
   const n = cur.length;
+  let next = perStep;
   while (i < n) {
+    if (i >= next) {
+      next = i + perStep;
+      yield;
+    }
     if (Math.round((cur[i] - natural[i]) * 100) === 0) {
       i++;
       continue;
@@ -374,9 +379,18 @@ function decodeRuns(runs: EditRuns, target: Float32Array, natural: Float32Array)
 }
 
 export function serializeTerrainEdits(t: Terrain): TerrainEdits | undefined {
+  const it = serializeTerrainEditsSteps(t, Infinity);
+  for (;;) {
+    const r = it.next();
+    if (r.done) return r.value;
+  }
+}
+
+/** The same, yielding about every `perStep` heightmap cells (saving a big world spread over frames). */
+export function* serializeTerrainEditsSteps(t: Terrain, perStep: number): Generator<void, TerrainEdits | undefined, void> {
   if (!t.natural || !t.naturalRoad) return undefined;
-  const base = encodeRuns(t.base, t.natural);
-  const road = encodeRuns(t.road, t.naturalRoad);
+  const base = yield* encodeRuns(t.base, t.natural, perStep);
+  const road = yield* encodeRuns(t.road, t.naturalRoad, perStep);
   if (!base.length && !road.length) return undefined;
   return t.hasSoil ? { base, road, soil: rleEncode(t.soil) } : { base, road };
 }

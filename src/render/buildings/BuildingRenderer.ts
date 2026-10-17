@@ -237,6 +237,28 @@ export class BuildingRenderer {
     }
   }
 
+  /**
+   * After loading: builds the chunks within `radius` of a point at once, and queues
+   * the rest nearest first for the frames that follow (big cities load seconds sooner).
+   */
+  warmNear(x: number, z: number, radius: number): void {
+    const centre = (ch: number) => Math.hypot(((ch % CHUNKS) + 0.5) * CHUNK_SIZE - x, (Math.floor(ch / CHUNKS) + 0.5) * CHUNK_SIZE - z);
+    const order = [...this.dirty].map((ch) => [ch, centre(ch)] as const).sort((a, b) => a[1] - b[1]);
+    this.dirty = new Set(order.map(([ch]) => ch));
+    for (const [ch, d] of order) {
+      if (d > radius) break;
+      this.prepare(ch, () => false);
+      this.dirty.delete(ch);
+      this.rebuildChunk(ch);
+    }
+    this.rebuild(0);
+  }
+
+  /** Chunks still to build (after a load, the far ones fill in over the next frames). */
+  get backlog(): number {
+    return this.dirty.size;
+  }
+
   /** Rebuilds dirty chunks within a time budget (ms). */
   rebuild(budgetMs = 6): void {
     const t0 = performance.now();

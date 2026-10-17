@@ -119,7 +119,15 @@ export class WorldRenderer {
     this.roads.sync();
     this.roads.rebuild(1e6);
     this.buildings.sync();
-    this.buildings.rebuild(1e6);
+    // Buildings around where the camera starts (the middle of the city) now, the rest over the next frames.
+    let n = 0, sx = 0, sz = 0;
+    for (const b of this.city.buildings.all.values()) {
+      sx += b.cx;
+      sz += b.cz;
+      n++;
+    }
+    if (n) this.buildings.warmNear(sx / n, sz / n, 1800);
+    else this.buildings.rebuild(1e6);
     this.buildings.updateState(0, true);
     this.terrain.syncDirty();
   }
@@ -134,7 +142,8 @@ export class WorldRenderer {
     this.roads.sync();
     this.roads.rebuild(6);
     this.buildings.sync();
-    this.buildings.rebuild(6);
+    // A little more while the far side of a just-loaded city is still filling in.
+    this.buildings.rebuild(this.buildings.backlog > 8 ? 9 : 6);
     this.buildings.updateState(dt);
     this.buildings.updateLod(focus);
     this.overlays.update(dt);

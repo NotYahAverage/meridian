@@ -18,7 +18,7 @@ import type { WeatherSave } from '../world/Weather';
 import type { PolicyId } from '../policies/Policies';
 import { BuildingState, type DemandKind, Zone } from '../types';
 import type { MapPreset } from '../world/Terrain';
-import { type TerrainEdits, loadTerrainEdits, serializeTerrainEdits } from '../world/Terraform';
+import { type TerrainEdits, loadTerrainEdits, serializeTerrainEditsSteps } from '../world/Terraform';
 import { conformTerrain } from '../world/TerrainConform';
 import type { LandData } from '../world/Land';
 import { migrateToBigWorld } from './WorldMigration';
@@ -164,6 +164,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
   for (const n of city.roads.nodes.values()) nodes.push([n.id, r3(n.x), r3(n.z), n.outside ? 1 : 0]);
   const segments: SaveData['roads']['segments'] = [];
   for (const s of city.roads.segments.values()) segments.push(s.elevated || s.oneway || s.ring || s.raised || s.bikeLane ? [s.id, s.a, s.b, s.type, r3(s.cx), r3(s.cz), s.name, s.builtTick, s.elevated ? 1 : 0, s.oneway, s.ring ? 1 : 0, s.raised ? 1 : 0, s.bikeLane] : [s.id, s.a, s.b, s.type, r3(s.cx), r3(s.cz), s.name, s.builtTick]);
+  yield;
   const buildings: BuildingRecord[] = [];
   for (const b of city.buildings.all.values()) {
     buildings.push([
@@ -198,7 +199,7 @@ function* serializeSteps(city: City): Generator<void, SaveData, void> {
   const landValue = { value: encodeTyped(city.landValue.value), pollution: encodeTyped(city.landValue.pollution) };
   const districtGrid = rleEncode(city.districts.grid);
   yield;
-  const terrainEdits = serializeTerrainEdits(city.terrain);
+  const terrainEdits = yield* serializeTerrainEditsSteps(city.terrain, 1 << 20);
   const nature = serializeNature(city);
   yield;
   return {

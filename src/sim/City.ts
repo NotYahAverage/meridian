@@ -131,6 +131,8 @@ export class City {
   jobDebt = 0;
   /** New trip demand waiting for the traffic cycle in progress to finish (game only). */
   heldDemand: TripDemand[] | null = null;
+  /** Transit ridership, worked out a slice of residents at a time (game only). */
+  ridershipJob: Generator<void, void, void> | null = null;
   /** Periodic coverage and land-value refreshes in progress (a slice per tick). */
   coverageJob: Generator<void, void, void> | null = null;
   landValueJob: Generator<void, void, void> | null = null;

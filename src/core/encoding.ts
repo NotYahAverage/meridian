@@ -1,12 +1,31 @@
 /** Typed-array ⇄ base64 helpers that work in browsers and Node. */
 
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const ENC = Uint8Array.from(B64, (c) => c.charCodeAt(0));
+const ascii = new TextDecoder('latin1');
+
+/** Base64 straight from the bytes (saves of big cities hold tens of megabytes of these). */
 export function bytesToBase64(bytes: Uint8Array): string {
-  let s = '';
-  const CH = 0x8000;
-  for (let i = 0; i < bytes.length; i += CH) {
-    s += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CH)));
+  const n = bytes.length;
+  const out = new Uint8Array(Math.ceil(n / 3) * 4);
+  let o = 0;
+  let i = 0;
+  for (; i + 2 < n; i += 3) {
+    const v = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
+    out[o++] = ENC[v >> 18];
+    out[o++] = ENC[(v >> 12) & 63];
+    out[o++] = ENC[(v >> 6) & 63];
+    out[o++] = ENC[v & 63];
   }
-  return btoa(s);
+  if (i < n) {
+    const v = (bytes[i] << 16) | (i + 1 < n ? bytes[i + 1] << 8 : 0);
+    out[o++] = ENC[v >> 18];
+    out[o++] = ENC[(v >> 12) & 63];
+    out[o++] = i + 1 < n ? ENC[(v >> 6) & 63] : 61;
+    out[o++] = 61;
+  }
+  // Pure ASCII, so latin1 decodes it byte for byte.
+  return ascii.decode(out);
 }
 
 export function base64ToBytes(b64: string): Uint8Array {

@@ -231,7 +231,8 @@ export class TrafficModel {
         g = { from: t.from, dests: [] };
         groups.set(key, g);
       }
-      g.dests.push({ to: t.to, trips: t.trips });
+      // The demand records themselves (no copies: big cities have about a million).
+      g.dests.push(t);
     }
     this.queue = this.cluster([...groups.values()]);
     this.cursor = 0;
@@ -278,14 +279,12 @@ export class TrafficModel {
     const out: OriginGroup[] = [];
     for (const list of cells.values()) {
       const head = list[0];
-      const merged: OriginGroup = { from: head.from, dests: [], local: [] };
-      for (const g of list) {
+      const merged: OriginGroup = { from: head.from, dests: list.length === 1 ? head.dests : head.dests.concat(...list.slice(1).map((g) => g.dests)), local: [] };
+      for (let k = 1; k < list.length; k++) {
+        const g = list[k];
         let trips = 0;
-        for (const d of g.dests) {
-          merged.dests.push(d);
-          trips += d.trips;
-        }
-        if (g !== head) merged.local!.push({ segId: g.from.segId, trips });
+        for (const d of g.dests) trips += d.trips;
+        merged.local!.push({ segId: g.from.segId, trips });
       }
       out.push(merged);
     }
