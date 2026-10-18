@@ -126,33 +126,79 @@ export class AssetLibrary {
 
 /**
  * Gives every wheel vertex its axle (x, height) in `aWheel`, so the vehicle shader can
- * spin it: wheel parts are grouped into axles by where they sit along the vehicle.
+ * spin it. Each wheel is found as a connected piece of the mesh (vertices joined by its
+ * triangles, or sitting at the same point), and turns about the middle of that piece:
+ * grouping by position along the vehicle would slice a round wheel into strips that each
+ * turned about a different centre, or merge twin rear wheels into one.
  */
 export function tagWheels(g: THREE.BufferGeometry): void {
   const pos = g.getAttribute('position');
   const mat = g.getAttribute('aMat');
   const n = pos.count;
   const out = new Float32Array(n * 2);
-  const idx: number[] = [];
-  for (let i = 0; i < n; i++) if (Math.round(mat.getX(i)) === MATK.wheel) idx.push(i);
-  idx.sort((a, b) => pos.getX(a) - pos.getX(b));
-  let k = 0;
-  while (k < idx.length) {
-    let e = k + 1;
-    while (e < idx.length && pos.getX(idx[e]) - pos.getX(idx[e - 1]) < 0.08) e++;
-    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
-    for (let j = k; j < e; j++) {
-      const i = idx[j];
-      x0 = Math.min(x0, pos.getX(i));
-      x1 = Math.max(x1, pos.getX(i));
-      y0 = Math.min(y0, pos.getY(i));
-      y1 = Math.max(y1, pos.getY(i));
+  const isWheel = (i: number) => Math.round(mat.getX(i)) === MATK.wheel;
+  const parent = new Int32Array(n);
+  for (let i = 0; i < n; i++) parent[i] = i;
+  const find = (i: number): number => {
+    while (parent[i] !== i) i = parent[i] = parent[parent[i]];
+    return i;
+  };
+  const join = (a: number, b: number) => {
+    const ra = find(a), rb = find(b);
+    if (ra !== rb) parent[ra] = rb;
+  };
+  // Triangles.
+  const index = g.getIndex();
+  const tris = index ? index.count : n;
+  for (let t = 0; t + 2 < tris; t += 3) {
+    const a = index ? index.getX(t) : t, b = index ? index.getX(t + 1) : t + 1, c = index ? index.getX(t + 2) : t + 2;
+    if (!isWheel(a) || !isWheel(b) || !isWheel(c)) continue;
+    join(a, b);
+    join(b, c);
+  }
+  // Vertices split for flat shading sit at the same point.
+  const at = new Map<string, number>();
+  for (let i = 0; i < n; i++) {
+    if (!isWheel(i)) continue;
+    const key = `${Math.round(pos.getX(i) * 500)},${Math.round(pos.getY(i) * 500)},${Math.round(pos.getZ(i) * 500)}`;
+    const j = at.get(key);
+    if (j === undefined) at.set(key, i);
+    else join(i, j);
+  }
+  // Each piece's extent: x0, x1, y0, y1, z0, z1.
+  const box = new Map<number, number[]>();
+  for (let i = 0; i < n; i++) {
+    if (!isWheel(i)) continue;
+    const r = find(i);
+    let b = box.get(r);
+    if (!b) box.set(r, (b = [Infinity, -Infinity, Infinity, -Infinity, Infinity, -Infinity]));
+    const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+    b[0] = Math.min(b[0], x); b[1] = Math.max(b[1], x);
+    b[2] = Math.min(b[2], y); b[3] = Math.max(b[3], y);
+    b[4] = Math.min(b[4], z); b[5] = Math.max(b[5], z);
+  }
+  // Small pieces on a wheel (bolts, hub caps) turn with the wheel they sit on: the biggest piece
+  // on the same side whose outline contains them.
+  const pieces = [...box.entries()].sort((p, q) => q[1][1] - q[1][0] - (p[1][1] - p[1][0]));
+  const centre = new Map<number, [number, number]>();
+  for (const [r, b] of pieces) {
+    const cx = (b[0] + b[1]) / 2, cy = (b[2] + b[3]) / 2, cz = (b[4] + b[5]) / 2;
+    let host: number[] | null = null;
+    for (const [, o] of pieces) {
+      if (o === b || o[1] - o[0] <= b[1] - b[0]) break;
+      if (cx >= o[0] && cx <= o[1] && cy >= o[2] && cy <= o[3] && cz >= o[4] - 0.15 && cz <= o[5] + 0.15) {
+        host = o;
+        break;
+      }
     }
-    for (let j = k; j < e; j++) {
-      out[idx[j] * 2] = (x0 + x1) / 2;
-      out[idx[j] * 2 + 1] = (y0 + y1) / 2;
-    }
-    k = e;
+    const h = host ?? b;
+    centre.set(r, [(h[0] + h[1]) / 2, (h[2] + h[3]) / 2]);
+  }
+  for (let i = 0; i < n; i++) {
+    if (!isWheel(i)) continue;
+    const c = centre.get(find(i))!;
+    out[i * 2] = c[0];
+    out[i * 2 + 1] = c[1];
   }
   g.setAttribute('aWheel', new THREE.BufferAttribute(out, 2));
 }
