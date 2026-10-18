@@ -89,9 +89,27 @@ export class Renderer {
     return { width: this.width, height: this.height };
   }
 
+  /** Frames since the shadow map was last drawn. */
+  private shadowAge = 0;
+
   render(): void {
     this.grade.uniforms.uExposure.value = this.renderer.toneMappingExposure;
+    // The shadow map is redrawn every other frame: it's the costliest pass, and at high frame
+    // rates shadows that move at half the rate don't show. (three.js only moves the shadow
+    // lookup when it redraws the map, so shadows never slip against what casts them.)
+    const sm = this.renderer.shadowMap;
+    sm.autoUpdate = false;
+    if (++this.shadowAge >= 2) {
+      sm.needsUpdate = true;
+      this.shadowAge = 0;
+    }
     this.composer.render();
+  }
+
+  /** The next frame redraws the shadow map (after a jump, or before a screenshot). */
+  refreshShadows(): void {
+    this.renderer.shadowMap.needsUpdate = true;
+    this.shadowAge = 0;
   }
 
   /**
@@ -114,6 +132,7 @@ export class Renderer {
 
   /** Renders one frame and returns a small JPEG thumbnail (for save slots). */
   captureThumbnail(width = 320, height = 180): string {
+    this.refreshShadows();
     this.render();
     const src = this.renderer.domElement;
     const c = document.createElement('canvas');

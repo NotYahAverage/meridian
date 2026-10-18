@@ -11,6 +11,7 @@ import { platform } from './platform/Platform';
 import { newBuilding } from './sim/buildings/Buildings';
 import { lotFrame } from './sim/buildings/Spawner';
 import { ARCHETYPES, capacityFor } from './sim/buildings/Archetypes';
+import { view } from './render/shared';
 import * as Terraform from './sim/world/Terraform';
 
 function webglAvailable(): boolean {
@@ -38,7 +39,7 @@ async function main(): Promise<void> {
   // Automation/debug hook (used by the Playwright end-to-end tests).
   const params = new URLSearchParams(location.search);
   if (import.meta.env.DEV || params.has('e2e')) {
-    (window as unknown as Record<string, unknown>).__meridian = { game, CityCommands, tickCity, fastForward, serializeCity, serializeCityAsync, storage: platform.storage, Terraform, sim: { newBuilding, lotFrame, ARCHETYPES, capacityFor, SERVICE_BY_ID, IDEAS, citizenOf } };
+    (window as unknown as Record<string, unknown>).__meridian = { game, CityCommands, tickCity, fastForward, serializeCity, serializeCityAsync, storage: platform.storage, view, Terraform, sim: { newBuilding, lotFrame, ARCHETYPES, capacityFor, SERVICE_BY_ID, IDEAS, citizenOf } };
   }
   await game.boot();
 }

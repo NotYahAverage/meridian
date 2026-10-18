@@ -4,6 +4,7 @@ import { CHUNKS, CHUNK_SIZE } from '../../sim/constants';
 import { ROAD_TYPES } from '../../sim/roads/RoadTypes';
 import { type PropInstance, RoadGeo, type SignalHead, type WalkSignalHead, buildNode, buildSegment, buildIsland } from './RoadMeshBuilder';
 import { nodeRaised } from '../../sim/roads/Overpass';
+import { Batcher } from '../Batcher';
 import { type RoadUniforms, createRoadMaterial } from './RoadMaterial';
 
 const SEG_TEX = 128;
@@ -157,6 +158,16 @@ export class RoadRenderer {
       }
       this.dirty.add(ch);
     }
+  }
+
+  private batcher: Batcher | null = null;
+  /** Settled blocks of chunks drawn as one mesh each. */
+  batch(dt: number): void {
+    this.batcher ??= new Batcher(this.group, CHUNKS, { material: this.material, receiveShadow: true });
+    this.batcher.update(dt, (ch) => {
+      const m = this.chunks[ch].mesh;
+      return m ? [(m.visible = true, m)] : [];
+    });
   }
 
   /** Rebuilds up to `budget` dirty chunks. */

@@ -241,6 +241,14 @@ export class Vehicles {
   lodRadius = 900;
   /** Vehicles further than this (along either axis) from the focus aren't drawn. */
   hiddenBeyond = 1600;
+  /**
+   * Set by the renderer: whether a point is on screen. Cars off screen (more than a short way
+   * from the camera) step at the distant rate, as nobody can see the coarser steps.
+   */
+  inView: ((x: number, z: number) => boolean) | null = null;
+  /** Camera position on the ground, for "a short way from the camera". */
+  camX = 0;
+  camZ = 0;
   /** Reroutes allowed this frame. */
   private rerouteBudget = 0;
   /** Finds a new way to a vehicle's destination from where it is, with that driver's knowledge of the roads. */
@@ -1011,7 +1019,8 @@ export class Vehicles {
       let step = dt + this.dtAcc[i];
       const dx = this.x[i] - this.lodX;
       const dz = this.z[i] - this.lodZ;
-      const far = dx * dx + dz * dz > lodR2;
+      const cx = this.x[i] - this.camX, cz = this.z[i] - this.camZ;
+      const far = dx * dx + dz * dz > lodR2 || (this.inView !== null && cx * cx + cz * cz > 80 * 80 && !this.inView(this.x[i], this.z[i]));
       // Out of sight altogether (beyond the drawn area): less often still.
       const hidden = far && Math.max(Math.abs(dx), Math.abs(dz)) > this.hiddenBeyond;
       if (far && ((this.frame + i) & (hidden ? hideMask : farMask)) !== 0) {

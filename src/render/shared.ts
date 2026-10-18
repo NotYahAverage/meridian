@@ -107,3 +107,35 @@ export const DETAIL_HALF = 1536;
 export function beyondDetail(x: number, z: number, half: number, fx: number, fz: number): boolean {
   return Math.max(Math.abs(x - fx), Math.abs(z - fz)) - half > DETAIL_HALF;
 }
+
+/**
+ * What the camera can see this frame, for skipping work on things behind or beside it.
+ * Updated once a frame by the world renderer before anything reads it.
+ */
+export const view = {
+  frustum: new THREE.Frustum(),
+  matrix: new THREE.Matrix4(),
+  sphere: new THREE.Sphere(),
+  /** Camera position. */
+  x: 0,
+  y: 0,
+  z: 0,
+  /** True once set this frame (before then everything counts as visible). */
+  ready: false,
+  /** In view, allowing `radius` (and a margin so nothing pops at the edges). */
+  sees(x: number, y: number, z: number, radius = 6): boolean {
+    if (!this.ready) return true;
+    this.sphere.center.set(x, y, z);
+    this.sphere.radius = radius + 4;
+    return this.frustum.intersectsSphere(this.sphere);
+  },
+  update(camera: THREE.PerspectiveCamera): void {
+    camera.updateMatrixWorld();
+    this.matrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.matrix);
+    this.x = camera.position.x;
+    this.y = camera.position.y;
+    this.z = camera.position.z;
+    this.ready = true;
+  },
+};

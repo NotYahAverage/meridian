@@ -22,7 +22,7 @@ import { Overlays } from './overlays/Overlays';
 import { PedestrianRenderer, personSize } from './pedestrians/Pedestrians';
 import { PropRenderer } from './props/PropRenderer';
 import { RoadRenderer } from './roads/RoadRenderer';
-import { globalUniforms } from './shared';
+import { globalUniforms, view } from './shared';
 import { TerrainRenderer } from './terrain/TerrainRenderer';
 import { VehicleRenderer } from './vehicles/VehicleRenderer';
 import { WaterRenderer } from './water/WaterRenderer';
@@ -109,6 +109,17 @@ export class WorldRenderer {
       this.transit.group,
       this.precipitation.group,
     );
+    // Names for inspecting the scene (profiling, debugging).
+    const names: [THREE.Object3D, string][] = [[this.terrain.group, 'terrain'], [this.water.mesh, 'water'], [this.roads.group, 'roads'], [this.buildings.group, 'buildings'], [this.props.group, 'props'], [this.vehicles.group, 'vehicles'], [this.pedestrians.group, 'people'], [this.transit.group, 'transit'], [this.precipitation.group, 'weather'], [this.airport.group, 'airport'], [this.boats.group, 'boats'], [this.ships.group, 'ships'], [this.ghost.group, 'ghost']];
+    for (const [o, n] of names) if (!o.name) o.name = n;
+    this.root.name = 'world';
+    // These never move (their meshes sit at the origin; only instance data and vertices change), so
+    // three.js needn't recompute thousands of world matrices under them every frame.
+    for (const o of [this.terrain.group, this.roads.group, this.buildings.group, this.props.group, this.vehicles.group, this.pedestrians.group]) {
+      o.updateMatrixWorld(true);
+      o.matrixAutoUpdate = false;
+      o.matrixWorldAutoUpdate = false;
+    }
     scene.add(this.root);
     this.buildings.rebuildAll();
     this.props.markAllDirty();
@@ -133,6 +144,7 @@ export class WorldRenderer {
   }
 
   update(dt: number, simDt: number, camera: THREE.PerspectiveCamera, env: Environment, focus: THREE.Vector3, camDist: number, viewportH: number, simRunning: boolean): void {
+    view.update(camera);
     this.water.syncTerrain(this.city.terrain, dt);
     this.terrain.syncSoil(dt);
     globalUniforms.uTime.value += dt;
@@ -148,11 +160,19 @@ export class WorldRenderer {
     this.buildings.updateLod(focus);
     this.overlays.update(dt);
     this.terrain.updateLOD(camera.position, focus);
+    // Settled blocks of chunks as one draw each (after detail has been chosen above).
+    this.buildings.batch(dt);
+    this.roads.batch(dt);
+    this.terrain.batch(dt);
     this.props.update(camera, dt);
+    city.vehicles.inView ??= (x, z) => view.sees(x, city.terrain.heightAt(x, z) + 1, z, 8);
+    city.vehicles.camX = camera.position.x;
+    city.vehicles.camZ = camera.position.z;
     city.vehicles.lodX = focus.x;
     city.vehicles.lodZ = focus.z;
     // Full-rate updates only where cars are big enough on screen for coarser steps to show.
-    city.vehicles.lodRadius = camDist < 500 ? Math.max(600, Math.min(camDist * 1.2, 1000)) : Math.max(220, 600 - (camDist - 500) * 0.38);
+    // From low down, cars a few hundred metres off are specks: only the near ones every frame.
+    city.vehicles.lodRadius = camDist < 500 ? Math.max(250, Math.min(camDist * 1.6, 600)) : Math.max(220, 600 - (camDist - 500) * 0.38);
     this.vehicles.update(city.vehicles, camera, focus, simDt);
     // After a road edit the walking network is rebuilt a few milliseconds a frame (no stutter in big cities).
     city.walk.sliced = true;

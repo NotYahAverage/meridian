@@ -3,7 +3,7 @@ import { MAX_VEHICLES } from '../../sim/constants';
 import { Purpose, VEHICLE_HEIGHT, VEHICLE_LENGTH, VEHICLE_MODELS, VEHICLE_WIDTH, type Vehicles } from '../../sim/traffic/Vehicles';
 import type { AssetLibrary } from '../assets/AssetLibrary';
 import { Pool, createAssetMaterial, writeMatrix } from '../assets/AssetMaterials';
-import { globalUniforms, beyondDetail } from '../shared';
+import { globalUniforms, beyondDetail, view } from '../shared';
 
 const HI_DIST = 700;
 const VM_BIKE = VEHICLE_MODELS.indexOf('bike');
@@ -121,6 +121,8 @@ export class VehicleRenderer {
       const dx = x - cam.x, dy = y - cam.y, dz = z - cam.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       if (beyondDetail(x, z, 0, focus.x, focus.z)) continue;
+      // Off screen (behind or beside the camera): not drawn, so not written either.
+      if (!view.sees(x, y, z, 8)) continue;
       const model = v.model[i];
       const col = this.color(v.color[i]);
       if (d2 < HI_DIST * HI_DIST) {

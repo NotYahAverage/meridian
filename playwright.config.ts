@@ -17,7 +17,8 @@ export default defineConfig({
     deviceScaleFactor: 1,
     launchOptions: {
       // Use the real GPU when available (falls back to SwiftShader otherwise).
-      args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader'],
+      // UNCAPPED=1 lifts the display's frame-rate cap, to measure how fast frames can really go.
+      args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-swiftshader', ...(process.env.UNCAPPED ? ['--disable-gpu-vsync', '--disable-frame-rate-limit'] : [])],
     },
   },
   webServer: {

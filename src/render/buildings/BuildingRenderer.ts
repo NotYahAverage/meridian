@@ -5,9 +5,10 @@ import { CHUNKS, CHUNK_SIZE } from '../../sim/constants';
 import { BuildingState, Problem } from '../../sim/types';
 import { type BuildingProp, type BuiltGeometry, GeoBuilder, type Mat } from './BuildingKit';
 import { Rng } from '../../core/rng';
-import { beyondDetail } from '../shared';
+import { beyondDetail, view } from '../shared';
 import { type BuildingUniforms, createBuildingDepthMaterial, createBuildingMaterial } from './BuildingMaterial';
 import { generateBuilding } from './generators';
+import { Batcher } from '../Batcher';
 import type { Movement } from '../../sim/style/Movements';
 
 const STATE_SIZE = 256;
@@ -356,6 +357,11 @@ export class BuildingRenderer {
     const far = beyondDetail(x, z, CHUNK_SIZE / 2, this.focusX, this.focusZ);
     c.mesh.visible = !far;
     c.lod.visible = far;
+    // Chunks well off screen cast no shadows: the shadow pass skips them. (The margin covers a
+    // tall tower behind the camera throwing its shadow into view under a low sun.)
+    const casts = view.sees(x, 40, z, CHUNK_SIZE * 0.71 + 240);
+    c.mesh.castShadow = casts;
+    c.lod.castShadow = casts;
   }
 
   /** Full detail inside the detail square around the camera's focus, boxes beyond it. */
@@ -363,6 +369,19 @@ export class BuildingRenderer {
     this.focusX = focus.x;
     this.focusZ = focus.z;
     for (let ch = 0; ch < this.chunks.length; ch++) this.applyLod(ch);
+  }
+
+  /** Settled blocks of chunks drawn as one mesh each (after updateLod has chosen what shows). */
+  private batcher: Batcher | null = null;
+  batch(dt: number): void {
+    this.batcher ??= new Batcher(this.group, CHUNKS, { material: this.material, depthMaterial: this.depthMaterial, receiveShadow: true });
+    this.batcher.update(dt, (ch) => {
+      const c = this.chunks[ch];
+      const out: THREE.Mesh[] = [];
+      if (c.mesh?.visible) out.push(c.mesh);
+      if (c.lod?.visible) out.push(c.lod);
+      return out;
+    });
   }
 
   private rebuildProps(ch: number): void {
@@ -481,6 +500,7 @@ export class BuildingRenderer {
       c.mesh?.geometry.dispose();
       c.lod?.geometry.dispose();
     }
+    this.batcher?.dispose();
     this.material.dispose();
     this.stateTex.dispose();
   }

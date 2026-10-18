@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { CHUNKS, CHUNK_SIZE, HM_RES, HM_STEP, WORLD_SIZE, ZONE_RES } from '../../sim/constants';
 import type { Rect, Terrain } from '../../sim/world/Terrain';
 import { LAND_TILES, type Land } from '../../sim/world/Land';
+import { Batcher } from '../Batcher';
 import { type TerrainUniforms, createTerrainMaterial, createTerrainUniforms } from './TerrainMaterial';
 
 const CELLS = CHUNK_SIZE / HM_STEP; // 64 quads per chunk side
@@ -227,6 +228,17 @@ export class TerrainRenderer {
     const x1 = Math.min(CHUNKS - 1, Math.floor((r.maxX + HM_STEP) / CHUNK_SIZE));
     const z1 = Math.min(CHUNKS - 1, Math.floor((r.maxZ + HM_STEP) / CHUNK_SIZE));
     for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) out.add(z * CHUNKS + x);
+  }
+
+  private batcher: Batcher | null = null;
+  /** Settled blocks of chunks drawn as one mesh each (after updateLOD has picked their detail). */
+  batch(dt: number): void {
+    this.batcher ??= new Batcher(this.group, CHUNKS, { material: this.material, receiveShadow: true });
+    this.batcher.update(dt, (i) => {
+      const ch = this.chunks[i];
+      ch.mesh.visible = true;
+      return [ch.mesh];
+    });
   }
 
   /** Chooses LOD per chunk from camera distance. */
