@@ -8,7 +8,7 @@ import {
   type CenterInfo, type Choice, type Decision, type DecisionOption, type Design, type Discovery, type Effect, type Outcome, type Plan, type ProposalContext,
   STAGE_PLAN, baseName, decisionFor, generateProposals, hashStr, makeDiscovery, odds, resolve, centerName as makeCenterName,
 } from './Generate';
-import { DEPOSITS, FIELD_BY_ID, type FieldId, LIVE_FIELD_DEFS, isLiveField, PRINCIPLE_BY_ID, RESOURCES, RESOURCE_BY_ID, fit, type ComponentKind } from './Knowledge';
+import { DEPOSITS, FIELD_BY_ID, type FieldId, LIVE_FIELD_DEFS, isLiveField, PRINCIPLE_BY_ID, RESOURCES, RESOURCE_BY_ID, fit, type ComponentKind, type FunctionKind } from './Knowledge';
 import { MASTERY_NAMES, type Retrofit, type ScienceSummary, masteryLevel, newMilestones, retrofitFor } from './Progress';
 
 /** Days a decision may wait before the careful option is taken (when the player allows it). */
@@ -64,6 +64,8 @@ export interface Center {
   mastery?: Partial<Record<FieldId, number>>;
   /** The centre this one is helping with a joint experiment. */
   assisting?: number;
+  /** What the player asked it to work toward. */
+  goal?: FunctionKind;
 }
 
 export interface ExperimentRecord {
@@ -482,17 +484,28 @@ export class Research {
   }
 
   /** Asks the centre for proposals (automatically after each experiment, or on request every few days). */
-  refresh(c: Center, manual = false): boolean {
+  refresh(c: Center, manual = false, sameRound = false): boolean {
     if (manual && this.city.clock.day - c.lastRefresh < REFRESH_DAYS) return false;
-    c.round++;
+    if (!sameRound) c.round++;
     if (manual) c.lastRefresh = this.city.clock.day;
     const ctx: ProposalContext = {
       resources: this.resourcesFor(c), needs: this.needs(), followups: this.followups, briefs: this.briefs(), iterations: this.iterationsReady(),
-      extraSlots: this.milestones.has('fields5') ? 1 : 0, synthDiscount: this.milestones.has('synth') ? 0.2 : 0,
+      extraSlots: this.milestones.has('fields5') ? 1 : 0, synthDiscount: this.milestones.has('synth') ? 0.2 : 0, goal: c.goal,
     };
     c.offers = generateProposals(this.civ(), this.info(c), ctx, c.round, this.nextPlan);
     this.version++;
     return true;
+  }
+
+  /**
+   * What the lab should work toward (undefined: anything). Its proposals are re-sorted at
+   * once from the same draw, so changing it is free but never a way to get new ones.
+   */
+  setGoal(centerId: number, goal: FunctionKind | undefined): void {
+    const c = this.centers.get(centerId);
+    if (!c || c.goal === goal) return;
+    c.goal = goal;
+    this.refresh(c, false, true);
   }
 
   /** Designs in service long enough to develop their next version. */

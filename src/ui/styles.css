@@ -1322,3 +1322,15 @@ canvas { touch-action: none; /* map */ }
 .legend .lg.m-walk::before { background: #4ade80; }
 .legend .lg.m-transit::before { background: #f472b6; }
 .legend .lg.m-car::before { background: #94a3b8; }
+
+/* Utility labs: "Looking for" and what each proposal could become. */
+.rs-goals { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+.rs-goal-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.rs-goal { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 14px; border: 1px solid var(--line-strong); background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; }
+.rs-goal:hover { color: var(--text); border-color: var(--accent); }
+.rs-goal.active { background: var(--accent-soft); color: var(--text); border-color: var(--accent); }
+.rs-outcome { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-2); padding: 6px 8px; border-radius: var(--radius-sm); background: rgba(255, 255, 255, 0.04); }
+.rs-outcome b { color: var(--text); }
+.rs-outcome.wanted { background: var(--accent-soft); }
+.rs-plan.wanted { border-color: var(--accent); }
+.rs-goal-miss { display: flex; align-items: center; gap: 6px; }

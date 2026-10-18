@@ -246,7 +246,23 @@ export function availablePrinciples(civ: CivState): Principle[] {
   return PRINCIPLES.filter((p) => !p.needs || p.needs.every((t) => civ.tags.has(t)));
 }
 
+/** Whether a facility from this method and substance has to stand on a shoreline. */
+export function needsShoreFor(principle: string, resource: string): boolean {
+  return resource === 'tidal' || resource === 'kelp' || (principle === 'desal' && resource === 'brine');
+}
+
+/** What a proposal could become: a kind of facility (and whether it needs the shore), or a city-wide improvement. */
+export function outcomeOf(plan: Pick<Plan, 'principle' | 'resource'>): { build?: FunctionKind; shore: boolean; mod?: ModifierKind } {
+  const p = PRINCIPLE_BY_ID.get(plan.principle);
+  return { build: p?.build, shore: needsShoreFor(plan.principle, plan.resource), mod: p?.mod };
+}
+
+/** Kinds of facility the labs can be asked to work toward. */
+export const GOALS: FunctionKind[] = ['powerGen', 'storage', 'water', 'sewage', 'waste', 'scrubber', 'farm'];
+
 export interface ProposalContext {
+  /** What the player asked this lab to work toward: proposals that can become it come first. */
+  goal?: FunctionKind;
   /** Substances the centre can use: id → reachable (local ones may be out of reach). */
   resources: Map<string, { ok: boolean; why?: string }>;
   /** How pressing each field is for the city right now (0–1). */
@@ -300,6 +316,9 @@ function propertyClue(p: Principle, r: ResourceDef): string {
  */
 export function generateProposals(civ: CivState, center: CenterInfo, ctx: ProposalContext, round: number, nextId: () => string): Plan[] {
   const fields = reach(center);
+  // Asked for something outside its fields, a lab still tries (at lower odds; see odds()).
+  const goal = ctx.goal;
+  if (goal) for (const p of PRINCIPLES) if (p.build === goal && isLiveField(p.field) && !fields.includes(p.field)) fields.push(p.field);
   const known = availablePrinciples(civ).filter((p) => fields.includes(p.field) && p.tier <= center.equipment);
   type Cand = { p: Principle; r: ResourceDef; score: number; f: number; follow?: ProposalContext['followups'][number] };
   const cands: Cand[] = [];
@@ -316,7 +335,9 @@ export function generateProposals(civ: CivState, center: CenterInfo, ctx: Propos
       const need = (ctx.needs[p.field] ?? 0) * 0.6 + (brief ? 0.4 * brief.severity : 0);
       const fresh = (civ.insights.get(p.id) ?? 0) === 0 ? 0.15 : 0;
       const jitter = unit(civ.civSeed, center.id, round, p.id, rid) * 0.45;
-      cands.push({ p, r: res, f, follow, score: f + spec + need + fresh + jitter + (follow ? 0.6 : 0) + (p.needs ? 0.2 : 0) });
+      // Working toward the player's goal: those first, and ones that can stand anywhere before shoreline ones.
+      const toGoal = goal && p.build === goal ? 3 - (needsShoreFor(p.id, rid) ? 0.5 : 0) : 0;
+      cands.push({ p, r: res, f, follow, score: f + spec + need + fresh + jitter + (follow ? 0.6 : 0) + (p.needs ? 0.2 : 0) + toGoal });
     }
   }
   cands.sort((a, b) => b.score - a.score);
@@ -326,8 +347,16 @@ export function generateProposals(civ: CivState, center: CenterInfo, ctx: Propos
   // At most two proposals answer the same brief, so the list stays varied.
   const briefed = new Map<FieldId, number>();
   const isBriefed = (c: Cand) => !!ctx.briefs?.some((b) => b.field === c.p.field);
+  // Up to two takes (different substances) on a method that answers the goal.
+  const goalTakes = new Map<string, number>();
   for (const c of cands) {
     if (picked.length >= want) break;
+    if (goal && c.p.build === goal && (goalTakes.get(c.p.id) ?? 0) < 2) {
+      goalTakes.set(c.p.id, (goalTakes.get(c.p.id) ?? 0) + 1);
+      perPrinciple.add(c.p.id);
+      picked.push(c);
+      continue;
+    }
     if (perPrinciple.has(c.p.id)) continue;
     if (isBriefed(c) && (briefed.get(c.p.field) ?? 0) >= 2) continue;
     perPrinciple.add(c.p.id);
@@ -578,6 +607,7 @@ export function odds(plan: Plan, choices: Choice[], center: CenterInfo, civ: Civ
   const factors: [string, number][] = [['Base', 0.62], ['Difficulty', -plan.risk]];
   factors.push([`Equipment level ${center.equipment}`, 0.06 * center.equipment]);
   if (plan.field === center.field) factors.push(['Specialization', 0.1]);
+  else if (!reach(center).includes(plan.field)) factors.push(["Outside this lab's fields", -0.1]);
   const fieldWork = civ.discoveries.filter((d) => d.field === plan.field).length;
   if (fieldWork) factors.push([`${fieldWork} earlier discover${fieldWork === 1 ? 'y' : 'ies'} in the field`, Math.min(0.15, 0.04 * fieldWork)]);
   if (education > 0.05) factors.push(['Educated staff nearby', 0.1 * education]);
@@ -824,7 +854,7 @@ function designStats(fn: FunctionKind, p: Principle, r: ResourceDef, q: number, 
   const renew = r.props.renewable ?? 0;
   const s: DesignStats = {
     kind: 'power', category: 'utilities', cost: 0, upkeep: 0, w: 40, d: 40, jobs: 10, radius: 0, capacity: 0, output: 0, storage: 0,
-    pollution: 0, attractiveness: 0, tourism: 0, needsShore: r.id === 'tidal' || r.id === 'kelp' || (p.id === 'desal' && r.id === 'brine'),
+    pollution: 0, attractiveness: 0, tourism: 0, needsShore: needsShoreFor(p.id, r.id),
   };
   const size = (base: number, grow: number) => 2 * Math.round((base + grow * q) / 2);
   switch (fn) {

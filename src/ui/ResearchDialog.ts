@@ -12,6 +12,22 @@ import { AUTO_DECIDE_DAYS, type Center, ITERATE_AFTER_DAYS, REFRESH_DAYS, type R
 import { SERVICE_BY_ID, SERVICE_TYPES, type ServiceType } from '../sim/services/ServiceTypes';
 import { h } from './dom';
 import { icon } from './icons';
+import { GOALS, outcomeOf } from '../sim/research/Generate';
+import { type FunctionKind, MODIFIER_LABEL } from '../sim/research/Knowledge';
+
+/** How the "Looking for" choices and the outcome lines name each kind of facility. */
+const GOAL_NAME: Record<FunctionKind, { short: string; a: string; icon: string }> = {
+  powerGen: { short: 'Power', a: 'a power station', icon: 'power' },
+  storage: { short: 'Storage', a: 'an energy store', icon: 'power' },
+  water: { short: 'Water', a: 'a water works', icon: 'water' },
+  sewage: { short: 'Sewage', a: 'a wastewater works', icon: 'sewage' },
+  waste: { short: 'Waste', a: 'a waste plant', icon: 'garbage' },
+  scrubber: { short: 'Clean air', a: 'an air-cleaning station', icon: 'cloud' },
+  farm: { short: 'Farm', a: 'an urban farm', icon: 'tree' },
+  clinic: { short: 'Health', a: 'a health centre', icon: 'health' },
+  school: { short: 'Learning', a: 'a learning centre', icon: 'education' },
+  civic: { short: 'Landmark', a: 'a civic landmark', icon: 'landmark' },
+};
 import { Modal } from './Menus';
 
 type Tab = 'centres' | 'web' | 'discoveries' | 'buildings' | 'history';
@@ -288,6 +304,7 @@ export class ResearchDialog extends Modal {
       const lead = r.centers.get(c.assisting);
       if (lead) b.append(h('div', { class: 'hint small' }, `This centre is helping ${lead.name} with “${lead.active?.plan.title ?? 'an experiment'}”. It can start its own work when that finishes.`, ' ', h('button', { class: 'rs-link', onclick: () => { this.centreId = lead.id; this.render(); } }, 'Go to it')));
     }
+    b.append(this.goalPicker(c));
     b.append(h('div', { class: 'rs-section-head' },
       h('div', { class: 'section-title' }, c.active ? 'Next proposals' : 'Proposals'),
       h('button', {
@@ -297,9 +314,33 @@ export class ResearchDialog extends Modal {
         onclick: () => { if (r.refresh(c, true)) this.render(); },
       }, icon('dice', 13), city.clock.day - c.lastRefresh < REFRESH_DAYS ? `New proposals in ${REFRESH_DAYS - (city.clock.day - c.lastRefresh)} days` : 'Ask for new proposals')));
     if (!c.offers.length) b.append(h('div', { class: 'hint small' }, op.ok ? 'No proposals right now. Ask again later, discover more, or build a centre somewhere else.' : 'Proposals arrive once the centre is open and has spare power.'));
+    const matches = (p: Plan) => !!c.goal && outcomeOf(p).build === c.goal;
+    if (c.goal && c.offers.length && !c.offers.some(matches)) {
+      const tier2 = PRINCIPLES.some((p) => p.build === c.goal && p.tier > c.equipment);
+      b.append(h('div', { class: 'hint small rs-goal-miss' }, icon('info', 13),
+        `Nothing here can become ${GOAL_NAME[c.goal].a} yet. `,
+        tier2 ? 'Better equipment opens more methods; ' : '',
+        'the substances within reach may not suit it. Try another lab, or ask again later.'));
+    }
     const grid = h('div', { class: 'rs-plans' });
-    for (const p of c.offers) grid.append(this.planCard(c, p));
+    // What was asked for comes first.
+    for (const p of [...c.offers].sort((x, y) => Number(matches(y)) - Number(matches(x)))) grid.append(this.planCard(c, p, matches(p)));
     b.append(grid);
+  }
+
+  /** "Looking for": steer a lab toward one kind of building. */
+  private goalPicker(c: Center): HTMLElement {
+    const r = this.game.city!.research;
+    const btn = (goal: FunctionKind | undefined, label: string, ic: string) =>
+      h('button', {
+        class: `rs-goal${c.goal === goal ? ' active' : ''}`,
+        'aria-pressed': c.goal === goal ? 'true' : 'false',
+        onclick: () => { r.setGoal(c.id, goal); this.render(); },
+      }, icon(ic, 13), label);
+    return h('div', { class: 'rs-goals' },
+      h('span', { class: 'rs-label' }, 'Looking for'),
+      h('div', { class: 'rs-goal-row' }, btn(undefined, 'Anything', 'flask'), ...GOALS.map((g) => btn(g, GOAL_NAME[g].short, GOAL_NAME[g].icon))),
+    );
   }
 
   private masteryChip(f: FieldId, xp: number): HTMLElement {
@@ -407,7 +448,7 @@ export class ResearchDialog extends Modal {
     );
   }
 
-  private planCard(c: Center, p: Plan): HTMLElement {
+  private planCard(c: Center, p: Plan, wanted = false): HTMLElement {
     const city = this.game.city!;
     const r = city.research;
     const reqs = r.requirements(c, p);
@@ -432,8 +473,15 @@ export class ResearchDialog extends Modal {
       });
       partnerEl = h('label', { class: 'rs-partner-row', 'data-tip': 'An idle centre can join in: +8% success, better results and 30% faster work. It can’t run its own experiment meanwhile, and both centres gain experience.' }, icon('people', 13), sel);
     }
-    return h('div', { class: `rs-plan${p.kind !== 'study' ? ` ${p.kind}` : ''}${p.brief ? ' brief' : ''}` },
+    const out = outcomeOf(p);
+    const outcome = out.build
+      ? h('div', { class: `rs-outcome${wanted ? ' wanted' : ''}` }, icon(GOAL_NAME[out.build]?.icon ?? 'build', 14),
+        h('span', null, 'Could become ', h('b', null, GOAL_NAME[out.build]?.a ?? FUNCTION_LABEL[out.build])),
+        h('span', { class: `rs-badge ${out.shore ? 'warn' : 'good'}` }, out.shore ? 'Shoreline only' : 'Anywhere'))
+      : out.mod ? h('div', { class: 'rs-outcome' }, icon('policy', 14), h('span', null, 'Could improve ', h('b', null, MODIFIER_LABEL[out.mod]), ' city-wide')) : null;
+    return h('div', { class: `rs-plan${p.kind !== 'study' ? ` ${p.kind}` : ''}${p.brief ? ' brief' : ''}${wanted ? ' wanted' : ''}` },
       h('div', { class: 'rs-plan-top' }, fieldChip(p.field), badge, p.brief ? h('span', { class: 'rs-badge warn', 'data-tip': p.brief.text }, `City brief: ${p.brief.title}`) : null),
+      outcome,
       h('div', { class: 'rs-plan-title' }, p.title),
       h('div', { class: 'rs-plan-sum' }, p.summary),
       rowsEl([
