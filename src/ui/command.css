@@ -354,3 +354,15 @@
 /* ── In the world ───────────────────────────────────────────────────── */
 [data-ui='command'] .proto-badge { border-radius: var(--radius-sm); }
 [data-ui='command'] .coach-bubble, [data-ui='command'] .coach-ring { border-radius: var(--radius); }
+
+/* ── Top bar stability ──────────────────────────────────────────────── */
+/* Figures that come and go (the change readouts) keep their space, so nothing after them shifts. */
+[data-ui='command'] :is(.tb-net, .tb-trend) { display: inline-block; min-width: 8.5ch; font-variant-numeric: tabular-nums; }
+[data-ui='command'] :is(.tb-money, .tb-val, .tb-date, .tb-time) { font-variant-numeric: tabular-nums; }
+/* When space runs short the readouts on the left give way (clipped, never wrapped); the clock,
+   speed controls, demand and the buttons at the right always stay whole and on screen. */
+[data-ui='command'] .tb-stat { flex: 0 1 auto; min-width: 0; overflow: hidden; }
+[data-ui='command'] .tb-util { flex-shrink: 2; }
+[data-ui='command'] :is(.tb-clock, .speed, .demand, .tb-icon, .tb-brand) { flex-shrink: 0; }
+[data-ui='command'] .tb-spacer { min-width: 0; }
+[data-ui='command'] .tb-time { display: inline-block; min-width: 5ch; }
