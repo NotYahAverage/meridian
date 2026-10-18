@@ -102,6 +102,8 @@ const P: Record<string, string> = {
   news: 'M4 5h13v14a2 2 0 002 2H6a2 2 0 01-2-2zM17 9h3v10a2 2 0 01-2 2M7 9h7M7 13h7M7 17h4',
 };
 
+const missingIcons = new Set<string>();
+
 export function icon(name: string, size = 20, cls = ''): SVGSVGElement {
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
@@ -116,6 +118,10 @@ export function icon(name: string, size = 20, cls = ''): SVGSVGElement {
   svg.setAttribute('aria-hidden', 'true');
   if (cls) svg.setAttribute('class', cls);
   const path = document.createElementNS(ns, 'path');
+  if (!P[name] && import.meta.env.DEV && !missingIcons.has(name)) {
+    missingIcons.add(name);
+    console.warn(`[icons] no icon named "${name}"`);
+  }
   path.setAttribute('d', P[name] ?? P.info);
   svg.appendChild(path);
   return svg;

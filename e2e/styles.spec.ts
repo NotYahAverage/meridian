@@ -113,7 +113,9 @@ test('verdicts: adopt a style and watch it spread, refine and rebuild, scrap', a
 
   // Scrap the cottage, and demolish it.
   await game(page, `g.ui.studio.open({ tab: 'prototypes' });`);
-  const cottage = page.locator('.tr-card', { hasText: 'House' }).first();
+  // By its exact name: residents' quotes on other cards can mention a "house" too.
+  const cottageName = await game<string>(page, `return g.city.design.trials[2].name;`);
+  const cottage = page.locator('.tr-card').filter({ has: page.locator('.tr-titles b', { hasText: new RegExp(`^${cottageName}$`) }) });
   const cottageId = await game<number>(page, `return g.city.design.trials[2].buildingId;`);
   await cottage.locator('.tr-choice[data-choice="scrap"]').click();
   await page.locator('.modal-backdrop:not(.hidden) [data-choice="demolish"]').click();

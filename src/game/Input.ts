@@ -237,13 +237,24 @@ export class Input {
     this.h.wheel(e.deltaY * scale, this.info(e));
   };
 
+  /**
+   * Keys belong to a text box while one has focus (but not to checkboxes, sliders and buttons,
+   * which are inputs too). Esc always reaches the game, so it closes windows from anywhere.
+   */
   private isTyping(e: KeyboardEvent): boolean {
+    if (e.code === 'Escape') return false;
     const t = e.target as HTMLElement | null;
-    return !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    if (!t) return false;
+    if (t.tagName === 'TEXTAREA' || t.isContentEditable) return true;
+    if (t.tagName !== 'INPUT') return false;
+    const type = (t as HTMLInputElement).type;
+    return !['checkbox', 'radio', 'range', 'button', 'submit', 'reset', 'color', 'file', 'image'].includes(type);
   }
 
   private onKeyDown = (e: KeyboardEvent): void => {
     if (this.isTyping(e)) return;
+    // Esc out of a text box: leave the box as well.
+    if (e.code === 'Escape' && document.activeElement instanceof HTMLElement && document.activeElement !== document.body) document.activeElement.blur();
     if (['Space', 'Tab', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
     this.h.key(e.code, true, e);
   };

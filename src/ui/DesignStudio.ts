@@ -152,7 +152,8 @@ export class DesignStudio extends Modal {
       this.input.removed = this.input.removed.filter((id) => !this.mentions(id));
       this.schedule();
     });
-    text.addEventListener('keydown', (e) => e.stopPropagation());
+    // Typing stays in the box; Esc still closes the studio.
+    text.addEventListener('keydown', (e) => { if (e.code !== 'Escape') e.stopPropagation(); });
     this.els.text = text;
     this.els.chips = h('div', { class: 'ds-chips', 'aria-live': 'polite' });
     this.els.notes = h('div', { class: 'ds-notes' });
@@ -183,7 +184,7 @@ export class DesignStudio extends Modal {
       this.name = name.value;
       this.nameEdited = !!name.value.trim();
     });
-    name.addEventListener('keydown', (e) => e.stopPropagation());
+    name.addEventListener('keydown', (e) => { if (e.code !== 'Escape') e.stopPropagation(); });
     this.els.name = name;
     this.els.desc = h('div', { class: 'ds-desc' });
     this.els.stats = h('div', { class: 'ds-stats' });
