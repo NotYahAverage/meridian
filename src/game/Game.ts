@@ -533,6 +533,8 @@ export class Game {
   }
 
   select(sel: Selection): void {
+    // A road picked out shows its traffic at once.
+    if (sel?.kind === 'road' && this.city) this.city.live.fillRoad(sel.id);
     if (sel?.kind !== 'vehicle' && sel?.kind !== 'person') this.following = null;
     if (this.selection?.kind === 'vehicle' || this.selection?.kind === 'person') this.world?.ghost.setSelectionRing(0, 0, null);
     if (this.city) this.city.pedestrians.watched = sel?.kind === 'person' ? sel.id : -1;

@@ -1028,7 +1028,7 @@ function dailyNotices(city: City): void {
     if (seg) {
       const mid = Math.floor(seg.poly.count / 2) * 2;
       city.emitNotice(
-        { severity: 'warning', icon: 'traffic', title: 'Traffic congestion', text: `${seg.name || 'A road'} is over capacity (${Math.round(worst.ratio * 100)}%). Add alternative routes or upgrade it.`, x: seg.poly.pts[mid], z: seg.poly.pts[mid + 1] },
+        { severity: 'warning', icon: 'traffic', title: 'Traffic congestion', text: `At rush hour ${seg.name || 'a road'} gets ${worst.ratio >= 1.95 ? `about ${Math.round(worst.ratio)}×` : `${Math.round((worst.ratio - 1) * 100)}% more than`} the traffic it can carry. Add another route or upgrade it.`, x: seg.poly.pts[mid], z: seg.poly.pts[mid + 1], road: seg.id },
         'traffic',
         24 * 12,
       );

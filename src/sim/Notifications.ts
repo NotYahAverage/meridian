@@ -31,6 +31,8 @@ export interface Notice {
   text: string;
   x?: number;
   z?: number;
+  /** The road it's about (clicking it selects the road). */
+  road?: number;
   /** Logged without a toast (something richer is shown instead). */
   quiet?: boolean;
 }

@@ -50,6 +50,7 @@ export class LiveTraffic {
     const city = this.city;
     const simDt = dtReal * Math.min(speedMult, 3);
     const tod = timeOfDayFactor(hour);
+    this.lastTod = tod;
     // Drivers slow down in bad weather; congestion is left to the queues themselves.
     city.vehicles.speedScale = city.weather.roadSpeed();
     city.signals.update(simDt);
@@ -133,27 +134,56 @@ export class LiveTraffic {
       // Mostly the busiest roads in view (squared pick leans to the front of the list).
       const pool = near.busy.length ? near.busy : near.segs;
       const seg = pool[Math.floor(this.rng.next() ** 2 * pool.length)];
+      if (this.addCar(seg, tod, near.wide) === 'full') return;
+    }
+  }
+
+  private lastTod = 1;
+
+  /**
+   * A road the player has just picked out gets the cars its traffic implies straight away
+   * (rather than over the next minute), so what the road panel says is what they see.
+   */
+  fillRoad(segId: number): void {
+    const city = this.city;
+    const seg = city.roads.segments.get(segId);
+    if (!seg || !city.traffic.volume.size) return;
+    const W = 1100;
+    const wide = city.roads.segmentsIn(seg.cx - W, seg.cz - W, seg.cx + W, seg.cz + W).filter((s) => (city.traffic.volume.get(s.id) ?? 0) > 0);
+    // Anywhere along it (the camera is on its way there), not all at the start.
+    for (let tries = 0; tries < 60; tries++) if (this.addCar(seg, this.lastTod, wide, true) === 'full') return;
+  }
+
+  /** One car onto a road that has fewer than its traffic implies, heading somewhere busy nearby. */
+  private addCar(seg: RoadSegment, tod: number, wide: RoadSegment[], anywhere = false): 'added' | 'skip' | 'full' {
+    const city = this.city;
+    const v = city.vehicles;
+    if (!wide.length) return 'skip';
+    {
       const dir: 1 | -1 = seg.oneway !== 0 ? (seg.oneway as 1 | -1) : this.rng.chance(0.5) ? 1 : -1;
       const want = this.expectedOn(seg, tod);
-      if (want < 0.6) continue;
+      if (want < 0.6) return 'skip';
       const lanes = ROAD_TYPES[seg.type].lanes * (seg.oneway !== 0 ? 2 : 1);
       let have = 0;
       for (let lane = 0; lane < lanes; lane++) have += v.inLane(seg.id, dir, lane);
-      if (have >= want - 0.4) continue;
+      if (have >= want - 0.4) return 'skip';
       // Somewhere else busy, a little way off.
       let to: RoadSegment | null = null;
       for (let k = 0; k < 6 && !to; k++) {
-        const c = near.wide[Math.floor(this.rng.next() * near.wide.length)];
+        const c = wide[Math.floor(this.rng.next() * wide.length)];
         if (c.id !== seg.id && (c.cx - seg.cx) ** 2 + (c.cz - seg.cz) ** 2 > 250 * 250) to = c;
       }
-      if (!to) continue;
-      const s = dir === 1 ? seg.trimA + 2 : seg.length - seg.trimB - 2;
+      if (!to) return 'skip';
+      const a = seg.trimA + 2, b = seg.length - seg.trimB - 2;
+      const s = anywhere && b > a ? a + this.rng.next() * (b - a) : dir === 1 ? a : b;
       const route = city.paths.find({ segId: seg.id, s }, { segId: to.id, s: to.length / 2 });
-      if (!route || route.legs[0].dir !== dir || route.length < 120) continue;
+      if (!route || route.legs[0].dir !== dir || route.length < 120) return 'skip';
       // Big cities fill the vehicle limit: cars far out of view make way for these.
-      if (v.count >= MAX_VEHICLES - 50 && !v.makeRoom()) return;
+      if (v.count >= MAX_VEHICLES - 50 && !v.makeRoom()) return 'full';
       const rng = this.rng;
-      if (v.spawn({ route, model: pickCarModel(rng), color: pickCarColor(rng), purpose: Purpose.Commute }) >= 0) this.localSpawns++;
+      if (v.spawn({ route, model: pickCarModel(rng), color: pickCarColor(rng), purpose: Purpose.Commute }) < 0) return 'skip';
+      this.localSpawns++;
+      return 'added';
     }
   }
 

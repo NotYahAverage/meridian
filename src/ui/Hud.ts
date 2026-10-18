@@ -814,7 +814,7 @@ export class Toasts {
 
   constructor(private game: Game) {}
 
-  push(n: Pick<Notice, 'severity' | 'title' | 'text'> & { icon: string; x?: number; z?: number; onClick?: () => void; tip?: string }): void {
+  push(n: Pick<Notice, 'severity' | 'title' | 'text'> & { icon: string; x?: number; z?: number; road?: number; onClick?: () => void; tip?: string }): void {
     const t = h(
       'div',
       { class: `toast ${n.severity}${n.x !== undefined || n.onClick ? ' clickable' : ''}` },
@@ -836,9 +836,10 @@ export class Toasts {
       });
       t.setAttribute('data-tip', n.tip ?? 'Click to open');
     } else if (n.x !== undefined && n.z !== undefined) {
-      const x = n.x, z = n.z;
+      const x = n.x, z = n.z, road = n.road;
       t.addEventListener('click', () => {
         this.game.flyTo(x, z, 260);
+        if (road !== undefined && this.game.city?.roads.segments.has(road)) this.game.select({ kind: 'road', id: road });
         t.remove();
       });
       t.setAttribute('data-tip', 'Click to go there');
