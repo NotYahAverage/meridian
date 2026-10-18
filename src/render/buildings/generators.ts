@@ -705,6 +705,17 @@ const outfall: Gen = (g, b) => {
   g.ground(-w / 2 + 2, 11, w / 2 - 6, d - 2, m(c(0x55704a), P.WATER, s), 0.25);
 };
 
+/** Septic tank: two low round tank lids in a gravel yard, a vent stack and a small pump hut. */
+const septic: Gen = (g, b, r) => {
+  const { w, d } = b;
+  const s = b.seed & 127;
+  g.ground(-w / 2, 0, w / 2, d, m(c(0x9a958a), P.CONCRETE, s), 0.04);
+  for (let i = 0; i < 2; i++) g.cylinder(-w / 2 + 4.2 + i * 6.2, d - 6, 2.4, 2.4, 0, 0.7, 14, m(c(0xb9b4a8), P.CONCRETE, s), m(c(0x8d8a80), P.CONCRETE, s));
+  g.box(w / 2 - 5, 2, w / 2 - 1.5, 5.5, 0, 2.6, m(c(0x7f8a6e), P.METAL, s), m(c(0x5d6450), P.METAL, s));
+  g.cylinder(w / 2 - 3, 9, 0.25, 0.25, 0, 3.4, 6, m(c(0x6d6a62), P.METAL, s), m(c(0x6d6a62), P.METAL, s));
+  trees(g, r, 2, -w / 2 + 1, 0.5, w / 2 - 1, 1.2, undefined, 0.7);
+};
+
 const treatment: Gen = (g, b, r) => {
   const { w, d } = b;
   const s = b.seed & 127;
@@ -1384,7 +1395,7 @@ const purification: Gen = (g, b, r) => {
 const GENERATORS: Record<StyleId, Gen> = {
   house, townhouse, lowrise, midrise, tower, shop, stripmall, mixeduse, bigbox, office, officeTower,
   workshop, warehouse, factory, depot, police, fire, clinic, hospital, school, highschool, university, cargoPort, landfill,
-  recycling, parkSmall, plaza, parkTown, parkLarge, wind, coal, solar, waterTower, pump, outfall, treatment,
+  recycling, parkSmall, plaza, parkTown, parkLarge, wind, coal, solar, waterTower, pump, outfall, septic, treatment,
   sportsField, communityGarden, sportsCourts, botanicalGarden,
   hotel,
   busDepot, metroStation, airport, cityHall, museum, cathedral, stadium, obsTower,

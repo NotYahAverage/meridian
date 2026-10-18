@@ -62,6 +62,8 @@ export interface NewCityOptions {
   seed: number;
   preset: MapPreset;
   unlimited: boolean;
+  /** Run the tutorial in this city. */
+  guide?: boolean;
 }
 
 /** Top-level game: owns the simulation, renderer, tools, audio and UI. */
@@ -333,8 +335,7 @@ export class Game {
     this.ui.loading.progress('Planting forests…', 0.6);
     await nextFrame();
     // A new city owns the land around its start; more can be bought a ring at a time.
-    const st = city.startPoint;
-    city.land.startAround(st.x, st.z);
+    city.foundLand();
     this.attachCity(city);
     this.slotId = `city-${opts.seed}-${Date.now().toString(36)}`;
     this.beginPlay();
@@ -342,7 +343,11 @@ export class Game {
     this.cam.jumpTo({ x: s.x, z: s.z, distance: 1500, pitch: 1.0, yaw: 0.45 });
     this.cam.flyTo(s.x, s.z, 420, 2.2);
     this.ui.loading.hide();
-    if (this.settings.tutorial) this.ui.openPanel('goals');
+    if (opts.guide) {
+      // The tutorial starts with the clock stopped: chapter 7 starts it.
+      this.setSpeed(0);
+      this.ui.guide.begin();
+    } else if (this.settings.tutorial) this.ui.openPanel('goals');
   }
 
   /** Founds the scenario's city and starts its clock. */

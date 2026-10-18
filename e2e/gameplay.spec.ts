@@ -20,6 +20,8 @@ test('full loop: found, build, zone, grow, traffic, save, reload, continue', asy
   await page.locator('.modal .text-input').first().fill('E2E Harbor');
   await page.locator('.modal .text-input.mono').fill('777');
   await page.locator('.modal .text-input.mono').press('Tab');
+  // These tests play without the tutorial.
+  await page.locator('.guide-check input').uncheck();
   await page.getByRole('button', { name: 'Found city' }).click();
   await page.waitForFunction(() => (window as any).__meridian.game.state === 'playing', null, { timeout: 60_000 });
   await expect(page.locator('.hud')).toBeVisible();

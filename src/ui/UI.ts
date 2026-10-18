@@ -17,6 +17,8 @@ import { ResearchTracker } from './ResearchTracker';
 import { DesignStudio } from './DesignStudio';
 import { LoadingScreen, MainMenu, Modal, NewCityDialog, PauseMenu, SaveLoadDialog, SettingsDialog } from './Menus';
 import { PerfMeter } from './PerfMeter';
+import { Guide } from './Tutorial';
+import { ChaptersDialog } from './Menus';
 import { BudgetPanel, DistrictsPanel, GoalsPanel, LogPanel, OverlaysPanel, type Panel, type PanelId, PoliciesPanel, LandPanel, StatsPanel, TransitPanel } from './Panels';
 
 class ConfirmDialog extends Modal {
@@ -107,6 +109,8 @@ export class UI {
   readonly tooltip = new Tooltip();
   readonly inspector: Inspector;
   readonly coach: CoachMark;
+  readonly guide: Guide;
+  readonly chapters: ChaptersDialog;
   readonly streets: StreetLabels;
   readonly bubbles: ReactionBubbles;
   readonly milestoneBanner = new MilestoneBanner();
@@ -153,12 +157,14 @@ export class UI {
     this.choiceDialog = new ChoiceDialog(game);
     this.saveStatus = new SaveStatus(() => this.hud);
     this.perf = new PerfMeter(game);
-    this.modals = [this.newCity, this.scenarios, this.scenarioResult, this.newspaper, this.saveLoad, this.settings, this.help, this.research, this.studio, this.discovery, this.pause, this.confirmDialog, this.choiceDialog];
+    this.chapters = new ChaptersDialog(game);
+    this.modals = [this.newCity, this.scenarios, this.scenarioResult, this.newspaper, this.saveLoad, this.settings, this.help, this.chapters, this.research, this.studio, this.discovery, this.pause, this.confirmDialog, this.choiceDialog];
     this.topbar = new TopBar(game);
     this.toolbar = new Toolbar(game);
     this.toasts = new Toasts(game);
     this.inspector = new Inspector(game);
     this.coach = new CoachMark(game);
+    this.guide = new Guide(game);
     this.streets = new StreetLabels(game);
     this.bubbles = new ReactionBubbles(game);
     this.panels = [new StatsPanel(game), new BudgetPanel(game), new OverlaysPanel(game), new GoalsPanel(game), new DistrictsPanel(game), new LogPanel(game), new TransitPanel(game), new PoliciesPanel(game), new LandPanel(game)];
@@ -198,7 +204,7 @@ export class UI {
     this.hud = h('div', { class: 'hud hidden' }, this.streets.el, this.labels, this.bubbles.el, this.chrome, this.cursor.el);
     this.applyScale();
     window.addEventListener('resize', () => this.applyScale());
-    root.append(this.hud, this.coach.ring, this.coach.bubble, this.menu.el, ...this.modals.map((m) => m.el), this.loading.el, this.tooltip.el);
+    root.append(this.hud, this.coach.ring, this.coach.bubble, this.guide.ring, this.guide.pin, this.guide.card, this.menu.el, ...this.modals.map((m) => m.el), this.loading.el, this.tooltip.el);
   }
 
   private photoHint = h('div', { class: 'photo-hint hidden' }, h('b', null, 'Photo mode'), ' · drag and scroll to frame the shot · ', h('kbd', null, 'Enter'), ' save picture · ', h('kbd', null, 'P'), ' or ', h('kbd', null, 'Esc'), ' exit');
@@ -448,6 +454,7 @@ export class UI {
     this.bubbles.update(dt);
     this.tracker.update();
     this.coach.update(dt);
+    this.guide.update();
     this.statTimer -= dt;
     if (this.statTimer <= 0) {
       this.statTimer = 0.5;

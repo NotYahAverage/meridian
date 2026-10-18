@@ -72,7 +72,7 @@ export const GOALS: Goal[] = [
   { id: 'zoneJobs', title: 'Zone workplaces', hint: 'Paint some Commercial and Industrial zones so residents have jobs.', reward: 2_000 },
   { id: 'power', title: 'Generate electricity', hint: 'Place Wind Turbines next to a connected road (Utilities).', reward: 3_000 },
   { id: 'water', title: 'Supply water', hint: 'Build a Water Tower, or a Pumping Station on the shoreline.', reward: 3_000 },
-  { id: 'sewage', title: 'Handle sewage', hint: 'Place a Sewage Outfall near water, downstream of your pumps.', reward: 3_000 },
+  { id: 'sewage', title: 'Handle sewage', hint: 'Place a Septic Tank beside a street, or a Sewage Outfall on the shoreline (it handles far more).', reward: 3_000 },
   { id: 'pop100', title: 'Welcome 100 residents', hint: 'Keep zoning and watch homes fill up.', reward: 5_000 },
   { id: 'service', title: 'Provide a city service', hint: 'Build a Fire Station, Police Station, Clinic or School.', reward: 4_000 },
   { id: 'park', title: 'Plant a park', hint: 'Parks raise land value — and happier residents pay more.', reward: 2_000 },

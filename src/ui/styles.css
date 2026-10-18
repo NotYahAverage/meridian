@@ -1342,3 +1342,37 @@ canvas { touch-action: none; /* map */ }
 .perf-meter .perf-ms { color: var(--text-2); font-weight: 500; }
 .perf-meter.warn { color: var(--warn); }
 .perf-meter.bad { color: var(--bad); }
+
+/* ── Tutorial ───────────────────────────────────────────────────────── */
+#ui > .guide { position: fixed; z-index: 45; top: calc(var(--top) + 12px); left: 50%; transform: translateX(-50%); width: min(460px, calc(100vw - 32px)); padding: 10px 12px 10px 14px; border-radius: var(--radius); background: var(--panel); border: 1px solid var(--line); border-top: 2px solid var(--accent); box-shadow: var(--shadow); display: grid; gap: 5px; pointer-events: auto; animation: slideUp 0.2s ease-out; }
+.guide-head { display: flex; align-items: center; gap: 6px; color: var(--accent-strong); }
+.guide-kicker { flex: 1; font-size: 10.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.guide-title { font-size: 15px; font-weight: 600; }
+.guide-text { font-size: 13px; line-height: 1.45; color: var(--text); }
+.guide-problem { display: flex; gap: 6px; align-items: flex-start; padding: 6px 8px; border-radius: var(--radius-sm); background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text); font-size: 12px; line-height: 1.4; }
+.guide-problem svg { color: var(--warn); flex: none; margin-top: 2px; }
+.guide-why { font-size: 12px; line-height: 1.45; color: var(--text-2); padding-left: 8px; border-left: 2px solid var(--line-strong); }
+.guide-foot { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.guide-dots { display: flex; gap: 4px; flex: 1; }
+.guide-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--panel-3); }
+.guide-dots i.done { background: var(--good); }
+.guide-dots i.now { background: var(--accent); }
+.guide-link { border: none; background: none; padding: 0; color: var(--accent-strong); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+#ui > .guide-ring { position: fixed; z-index: 44; border: 2px solid var(--accent); border-radius: 8px; pointer-events: none; animation: coachPulse 1.6s ease-out infinite; }
+#ui > .guide-pin { position: fixed; left: 0; top: 0; width: 0; height: 0; z-index: 43; pointer-events: none; will-change: transform; }
+.guide-pin-dot { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 50%; border: 3px solid #fff; background: var(--accent); box-sizing: border-box; animation: coachPulse 1.4s ease-out infinite; }
+.guide-pin-label { position: absolute; left: 0; top: -16px; transform: translate(-50%, -100%); padding: 3px 9px; border-radius: var(--radius-sm); background: var(--accent); color: #fff; font-size: 12px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow); }
+.guide-pin-label::after { content: ''; position: absolute; left: 50%; bottom: -5px; margin-left: -5px; border: 5px solid transparent; border-bottom: 0; border-top-color: var(--accent); }
+.guide-check { margin-top: 12px; }
+.chapter-list { display: grid; gap: 6px; margin-top: 12px; }
+.chapter { display: flex; align-items: center; gap: 12px; padding: 9px 12px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel-2); color: var(--text); text-align: left; }
+.chapter:hover:not(:disabled) { border-color: var(--accent); }
+.chapter:disabled { opacity: 0.5; cursor: not-allowed; }
+.chapter > svg { color: var(--muted); flex: none; }
+.chapter-n { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--panel-3); font-size: 12px; font-weight: 700; color: var(--text-2); }
+.chapter.done .chapter-n { background: color-mix(in srgb, var(--good) 22%, transparent); color: var(--good); }
+.chapter-text { flex: 1; display: grid; gap: 1px; min-width: 0; }
+.chapter-text b { font-size: 13px; }
+.chapter-text span { font-size: 11.5px; color: var(--muted); }
+/* The frame-rate readout moves aside while the guide card is at the top. */
+.hud-chrome:has(~ .guide:not(.hidden)) .perf-meter, body:has(.guide:not(.hidden)) .perf-meter { left: auto; right: 12px; transform: none; }

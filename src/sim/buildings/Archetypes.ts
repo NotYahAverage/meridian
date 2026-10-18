@@ -49,6 +49,7 @@ export type ServiceStyle =
   | 'waterTower'
   | 'pump'
   | 'outfall'
+  | 'septic'
   | 'treatment'
   | 'busDepot'
   | 'metroStation'

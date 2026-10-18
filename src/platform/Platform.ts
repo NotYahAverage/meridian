@@ -179,6 +179,8 @@ export interface Settings {
   /** Frames per second, and frame time, at the top of the screen. */
   showFps?: boolean;
   showFrameTime?: boolean;
+  /** Tutorial chapters finished at least once (ids). */
+  guideDone?: string[];
 }
 
 export type UiStyle = 'classic' | 'command';

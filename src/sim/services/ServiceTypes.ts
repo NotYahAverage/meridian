@@ -217,6 +217,12 @@ export const SERVICE_TYPES: ServiceType[] = [
     cost: 85_000, upkeep: 2_600, output: 12_000, w: 56, d: 44, jobs: 35, needsShore: true, unlockPopulation: 3_000,
   }),
   svc({
+    // The sewage counterpart of the water tower: every map can start a town, shore or not.
+    id: 'septic_tank', name: 'Septic Tank', kind: 'sewage', category: 'utilities', style: 'septic',
+    description: 'Buried tanks for a small town’s waste water. Small capacity, can be placed anywhere.',
+    cost: 7_000, upkeep: 220, output: 280, w: 16, d: 16, jobs: 1, pollution: 0.08,
+  }),
+  svc({
     id: 'sewage_outfall', name: 'Sewage Outfall', kind: 'sewage', category: 'utilities', style: 'outfall',
     description: 'Discharges sewage into open water. Must be placed near water.',
     cost: 14_000, upkeep: 520, output: 2_400, w: 20, d: 20, jobs: 6, needsShore: true, pollution: 0.35,

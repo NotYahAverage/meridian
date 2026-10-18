@@ -5,7 +5,7 @@ import { Rng } from '../core/rng';
 import { type Building, Buildings, lotOBB } from './buildings/Buildings';
 import { Spawner } from './buildings/Spawner';
 import { Clock } from './Clock';
-import { START_MONEY, ZONE_DEPTH } from './constants';
+import { START_MONEY, WATER_LEVEL, WORLD_SIZE, ZONE_DEPTH } from './constants';
 import { Demand } from './demand/Demand';
 import { Districts } from './districts/Districts';
 import { Economy } from './economy/Economy';
@@ -399,6 +399,36 @@ export class City {
     this.zones.rebuildRoadInfluence(this.roads, all);
     for (const seg of this.roads.segments.values()) this.nature.clearAlong(seg.poly, ROAD_TYPES[seg.type].halfWidth + 1.5);
     this.paths.invalidate();
+  }
+
+  /**
+   * A new city's land: the 3 × 3 parcels around its start, plus a strip down to the nearest
+   * shoreline when that lies beyond them. Sewage outfalls must stand on a shore (the only
+   * sewage before 2,500 residents), so without it some maps could never grow.
+   */
+  foundLand(): void {
+    const st = this.startPoint;
+    this.land.startAround(st.x, st.z);
+    const t = this.terrain;
+    const nearShore = (x: number, z: number) => t.shoreDistanceAt(x, z) < 50 && t.heightAt(x, z) > WATER_LEVEL + 0.5;
+    let shore: { x: number; z: number } | null = null;
+    for (let r = 20; r < 4000 && !shore; r += 20) {
+      for (let a = 0; a < Math.PI * 2; a += 0.03) {
+        const x = st.x + Math.cos(a) * r, z = st.z + Math.sin(a) * r;
+        if (x < 0 || z < 0 || x >= WORLD_SIZE || z >= WORLD_SIZE) continue;
+        if (nearShore(x, z)) {
+          shore = { x, z };
+          break;
+        }
+      }
+    }
+    if (!shore || this.land.ownsPoint(shore.x, shore.z)) return;
+    // The parcels along the way, so a road can reach it.
+    const extra: { x: number; z: number }[] = [];
+    const d = Math.hypot(shore.x - st.x, shore.z - st.z);
+    for (let s = 0; s <= d; s += 40) extra.push({ x: st.x + ((shore.x - st.x) * s) / d, z: st.z + ((shore.z - st.z) * s) / d });
+    extra.push(shore);
+    this.land.startAround(st.x, st.z, extra);
   }
 
   /** Buys the next ring of land around the city. */

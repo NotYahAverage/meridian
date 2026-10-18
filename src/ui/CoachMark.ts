@@ -70,7 +70,7 @@ export class CoachMark {
     this.timer = 0.25;
     const g = this.game;
     const city = g.city;
-    if (!city || g.state !== 'playing' || g.photoMode || !g.settings.tutorial || document.querySelector('.modal-backdrop:not(.hidden)')) return this.hide();
+    if (!city || g.state !== 'playing' || g.photoMode || !g.settings.tutorial || g.ui.guide.running || document.querySelector('.modal-backdrop:not(.hidden)')) return this.hide();
     const goal = GOALS.find((q) => !city.goalsDone.has(q.id));
     const t = goal ? TARGETS[goal.id] : undefined;
     if (!goal || !t || this.dismissed.has(goal.id) || city.peakPopulation < (t.minPop ?? 0)) return this.hide();

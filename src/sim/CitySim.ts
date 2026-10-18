@@ -962,7 +962,7 @@ function dailyNotices(city: City): void {
   const util = [
     ['power', Problem.NoPower, 'Power shortage', 'without electricity. Build more power plants or connect them by road.', 'power'],
     ['water', Problem.NoWater, 'Water shortage', 'without running water. Add water towers or pumping stations.', 'water'],
-    ['sewage', Problem.NoSewage, 'Sewage backing up', 'without sewage service. Build a sewage outfall or treatment plant.', 'sewage'],
+    ['sewage', Problem.NoSewage, 'Sewage backing up', 'without sewage service. Build a septic tank, a sewage outfall or a treatment plant.', 'sewage'],
   ] as const;
   for (const [kind, flag, title, text, icon] of util) {
     if (u[kind].unserved > 0) {

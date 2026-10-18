@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS, LARGE_CITY_POPULATION, type SlotInfo, type UiStyle, t
 import { MAP_PRESETS, type MapPreset } from '../sim/world/Terrain';
 import { h } from './dom';
 import { icon } from './icons';
+import { CHAPTERS } from './Tutorial';
 import { brandWordmark } from './brand';
 
 const CITY_NAMES = ['Port Alder', 'Meridian Bay', 'New Halston', 'Cedarbrook', 'Westmere', 'Larkhaven', 'Ashby Falls', 'Silverlake', 'Northfield', 'Kingsport', 'Juniper Ridge', 'Brightwater', 'Easton Vale', 'Harbourne'];
@@ -89,6 +90,8 @@ export class NewCityDialog extends Modal {
   private seed = randomSeed() % 1_000_000;
   private preset: MapPreset = 'coastal';
   private unlimited = false;
+  /** Run the tutorial in this city (on by default until the player has finished it). */
+  private guide = true;
 
   constructor(game: Game) {
     super(game, 'Found a New City', 'wide');
@@ -97,6 +100,7 @@ export class NewCityDialog extends Modal {
   open(): void {
     this.name = CITY_NAMES[Math.floor(Math.random() * CITY_NAMES.length)];
     this.seed = randomSeed() % 1_000_000;
+    this.guide = !(this.game.settings.guideDone ?? []).includes('inspect');
     this.render();
     super.open();
   }
@@ -120,6 +124,8 @@ export class NewCityDialog extends Modal {
     }
     const unl = h('input', { type: 'checkbox', checked: this.unlimited }) as HTMLInputElement;
     unl.addEventListener('change', () => (this.unlimited = unl.checked));
+    const gd = h('input', { type: 'checkbox', checked: this.guide }) as HTMLInputElement;
+    gd.addEventListener('change', () => (this.guide = gd.checked));
     b.append(
       h('label', { class: 'field' }, h('span', null, 'City name'), nameIn),
       h('div', { class: 'field' }, h('span', null, 'Map'), maps),
@@ -127,9 +133,10 @@ export class NewCityDialog extends Modal {
         h('label', { class: 'field' }, h('span', null, 'Seed'), h('div', { class: 'seed-row' }, seedIn, h('button', { class: 'icon-btn', 'data-tip': 'Random seed', onclick: () => { this.seed = randomSeed() % 1_000_000; this.render(); } }, icon('dice', 18)))),
         h('label', { class: 'check' }, unl, h('span', null, 'Unlimited money (sandbox)')),
       ),
+      h('label', { class: 'check guide-check', 'data-tip': 'A short tutorial in this city: eight chapters on roads, zones, utilities and growth. Skip or hide it at any time.' }, gd, h('span', null, 'Guide me through the basics')),
       h('div', { class: 'modal-actions' },
         h('button', { class: 'btn', onclick: () => this.close() }, 'Cancel'),
-        h('button', { class: 'btn primary big', onclick: () => { this.close(); void this.game.startNewCity({ name: this.name.trim() || 'New City', seed: this.seed, preset: this.preset, unlimited: this.unlimited }); } }, icon('build', 16), 'Found city'),
+        h('button', { class: 'btn primary big', onclick: () => { this.close(); void this.game.startNewCity({ name: this.name.trim() || 'New City', seed: this.seed, preset: this.preset, unlimited: this.unlimited, guide: this.guide }); } }, icon('build', 16), 'Found city'),
       ),
     );
   }
@@ -357,6 +364,7 @@ export class PauseMenu extends Modal {
         btn('Your cities', 'folder', () => { this.close(); this.game.ui.saveLoad.openMode('load'); }),
         btn('Settings', 'gear', () => { this.close(); this.game.ui.settings.open(); }),
         btn('Controls', 'keyboard', () => { this.close(); this.game.ui.help.open(); }),
+        btn('Tutorial chapters', 'flag', () => { this.close(); this.game.ui.chapters.open(); }),
         btn('Exit to main menu', 'home', () => { this.close(); void this.game.exitToMenu(); }),
         platform.quit ? btn('Quit game', 'close', () => { this.close(); void this.game.quit(); }) : null,
       ),
@@ -470,5 +478,45 @@ export class MainMenu {
 
   hide(): void {
     this.el.classList.add('hidden');
+  }
+}
+
+/** The tutorial's chapters: in order the first time, then any finished one can be replayed. */
+export class ChaptersDialog extends Modal {
+  constructor(game: Game) {
+    super(game, 'Tutorial chapters', 'narrow');
+  }
+
+  open(): void {
+    this.render();
+    super.open();
+  }
+
+  private render(): void {
+    const guide = this.game.ui.guide;
+    const done = guide.finished;
+    const b = this.body;
+    b.innerHTML = '';
+    b.append(h('div', { class: 'hint small' }, 'Each chapter runs in the city you have open. Finish one to unlock the next; finished chapters can be replayed any time.'));
+    const list = h('div', { class: 'chapter-list' });
+    CHAPTERS.forEach((ch, i) => {
+      const ok = guide.canStart(i);
+      list.append(h('button', {
+        class: `chapter${done.has(ch.id) ? ' done' : ''}`,
+        disabled: ok ? null : '',
+        'data-tip': ok ? '' : 'Finish the chapter before it first',
+        onclick: () => { this.close(); guide.replay(i); },
+      },
+        h('span', { class: 'chapter-n' }, done.has(ch.id) ? icon('check', 13) : String(i + 1)),
+        h('span', { class: 'chapter-text' }, h('b', null, ch.title), h('span', null, ch.blurb)),
+        ok ? icon('play', 14) : icon('lock', 14),
+      ));
+    });
+    b.append(list,
+      h('div', { class: 'modal-actions' },
+        h('button', { class: 'btn', onclick: () => { this.close(); guide.begin(); } }, icon('flag', 14), 'Start from the beginning'),
+        h('button', { class: 'btn primary', onclick: () => this.close() }, 'Close'),
+      ),
+    );
   }
 }

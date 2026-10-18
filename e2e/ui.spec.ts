@@ -6,6 +6,8 @@ test('coach marks guide a new city', async ({ page }) => {
   const errors = trackErrors(page);
   await boot(page);
   await page.getByRole('button', { name: 'New city' }).click();
+  // These tests play without the tutorial.
+  await page.locator('.guide-check input').uncheck();
   await page.getByRole('button', { name: 'Found city' }).click();
   await page.waitForFunction(() => (window as any).__meridian.game.state === 'playing', null, { timeout: 60_000 });
   await game(page, `g.ui.closePanel();`);
@@ -60,6 +62,8 @@ test('road grid tool', async ({ page }) => {
   const errors = trackErrors(page);
   await boot(page);
   await page.getByRole('button', { name: 'New city' }).click();
+  // These tests play without the tutorial.
+  await page.locator('.guide-check input').uncheck();
   await page.getByRole('button', { name: 'Found city' }).click();
   await page.waitForFunction(() => (window as any).__meridian.game.state === 'playing', null, { timeout: 60_000 });
   const sp = await game<{ endX: number; endZ: number }>(page, `g.ui.closePanel(); g.settings.tutorial = false; g.setSpeed(0); g.hour = 11; const s = g.city.terrain.spawn; g.cam.jumpTo({ x: s.endX + 160, z: s.endZ + 140, distance: 700, pitch: 1.25, yaw: Math.PI / 2 }); return s;`);
