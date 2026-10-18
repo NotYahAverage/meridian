@@ -2,6 +2,7 @@ import { SERVICE_BY_ID } from './sim/services/ServiceTypes';
 import { IDEAS } from './sim/design/Ideas';
 import { citizenOf } from './sim/population/Citizens';
 import './ui/styles.css';
+import './ui/command.css';
 import { Game } from './game/Game';
 import * as CityCommands from './sim/CityCommands';
 import { fastForward, tickCity } from './sim/CitySim';

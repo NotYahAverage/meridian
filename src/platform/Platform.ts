@@ -174,7 +174,11 @@ export interface Settings {
   scenariosWon: string[];
   /** Interface scale: 0 = automatic (follows screen height), otherwise a factor. */
   uiScale: number;
+  /** Interface look: the original, or the Command style (switchable in Settings to compare). */
+  uiStyle?: UiStyle;
 }
+
+export type UiStyle = 'classic' | 'command';
 
 /** Large city mode switches itself on at this population (when set to automatic). */
 export const LARGE_CITY_POPULATION = 40_000;

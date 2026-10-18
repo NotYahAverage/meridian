@@ -599,8 +599,10 @@ export class Game {
   // ── Settings ──────────────────────────────────────────────────────────────
 
   applySettings(): void {
-    this.ui?.applyScale();
     const s = this.settings;
+    // The interface style is a stylesheet switch on the page (and a few layout choices that read it).
+    document.documentElement.dataset.ui = s.uiStyle ?? 'classic';
+    this.ui?.applyScale();
     this.renderer.setQuality(QUALITY_PRESETS[s.quality]);
     this.env.setShadowSize(QUALITY_PRESETS[s.quality].shadowSize);
     this.env.sun.castShadow = QUALITY_PRESETS[s.quality].shadows;

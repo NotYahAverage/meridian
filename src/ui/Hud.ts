@@ -23,6 +23,12 @@ import { DemandPanel } from './DemandPanel';
 import { bindingName } from '../game/Keybinds';
 import type { ThumbSpec } from '../render/Thumbnails';
 import { BIKE_LANE } from '../sim/CityCommands';
+
+/** What kind of notice a toast is, in a word (shown by the Command interface style). */
+const TOAST_KIND: Record<string, string> = { info: 'Notice', good: 'Good news', warning: 'Warning', critical: 'Critical' };
+
+/** A small caption over a top-bar readout (shown by the Command interface style). */
+const cap = (text: string) => h('span', { class: 'tb-cap' }, text);
 import { ARCHETYPES } from '../sim/buildings/Archetypes';
 
 const SERVICE_ICON: Record<string, string> = {
@@ -75,7 +81,7 @@ export class TopBar {
   private popTrend: HTMLElement;
   private happy: HTMLElement;
   private happyBox: HTMLElement;
-  private utils: Record<'power' | 'water' | 'sewage', { box: HTMLElement; val: HTMLElement }>;
+  private utils: Record<'power' | 'water' | 'sewage', { box: HTMLElement; val: HTMLElement; fill: HTMLElement }>;
   private jobs: HTMLElement;
   private jobsBox: HTMLElement;
   private scn: HTMLElement;
@@ -101,7 +107,7 @@ export class TopBar {
     this.pop = h('span', { class: 'tb-val' });
     this.popTrend = h('span', { class: 'tb-trend' });
     this.happy = h('span', { class: 'tb-val' });
-    this.happyBox = h('div', { class: 'tb-stat', 'data-tip': 'Average happiness of residents' }, icon('happy', 16), this.happy);
+    this.happyBox = h('div', { class: 'tb-stat', 'data-tip': 'Average happiness of residents' }, icon('happy', 16), cap('Happiness'), this.happy);
     this.scnText = h('span', { class: 'tb-scn-text' });
     this.scn = h('button', { class: 'tb-stat tb-scenario hidden', 'data-tip': 'Scenario objectives (click for details)', onclick: () => this.game.ui.openPanel('goals') }, icon('flag', 15), this.scnText);
     this.date = h('span', { class: 'tb-date' });
@@ -111,12 +117,13 @@ export class TopBar {
     this.net = h('span', { class: 'tb-net' });
     const util = (ic: string, label: string) => {
       const val = h('span', { class: 'tb-val small' });
-      const box = h('div', { class: 'tb-stat tb-util' }, icon(ic, 15), h('span', { class: 'tb-label' }, label), val);
-      return { box, val };
+      const fill = h('i');
+      const box = h('div', { class: 'tb-stat tb-util' }, icon(ic, 15), cap(label), h('span', { class: 'tb-label' }, label), val, h('span', { class: 'tb-meter', 'aria-hidden': 'true' }, fill));
+      return { box, val, fill };
     };
     this.utils = { power: util('power', 'Power'), water: util('water', 'Water'), sewage: util('sewage', 'Sewage') };
     this.jobs = h('span', { class: 'tb-val small' });
-    this.jobsBox = h('div', { class: 'tb-stat tb-util' }, icon('office', 15), h('span', { class: 'tb-label' }, 'Jobless'), this.jobs);
+    this.jobsBox = h('div', { class: 'tb-stat tb-util' }, icon('office', 15), cap('Jobless'), h('span', { class: 'tb-label' }, 'Jobless'), this.jobs);
     const speeds: [string, string, number][] = [['pause', 'Pause (Space)', 0], ['play', 'Normal speed (Shift+1)', 1], ['fast', 'Fast (Shift+2)', 2], ['faster', 'Very fast (Shift+3)', 3]];
     const speedBox = h('div', { class: 'speed', role: 'group', 'aria-label': 'Simulation speed' });
     for (const [ic, tip, s] of speeds) {
@@ -141,8 +148,8 @@ export class TopBar {
       { class: 'topbar' },
       h('div', { class: 'tb-brand' }, brandMark('tb-logo'), h('div', { class: 'tb-names' }, this.name, this.title)),
       h('div', { class: 'tb-sep' }),
-      h('button', { class: 'tb-stat tb-moneybox', 'data-tip': 'Treasury · projected monthly cash flow (click for the budget)', onclick: () => this.game.ui.openPanel('budget') }, icon('money', 16), this.money, this.net),
-      h('div', { class: 'tb-stat', 'data-tip': 'Population · change over the last few seconds' }, icon('people', 16), this.pop, this.popTrend),
+      h('button', { class: 'tb-stat tb-moneybox', 'data-tip': 'Treasury · projected monthly cash flow (click for the budget)', onclick: () => this.game.ui.openPanel('budget') }, icon('money', 16), cap('Treasury'), this.money, this.net),
+      h('div', { class: 'tb-stat tb-popbox', 'data-tip': 'Population · change over the last few seconds' }, icon('people', 16), cap('Population'), this.pop, this.popTrend),
       this.happyBox,
       h('div', { class: 'tb-sep' }),
       this.utils.power.box,
@@ -151,7 +158,7 @@ export class TopBar {
       this.jobsBox,
       this.scn,
       h('div', { class: 'tb-spacer' }),
-      h('div', { class: 'tb-clock' }, this.sky, this.date, this.time),
+      h('div', { class: 'tb-clock' }, this.sky, this.date, this.time, cap('Date')),
       speedBox,
       h('div', { class: 'tb-sep' }),
       demand,
@@ -175,10 +182,12 @@ export class TopBar {
       let state: '' | 'warn' | 'bad' = '';
       if (t.production <= 0 && t.consumption <= 0) {
         setText(val, '—');
+        this.utils[kind].fill.style.width = '0%';
         box.setAttribute('data-tip', `${NAMES[kind]}: nothing built yet`);
       } else {
         const load = t.production > 0 ? t.consumption / t.production : Infinity;
         setText(val, Number.isFinite(load) ? `${Math.round(load * 100)}%` : 'None');
+        this.utils[kind].fill.style.width = `${Math.min(100, Number.isFinite(load) ? load * 100 : 100)}%`;
         state = t.unserved > 0 || load > 1 ? 'bad' : load > 0.9 ? 'warn' : '';
         box.setAttribute('data-tip', `${NAMES[kind]}: ${fmt(t.consumption)} of ${fmt(t.production)} ${UNITS[kind]} in use${t.unserved ? ` · ${formatInt(t.unserved)} buildings without service` : ''}`);
       }
@@ -332,6 +341,7 @@ export class Toolbar {
       ['bulldoze', 'bulldoze', 'Demolish', 'Demolish roads and buildings', 'toolBulldoze'],
     ];
     for (const [id, ic, label, tip, action] of tools) {
+      if (id === 'roads') this.rail.appendChild(h('div', { class: 'rail-cap' }, 'Build'));
       const badge = h('kbd', { class: 'rail-key', 'aria-hidden': 'true' });
       const b = h('button', { class: `rail-btn${id === 'bulldoze' ? ' danger' : ''}`, 'data-cat': id, 'aria-label': label, onclick: () => this.select(id as Category | 'build') },
         icon(ic, 20), h('span', null, label), badge);
@@ -354,6 +364,11 @@ export class Toolbar {
 
   addRailGap(cls: 'rail-sep' | 'rail-spacer'): void {
     this.rail.appendChild(h('div', { class: cls }));
+  }
+
+  /** A group caption in the rail (shown by the Command interface style). */
+  addRailCaption(text: string): void {
+    this.rail.appendChild(h('div', { class: 'rail-cap' }, text));
   }
 
   /** City services or parks & landmarks, both under the Services tab. */
@@ -804,7 +819,7 @@ export class Toasts {
       'div',
       { class: `toast ${n.severity}${n.x !== undefined || n.onClick ? ' clickable' : ''}` },
       h('div', { class: 'toast-icon' }, icon(NOTICE_ICON[n.icon] ?? n.icon, 18)),
-      h('div', { class: 'toast-body' }, h('div', { class: 'toast-title' }, n.title), n.text ? h('div', { class: 'toast-text' }, n.text) : null),
+      h('div', { class: 'toast-body' }, h('div', { class: 'toast-kind' }, TOAST_KIND[n.severity] ?? 'Notice'), h('div', { class: 'toast-title' }, n.title), n.text ? h('div', { class: 'toast-text' }, n.text) : null),
     );
     const dismiss = h('button', { class: 'toast-close', 'aria-label': 'Dismiss', 'data-tip': 'Dismiss' }, icon('close', 13));
     dismiss.addEventListener('click', (e) => {

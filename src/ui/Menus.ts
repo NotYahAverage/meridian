@@ -1,7 +1,7 @@
 import { formatInt, formatMoney } from '../core/math';
 import { randomSeed } from '../core/rng';
 import type { Game } from '../game/Game';
-import { DEFAULT_SETTINGS, LARGE_CITY_POPULATION, type SlotInfo, type UpdateState, platform } from '../platform/Platform';
+import { DEFAULT_SETTINGS, LARGE_CITY_POPULATION, type SlotInfo, type UiStyle, type UpdateState, platform } from '../platform/Platform';
 import { MAP_PRESETS, type MapPreset } from '../sim/world/Terrain';
 import { h } from './dom';
 import { icon } from './icons';
@@ -309,6 +309,9 @@ export class SettingsDialog extends Modal {
       h('div', { class: 'section-title' }, 'Graphics'),
       h('label', { class: 'set-row' }, h('span', null, 'Fullscreen (F11)'), fsBox),
       sel('Quality', s.quality, [['low', 'Low (fast)'], ['medium', 'Medium'], ['high', 'High']], (v) => (s.quality = v as typeof s.quality)),
+      sel('Interface style', s.uiStyle ?? 'classic', [['classic', 'Classic'], ['command', 'Command (new)']], (v) => {
+        s.uiStyle = v as UiStyle;
+      }),
       sel('Interface scale', String(s.uiScale ?? 0), [['0', 'Automatic'], ['1', '100%'], ['1.15', '115%'], ['1.25', '125%'], ['1.5', '150%']], (v) => (s.uiScale = Number(v))),
       sel('Time of day', !s.dayNight ? 'noon' : s.dayOnly ? 'day' : 'cycle', [['cycle', 'Day & night'], ['day', 'Daytime only (sunrise to sunset, on a loop)'], ['noon', 'Always midday']], (v) => {
         s.dayNight = v !== 'noon';

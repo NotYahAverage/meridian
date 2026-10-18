@@ -179,6 +179,7 @@ export class UI {
     this.layersHost = h('div', { class: 'layers-host' }, overlays.el);
     // Rail: construction tools come from the toolbar; analysis and information follow.
     const tb = this.toolbar;
+    tb.addRailCaption('City');
     tb.addRailButton('analysis', 'layers', 'Analysis', 'Map layers: traffic, land value, pollution, coverage… (L) · Tab cycles layers', () => this.togglePanel('overlays'));
     tb.addRailButton('info', 'stats', 'City Info', 'Statistics, budget, policies, districts, goals (I)', () => this.toggleCityInfo());
     tb.addRailButton('design', 'brush', 'Design', 'Design Studio: describe a building in your own words and your architects will design it', () => (this.studio.isOpen ? this.studio.close() : this.studio.open()));

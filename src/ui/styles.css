@@ -70,6 +70,8 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .tb-sub { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.09em; }
 .tb-sep { width: 1px; height: 22px; background: var(--line); margin: 0 6px; flex: none; }
 .tb-spacer { flex: 1; min-width: 8px; }
+/* Hooks the Command style uses; the classic look leaves them out. */
+.tb-cap, .tb-meter, .rail-cap, .toast-kind { display: none; }
 .tb-stat { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px; border-radius: var(--radius-sm); border: none; background: none; color: var(--text); white-space: nowrap; position: relative; font-variant-numeric: tabular-nums; flex: none; }
 .tb-stat svg { color: var(--muted); flex: none; }
 button.tb-stat:hover { background: var(--panel-2); }
