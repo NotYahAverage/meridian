@@ -165,6 +165,8 @@ export class BuildingRenderer {
   private propsDirty = new Set<number>();
   private completed = new Set<number>();
   private highlights = new Map<number, number>();
+  /** Longer-lived marks (a style shown on the map) beneath hover and selection, which never wipe them. */
+  private marks = new Map<number, number>();
   /** Props per chunk (completed buildings only). */
   readonly chunkProps = new Map<number, BuildingProp[]>();
   /** Empty driveways by building id, in world space (cars arriving there can pull in). */
@@ -225,6 +227,7 @@ export class BuildingRenderer {
         this.cache.delete(id);
         this.completed.delete(id);
         this.highlights.delete(id);
+        this.marks.delete(id);
         continue;
       }
       const b = this.city.buildings.get(id);
@@ -404,7 +407,7 @@ export class BuildingRenderer {
       const o = b.slot * 4;
       if (o < 0 || o >= d.length) continue;
       d[o] = Math.round(Math.min(1, b.progress) * 255);
-      d[o + 1] = this.highlights.get(b.id) ?? 0;
+      d[o + 1] = this.highlights.get(b.id) ?? this.marks.get(b.id) ?? 0;
       let flags = 0;
       if (b.state === BuildingState.Abandoned) flags |= 1;
       if (b.state === BuildingState.Burning) flags |= 2;
@@ -421,6 +424,23 @@ export class BuildingRenderer {
       }
     }
     this.stateTex.needsUpdate = true;
+  }
+
+  /** Marks buildings until clearMarks(): hover and selection show over them and leave them be. */
+  setMarks(ids: Iterable<number>, code: number): void {
+    this.marks.clear();
+    for (const id of ids) this.marks.set(id, code);
+    this.stateTimer = 0;
+  }
+
+  clearMarks(): void {
+    if (!this.marks.size) return;
+    this.marks.clear();
+    this.stateTimer = 0;
+  }
+
+  get marked(): number {
+    return this.marks.size;
   }
 
   setHighlight(ids: Iterable<number>, code: number): void {

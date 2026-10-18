@@ -783,6 +783,8 @@ export class Game {
       if (this.tool.onCancel()) return;
       if (this.tool !== this.tools.inspect) return this.setTool('inspect');
       if (this.ui.closeTopmost()) return;
+      // A style lit up on the map goes out before Esc opens the menu.
+      if (this.world?.buildings.marked) return this.world.buildings.clearMarks();
       this.ui.openPause();
       return;
     }

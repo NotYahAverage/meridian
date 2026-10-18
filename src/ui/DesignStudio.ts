@@ -94,7 +94,7 @@ export class DesignStudio extends Modal {
       this.tab = 'design';
       this.refining = rt.id;
     }
-    this.game.world?.buildings.clearHighlights(STYLE_HIGHLIGHT);
+    this.game.world?.buildings.clearMarks();
     this.render();
     super.open();
     if (this.tab === 'design') setTimeout(() => this.els.text?.focus(), 30);
@@ -903,12 +903,16 @@ export class DesignStudio extends Modal {
     const st = city.design.style(id);
     const w = this.game.world;
     if (!st || !w) return;
-    w.buildings.clearHighlights(STYLE_HIGHLIGHT);
     const ids = [...city.buildings.all.values()].filter((b) => b.movement === id).map((b) => b.id);
-    w.buildings.setHighlight(ids, STYLE_HIGHLIGHT);
+    w.buildings.setMarks(ids, STYLE_HIGHLIGHT);
     this.close();
     this.game.flyTo(st.x, st.z, Math.min(900, Math.max(260, reachOf(st, city.clock.day) * 1.4)));
-    this.game.ui.toasts.push({ severity: 'info', icon: 'eye', title: `The ${st.name}`, text: `${ids.length} building${ids.length === 1 ? '' : 's'} highlighted. They stay lit until you open the studio again.` });
+    this.game.ui.toasts.push({
+      severity: 'info', icon: 'eye', title: `The ${st.name}`,
+      text: `${ids.length} building${ids.length === 1 ? '' : 's'} highlighted. Press Esc or click here to clear them.`,
+      onClick: () => this.game.world?.buildings.clearMarks(),
+      tip: 'Click to clear the highlight',
+    });
   }
 
   private quote(r: Trial['reactions'][number]): HTMLElement {
