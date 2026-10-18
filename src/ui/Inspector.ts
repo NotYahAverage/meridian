@@ -24,6 +24,7 @@ import { humanize } from '../tools/BulldozeTool';
 import { h } from './dom';
 import { BikeRequests } from '../sim/mobility/BikeRequests';
 import { BIKE_LANE } from '../sim/CityCommands';
+import { timeOfDayFactor } from '../sim/traffic/TripGenerator';
 import { icon } from './icons';
 
 const PROBLEMS: [number, string, string][] = [
@@ -520,16 +521,21 @@ export class Inspector {
       const vol = city.traffic.volume.get(seg.id) ?? 0;
       const cap = segmentCapacity(rt);
       const ratio = vol / cap;
+      // The traffic model works out the rush hour; the hour of day scales it to now.
+      const nowVol = vol * timeOfDayFactor(this.game.hour);
+      const nowRatio = nowVol / cap;
+      const kvTip = (k: string, v: string, tip: string) => { const el = kv(k, v); el.setAttribute('data-tip', tip); return el; };
       body.append(
         kv('Length', `${Math.round(seg.length)} m`),
         kv('Lanes', `${rt.lanes * 2} · ${rt.speedKmh} km/h`),
-        kv('Peak traffic', `${formatInt(vol)} / ${formatInt(cap)} veh/h`),
-        h('div', { class: 'kv' }, h('span', null, 'Congestion'), meter(Math.min(1, ratio), ratio > 1 ? 'var(--bad)' : ratio > 0.7 ? 'var(--warn)' : 'var(--good)')),
-        kv('Vehicles now', formatInt(city.vehicles.countOn(seg.id))),
+        kvTip('Rush hour (estimate)', `${formatInt(vol)} / ${formatInt(cap)} veh/h`, 'How many vehicles the city’s traffic model expects at the morning rush, against what the road can carry. The cars you see are a sample of this, mostly near the camera.'),
+        kvTip('Now (estimate)', `${formatInt(nowVol)} veh/h`, 'The rush-hour estimate scaled to the time of day.'),
+        h('div', { class: 'kv', 'data-tip': 'How full the road is at this time of day.' }, h('span', null, 'Congestion now'), meter(Math.min(1, nowRatio), nowRatio > 1 ? 'var(--bad)' : nowRatio > 0.7 ? 'var(--warn)' : 'var(--good)')),
+        kvTip('Cars on it now', formatInt(city.vehicles.countOn(seg.id)), 'Vehicles actually driving on this road right now.'),
         kv('Buildings served', formatInt(city.buildings.onSegment(seg.id).length)),
         kv('Upkeep', `${formatMoney(seg.length * (rt.upkeepPerMeter + BIKE_LANE.upkeepPerMeter[seg.bikeLane ?? 0]))}/month`),
       );
-      if (ratio > 1) body.appendChild(h('div', { class: 'hint small' }, 'Over capacity: add parallel routes or upgrade to a wider road.'));
+      if (ratio > 1) body.appendChild(h('div', { class: 'hint small' }, `At rush hour this road gets about ${ratio >= 1.95 ? `${Math.round(ratio)}×` : `${Math.round((ratio - 1) * 100)}% more than`} what it can carry: add a parallel route or upgrade it to a wider road.`));
       if (seg.bikeLane) body.appendChild(kv('Bike lanes', seg.bikeLane === 2 ? 'Protected' : 'Painted'));
       const req = city.bikeRequests.forSegment(seg.id);
       if (req) {

@@ -15,6 +15,12 @@ interface OriginGroup {
   dests: { to: RoutePoint; trips: number }[];
   /** Streets merged into this group and the trips leaving each. */
   local?: { segId: number; trips: number }[];
+  /**
+   * The merged streets' trips. They share the head's tree, so near home the path is the
+   * head's, not theirs: they count only once they've left the cluster's cell (`box`).
+   */
+  far?: { to: RoutePoint; trips: number }[];
+  box?: { x0: number; z0: number; x1: number; z1: number };
 }
 
 /** Shortest-path trees per assignment cycle before nearby origins are merged. */
@@ -277,9 +283,12 @@ export class TrafficModel {
       cell *= 1.4;
     }
     const out: OriginGroup[] = [];
-    for (const list of cells.values()) {
+    for (const [k, list] of cells) {
       const head = list[0];
-      const merged: OriginGroup = { from: head.from, dests: list.length === 1 ? head.dests : head.dests.concat(...list.slice(1).map((g) => g.dests)), local: [] };
+      const ix = k % 4096, iz = Math.floor(k / 4096);
+      // (Cells with negative coordinates don't occur: the world starts at 0.)
+      const box = { x0: ix * cell, z0: iz * cell, x1: (ix + 1) * cell, z1: (iz + 1) * cell };
+      const merged: OriginGroup = { from: head.from, dests: head.dests, far: list.length === 1 ? [] : ([] as OriginGroup['dests']).concat(...list.slice(1).map((g) => g.dests)), box, local: [] };
       for (let k = 1; k < list.length; k++) {
         const g = list[k];
         let trips = 0;
@@ -341,7 +350,13 @@ export class TrafficModel {
     }
     const { cost, parentSeg, parentNode, stamp, gen } = tree;
     const net = this.net;
-    for (const d of g.dests) {
+    const box = g.box;
+    const n = g.dests.length;
+    const all = g.far?.length ? g.dests.concat(g.far) : g.dests;
+    for (let di = 0; di < all.length; di++) {
+      const d = all[di];
+      // A merged street's trip: its path near home isn't known (it's the head's), so it counts from where it leaves the cell.
+      const clip = di >= n && box ? box : null;
       this.accTotal += d.trips;
       const ts = net.segments.get(d.to.segId);
       if (!ts) {
@@ -370,6 +385,10 @@ export class TrafficModel {
       for (let guard = 0; guard < 50000; guard++) {
         const p = parentNode[cur];
         const s = parentSeg[cur];
+        if (clip) {
+          const node = net.nodes.get(cur);
+          if (node && node.x >= clip.x0 && node.x < clip.x1 && node.z >= clip.z0 && node.z < clip.z1) break;
+        }
         this.add(s, d.trips);
         if (p < 0) break;
         cur = p;

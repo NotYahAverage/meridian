@@ -37,7 +37,7 @@ export type OverlayId =
   | 'cycling';
 
 export const OVERLAYS: { id: OverlayId; label: string; group: string; legend: [string, string] }[] = [
-  { id: 'traffic', label: 'Traffic', group: 'City', legend: ['Free flowing', 'Gridlock'] },
+  { id: 'traffic', label: 'Traffic', group: 'City', legend: ['Free at rush hour', 'Jammed at rush hour'] },
   { id: 'landValue', label: 'Land Value', group: 'City', legend: ['Low', 'High'] },
   { id: 'happiness', label: 'Happiness', group: 'City', legend: ['Unhappy', 'Happy'] },
   { id: 'districts', label: 'Districts', group: 'City', legend: ['', ''] },
@@ -375,7 +375,7 @@ export class Overlays {
   /** Short explanation for the legend. */
   static describe(mode: OverlayId): string {
     switch (mode) {
-      case 'traffic': return 'Road colour shows peak-hour load versus capacity.';
+      case 'traffic': return 'Road colour shows how full each road gets at the morning rush (an estimate from the traffic model), not the cars on it right now. Red roads need a parallel route or a wider road.';
       case 'landValue': return 'Parks, services, shops and water views raise value; pollution and noise lower it.';
       case 'pollution': return 'Ground pollution from industry and power plants. Keep homes away.';
       case 'noise': return 'Traffic noise from busy roads and highways.';

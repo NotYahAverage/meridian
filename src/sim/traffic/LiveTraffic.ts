@@ -93,7 +93,7 @@ export class LiveTraffic {
   }
 
   private localTimer = 0;
-  private near: { at: number; x: number; z: number; segs: RoadSegment[]; wide: RoadSegment[] } = { at: -1, x: 0, z: 0, segs: [], wide: [] };
+  private near: { at: number; x: number; z: number; segs: RoadSegment[]; wide: RoadSegment[]; busy: RoadSegment[] } = { at: -1, x: 0, z: 0, segs: [], wide: [], busy: [] };
   /** Extra cars spawned for busy roads near the camera. */
   localSpawns = 0;
 
@@ -115,7 +115,7 @@ export class LiveTraffic {
   private topUpLocal(tod: number): void {
     const city = this.city;
     const v = city.vehicles;
-    if (v.count >= MAX_VEHICLES - 50 || !city.traffic.volume.size) return;
+    if (!city.traffic.volume.size) return;
     const fx = v.lodX, fz = v.lodZ;
     const near = this.near;
     if (near.at !== city.roads.version || Math.hypot(fx - near.x, fz - near.z) > 60) {
@@ -125,10 +125,14 @@ export class LiveTraffic {
       const R = 420, W = 1100;
       near.segs = city.roads.segmentsIn(fx - R, fz - R, fx + R, fz + R).filter((s) => !s.ring);
       near.wide = city.roads.segmentsIn(fx - W, fz - W, fx + W, fz + W).filter((s) => (city.traffic.volume.get(s.id) ?? 0) > 0);
+      // The roads with traffic, busiest first: those are the ones to fill.
+      near.busy = near.segs.filter((s) => (city.traffic.volume.get(s.id) ?? 0) > 0).sort((a, b) => city.traffic.ratio(b.id) - city.traffic.ratio(a.id));
     }
     if (!near.segs.length || !near.wide.length) return;
-    for (let tries = 0; tries < 3; tries++) {
-      const seg = near.segs[Math.floor(this.rng.next() * near.segs.length)];
+    for (let tries = 0; tries < 6; tries++) {
+      // Mostly the busiest roads in view (squared pick leans to the front of the list).
+      const pool = near.busy.length ? near.busy : near.segs;
+      const seg = pool[Math.floor(this.rng.next() ** 2 * pool.length)];
       const dir: 1 | -1 = seg.oneway !== 0 ? (seg.oneway as 1 | -1) : this.rng.chance(0.5) ? 1 : -1;
       const want = this.expectedOn(seg, tod);
       if (want < 0.6) continue;
@@ -146,6 +150,8 @@ export class LiveTraffic {
       const s = dir === 1 ? seg.trimA + 2 : seg.length - seg.trimB - 2;
       const route = city.paths.find({ segId: seg.id, s }, { segId: to.id, s: to.length / 2 });
       if (!route || route.legs[0].dir !== dir || route.length < 120) continue;
+      // Big cities fill the vehicle limit: cars far out of view make way for these.
+      if (v.count >= MAX_VEHICLES - 50 && !v.makeRoom()) return;
       const rng = this.rng;
       if (v.spawn({ route, model: pickCarModel(rng), color: pickCarColor(rng), purpose: Purpose.Commute }) >= 0) this.localSpawns++;
     }

@@ -581,6 +581,28 @@ export class Vehicles {
     this.reserved[i] = -1;
   }
 
+  /**
+   * At the vehicle limit: takes the ordinary car farthest from the camera's focus off the map
+   * (if it's well out of view), so busy roads where the player is looking can still fill up.
+   */
+  makeRoom(minDist = 900): boolean {
+    let best = -1, bestD = minDist * minDist;
+    for (let i = 0; i < this.max; i++) {
+      if (!this.active[i] || this.callbacks.has(i) || this.continuations.has(i) || this.park[i] !== Park.None) continue;
+      const p = this.purpose[i];
+      if (p !== Purpose.Commute && p !== Purpose.Shopping && p !== Purpose.Visitor && p !== Purpose.Freight) continue;
+      const dx = this.x[i] - this.lodX, dz = this.z[i] - this.lodZ;
+      const d = dx * dx + dz * dz;
+      if (d > bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best < 0) return false;
+    this.despawn(best);
+    return true;
+  }
+
   despawn(i: number, arrived = false): void {
     if (!this.active[i]) return;
     this.laneRemove(i);
