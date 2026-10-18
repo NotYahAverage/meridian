@@ -129,6 +129,13 @@ export class City {
   jobsInFrames = false;
   /** Job steps owed (JOB_FINE per tick). */
   jobDebt = 0;
+  /**
+   * The rest of the last tick's work, in order, a piece a frame (game only): all of it is done
+   * before the next tick starts, so the order of events is the same, just spread out.
+   */
+  tickRest: (() => void)[] = [];
+  /** New trip demand being handed to the traffic model (game only). */
+  applyJob: Generator<void, void, void> | null = null;
   /** New trip demand waiting for the traffic cycle in progress to finish (game only). */
   heldDemand: TripDemand[] | null = null;
   /** Transit ridership, worked out a slice of residents at a time (game only). */

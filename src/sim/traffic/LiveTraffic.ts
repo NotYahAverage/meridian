@@ -84,7 +84,7 @@ export class LiveTraffic {
       this.serviceTimer = 2.5;
       this.dispatchRoutineService();
     }
-    city.vehicles.update(simDt);
+    city.vehicles.update(simDt, dtReal);
   }
 
   spawn(from: RoutePoint, to: RoutePoint, model: number, color: number, purpose: Purpose, onArrive?: () => void, tag = 0, dest?: number): number {

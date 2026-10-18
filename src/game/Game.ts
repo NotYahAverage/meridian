@@ -19,7 +19,7 @@ import { WorldRenderer } from '../render/WorldRenderer';
 import { lotOBB } from '../sim/buildings/Buildings';
 import { City } from '../sim/City';
 import { generateBaseParallel } from '../sim/world/parallelTerrain';
-import { advanceJobs, tickCity } from '../sim/CitySim';
+import { advanceJobs, finishTick, tickCity } from '../sim/CitySim';
 import { DAY_CYCLE_SECONDS, TICK_SECONDS } from '../sim/constants';
 
 /** Simulation time allowed per rendered frame (ms). */
@@ -404,6 +404,7 @@ export class Game {
       this.world?.ghost.clear();
       const thumb = this.renderer.captureThumbnail();
       // A piece per frame; the clock waits (see frame()) so the save is consistent.
+      finishTick(city);
       const data = await serializeCityAsync(city, yieldFrame);
       await platform.storage.save(this.slotId, data, thumb);
       // A save resets the autosave clock so the two don't run back to back.
@@ -487,6 +488,7 @@ export class Game {
 
   exportSave(): void {
     if (!this.city) return;
+    finishTick(this.city);
     const blob = new Blob([JSON.stringify(serializeCity(this.city))], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -861,8 +863,9 @@ export class Game {
         n++;
       }
       if (this.tickAcc >= TICK_SECONDS) this.tickAcc = Math.min(this.tickAcc, TICK_SECONDS);
-      // Heavy background work in small steps, so a tick never makes a long frame.
-      advanceJobs(city, JOBS_BUDGET_MS);
+      // Heavy background work in small steps, so a tick never makes a long frame (and none at
+      // all in the frame a tick has just run in).
+      if (n === 0) advanceJobs(city, JOBS_BUDGET_MS);
       if (this.settings.dayNight) {
         this.hour = (this.hour + (dt * mult * 24) / DAY_CYCLE_SECONDS) % 24;
         // Daytime only: just after sunrise to just before sunset, round and round.
@@ -946,11 +949,11 @@ export class Game {
       return;
     }
     // Ring under the selected vehicle.
-    this.world?.ghost.setSelectionRing(v.x[sel.id], v.z[sel.id], VEHICLE_LENGTH[v.model[sel.id]] * 0.5 + 1.4);
+    this.world?.ghost.setSelectionRing(v.drawnX(sel.id), v.drawnZ(sel.id), VEHICLE_LENGTH[v.model[sel.id]] * 0.5 + 1.4);
     const f = this.following;
     if (f && f.id === sel.id && f.serial === sel.serial) {
-      this.cam.goal.x = v.x[sel.id];
-      this.cam.goal.z = v.z[sel.id];
+      this.cam.goal.x = v.drawnX(sel.id);
+      this.cam.goal.z = v.drawnZ(sel.id);
     }
   }
 

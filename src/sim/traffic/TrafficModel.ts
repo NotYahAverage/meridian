@@ -227,8 +227,19 @@ export class TrafficModel {
 
   /** Replaces the demand set; a new assignment cycle starts. */
   setDemand(trips: TripDemand[]): void {
+    const it = this.setDemandSteps(trips, Infinity);
+    while (!it.next().done);
+  }
+
+  /**
+   * setDemand a slice of `perStep` trips per next(). Nothing changes until the last step, so
+   * the cycle under way carries on meanwhile.
+   */
+  *setDemandSteps(trips: TripDemand[], perStep: number): Generator<void, void, void> {
     const groups = new Map<number, OriginGroup>();
+    let n = 0;
     for (const t of trips) {
+      if (++n % perStep === 0) yield;
       if (t.trips <= 0) continue;
       // Trips leaving the same street share one shortest-path tree.
       const key = t.from.segId;
@@ -240,7 +251,10 @@ export class TrafficModel {
       // The demand records themselves (no copies: big cities have about a million).
       g.dests.push(t);
     }
-    this.queue = this.cluster([...groups.values()]);
+    if (perStep !== Infinity) yield;
+    const queue = this.cluster([...groups.values()]);
+    if (perStep !== Infinity) yield;
+    this.queue = queue;
     this.cursor = 0;
     if (this.queue.length === 0) {
       // No trips at all: no traffic.

@@ -95,6 +95,8 @@ const COVERAGE_SLICE = 150;
 
 /** In the game, each tick's share of background work is done in this many smaller steps. */
 export const JOB_FINE = 4;
+/** Trips handed to the traffic model per step (game only). */
+const APPLY_SLICE = 150_000;
 
 /** Traffic routing and getting around: a tick's share (or 1/JOB_FINE of it in the game). */
 function stepJobs(city: City): void {
@@ -106,6 +108,10 @@ function stepJobs(city: City): void {
 
 /** Coverage, land value and trip demand: one step each. */
 function stepLateJobs(city: City): void {
+  if (city.applyJob) {
+    if (city.applyJob.next().done) city.applyJob = null;
+    return;
+  }
   if (city.coverageJob && city.coverageJob.next().done) city.coverageJob = null;
   if (city.landValueJob && city.landValueJob.next().done) city.landValueJob = null;
   if (city.ridershipJob && city.ridershipJob.next().done) city.ridershipJob = null;
@@ -127,7 +133,8 @@ function stepLateJobs(city: City): void {
 function applyDemand(city: City, trips: TripDemand[]): void {
   // Junction delays phase in with the other getting-around effects in older cities.
   city.traffic.delayScale = city.mobility.phase;
-  city.traffic.setDemand(trips);
+  if (city.jobsInFrames) city.applyJob = city.traffic.setDemandSteps(trips, APPLY_SLICE);
+  else city.traffic.setDemand(trips);
 }
 
 /**
@@ -136,16 +143,57 @@ function applyDemand(city: City, trips: TripDemand[]): void {
  */
 export function advanceJobs(city: City, budgetMs: number): void {
   const t0 = performance.now();
-  while (city.jobDebt > 0) {
-    stepJobs(city);
-    stepLateJobs(city);
-    city.jobDebt--;
-    if (performance.now() - t0 >= budgetMs) break;
+  // The last tick's remaining work first: at least a piece a frame, more while there's time.
+  let busy = city.tickRest.length > 0;
+  while (city.tickRest.length) {
+    city.tickRest.shift()!();
+    if (performance.now() - t0 >= budgetMs * 0.5) return;
   }
+  while (city.jobDebt > 0) {
+    const s0 = performance.now();
+    // Another step only if it should fit (one is always taken in an otherwise idle frame).
+    if (busy && s0 - t0 + jobCost > budgetMs) break;
+    // A step in three parts, each its own unit of work: routing, getting around, the rest.
+    if (jobPart === 0) city.traffic.step(Math.ceil(14 / JOB_FINE), JOB_FINE);
+    else if (jobPart === 1) {
+      city.mobility.fine = JOB_FINE;
+      city.mobility.tick();
+    } else {
+      stepLateJobs(city);
+      city.jobDebt--;
+    }
+    jobPart = (jobPart + 1) % 3;
+    const d = performance.now() - s0;
+    // Quick to rise, slow to fall: the next step is guessed on the cautious side.
+    jobCost = d > jobCost ? d : jobCost * 0.9 + d * 0.1;
+    busy = true;
+  }
+}
+
+/** How long a part of a job step has been taking (ms), and which part is next. */
+let jobCost = 2;
+let jobPart = 0;
+
+/** Work done a slice at a time from the tick queue (each slice in its own frame), or all at once. */
+function sliced(city: City, steps: Generator<void, void>): () => void {
+  const f = () => {
+    if (!city.jobsInFrames) {
+      while (!steps.next().done);
+      return;
+    }
+    if (!steps.next().done) city.tickRest.unshift(f);
+  };
+  return f;
+}
+
+/** Finishes the last tick's work at once (before the next tick, or a save). */
+export function finishTick(city: City): void {
+  while (city.tickRest.length) city.tickRest.shift()!();
 }
 
 /** Advances the city by one simulation tick (one game hour). */
 export function tickCity(city: City): void {
+  finishTick(city);
   city.clock.tick++;
   const t = city.clock.tick;
   city.economy.accrueHour();
@@ -153,51 +201,71 @@ export function tickCity(city: City): void {
   if (weatherChange) weatherNotice(city, weatherChange);
   progressConstruction(city);
   updateFires(city);
+  // The rest runs a piece at a time between frames in the game (see tickRest); straight away otherwise.
+  const later = (f: () => void) => (city.jobsInFrames ? city.tickRest.push(f) : f());
+  let demandIn: DemandInputs | null = null;
+  let eduEmployed = 0;
   // Periodic work is staggered across hours so no single tick does it all.
   if (t < 3) {
-    city.recomputeUtilities();
-    refreshStats(city);
-    city.demand.update(demandInputs(city));
-    projectEconomy(city);
+    later(() => city.recomputeUtilities());
+    later(() => refreshStats(city));
+    later(() => (eduEmployed = countEducatedEmployed(city)));
+    later(() => (demandIn = demandInputs(city, eduEmployed)));
+    later(() => city.demand.update(demandIn!));
+    later(() => projectEconomy(city));
   } else if (t % 6 === 3) {
-    city.recomputeUtilities();
-    refreshStats(city);
+    later(() => city.recomputeUtilities());
+    later(() => refreshStats(city));
   } else if (t % 6 === 4) {
-    city.demand.update(demandInputs(city));
+    later(() => (eduEmployed = countEducatedEmployed(city)));
+    later(() => (demandIn = demandInputs(city, eduEmployed)));
+    later(() => city.demand.update(demandIn!));
   } else if (t % 6 === 5) {
-    projectEconomy(city);
+    later(() => projectEconomy(city));
   }
-  growBuildings(city);
-  moveIn(city);
-  matchJobs(city, 350);
-  if (!city.jobsInFrames) stepJobs(city);
-  checkGoals(city);
+  later(() => growBuildings(city));
+  later(() => {
+    moveIn(city);
+    matchJobs(city, 350);
+    if (!city.jobsInFrames) stepJobs(city);
+    checkGoals(city);
+  });
   const hour = city.clock.hour;
-  city.disasters.tickHour();
-  if (city.coverageDirty) {
-    // Something was built or removed: the player sees the new coverage at once.
-    city.coverageJob = null;
-    city.coverage.recompute(city.buildings);
-    city.coverageDirty = false;
-  } else if (hour === 9 && city.clock.day % 2 === 0 && !(city.jobsInFrames && city.coverageJob)) {
-    city.coverageJob = city.coverage.recomputeSteps(city.buildings, city.jobsInFrames ? Math.ceil(COVERAGE_SLICE / JOB_FINE) : COVERAGE_SLICE);
-  }
-  if (!city.jobsInFrames && city.coverageJob && city.coverageJob.next().done) city.coverageJob = null;
+  later(() => {
+    city.disasters.tickHour();
+    if (city.coverageDirty) {
+      // Something was built or removed: the player sees the new coverage at once.
+      city.coverageJob = null;
+      city.coverage.recompute(city.buildings);
+      city.coverageDirty = false;
+    } else if (hour === 9 && city.clock.day % 2 === 0 && !(city.jobsInFrames && city.coverageJob)) {
+      city.coverageJob = city.coverage.recomputeSteps(city.buildings, city.jobsInFrames ? Math.ceil(COVERAGE_SLICE / JOB_FINE) : COVERAGE_SLICE);
+    }
+    if (!city.jobsInFrames && city.coverageJob && city.coverageJob.next().done) city.coverageJob = null;
+  });
   if (hour === 0) {
-    daily(city);
-    if (city.clock.day % DAYS_PER_MONTH === 0) monthly(city);
-  } else if (hour === 14 && !(city.jobsInFrames && city.landValueJob)) {
-    // Land value is worked out a pass per hour.
-    city.landValueJob = city.landValue.updateSteps(city.buildings, city.roads, city.coverage, city.traffic, 0.3, city.transit.servedStops(), landValueMods(city), city.jobsInFrames ? 24 : Infinity);
+    for (const f of daily(city)) later(f);
+    if (city.clock.day % DAYS_PER_MONTH === 0) later(() => monthly(city));
+  } else if (hour === 14) {
+    later(() => {
+      if (city.jobsInFrames && city.landValueJob) return;
+      // Land value is worked out a pass per hour.
+      city.landValueJob = city.landValue.updateSteps(city.buildings, city.roads, city.coverage, city.traffic, 0.3, city.transit.servedStops(), landValueMods(city), city.jobsInFrames ? 8 : Infinity);
+    });
   } else if (hour === 19) {
-    dailyLate(city);
+    for (const f of dailyLate(city)) later(f);
   } else if (hour === 3) {
-    if (!city.jobsInFrames) city.transit.updateRidership();
-    else if (!city.ridershipJob) city.ridershipJob = city.transit.ridershipSteps(RIDERSHIP_SLICE);
-  } else if (hour === 4 && city.clock.day % 2 === 0 && !(city.jobsInFrames && city.demandJob)) {
-    city.trips.refresh();
-    // Trip demand is added up a slice at a time over the next few hours in big cities.
-    city.demandJob = city.trips.demandSteps(city.jobsInFrames ? DEMAND_SLICE / JOB_FINE : DEMAND_SLICE);
+    later(() => {
+      if (!city.jobsInFrames) city.transit.updateRidership();
+      else if (!city.ridershipJob) city.ridershipJob = city.transit.ridershipSteps(RIDERSHIP_SLICE / JOB_FINE);
+    });
+  } else if (hour === 4 && city.clock.day % 2 === 0) {
+    later(() => {
+      if (city.jobsInFrames && city.demandJob) return;
+      city.trips.refresh();
+      // Trip demand is added up a slice at a time over the next few hours in big cities.
+      city.demandJob = city.trips.demandSteps(city.jobsInFrames ? DEMAND_SLICE / (JOB_FINE * 3) : DEMAND_SLICE);
+    });
   }
   if (!city.jobsInFrames) {
     if (city.landValueJob && city.landValueJob.next().done) city.landValueJob = null;
@@ -214,7 +282,7 @@ export function tickCity(city: City): void {
   }
   // The game does these between frames. At high speed they may fall behind the clock (each
   // finishes before it starts again), rather than slow every frame down to catch up.
-  city.jobDebt = Math.min(city.jobDebt + JOB_FINE, JOB_FINE * 24);
+  later(() => (city.jobDebt = Math.min(city.jobDebt + JOB_FINE, JOB_FINE * 24)));
 }
 
 /** Land-value modifiers from the Clean Air Act and Park Rangers (city-wide or per district). */
@@ -476,29 +544,42 @@ export function streetOf(city: City, b: Building): string {
 
 // ── Daily / monthly ─────────────────────────────────────────────────────────
 
-function daily(city: City): void {
-  city.achievements.check();
-  city.research.daily();
-  city.design.daily();
-  city.people.daily();
-  city.mobility.daily();
-  city.terrain.regrow(9);
-  city.nature.grow(city.clock.day);
-  dailyBuildings(city);
-  refreshStats(city);
-  recordHistory(city);
-  checkMilestones(city);
-  dailyNotices(city);
-  city.growthBlocked.clear();
+/** The day's bookkeeping at midnight, as separate pieces (spread over frames in the game). */
+function daily(city: City): (() => void)[] {
+  return [
+    () => {
+      city.achievements.check();
+      city.research.daily();
+      city.design.daily();
+    },
+    () => city.people.daily(),
+    () => city.mobility.daily(),
+    () => {
+      city.terrain.regrow(9);
+      city.nature.grow(city.clock.day);
+    },
+    sliced(city, dailyBuildings(city)),
+    () => {
+      refreshStats(city);
+      recordHistory(city);
+      checkMilestones(city);
+      dailyNotices(city);
+      city.growthBlocked.clear();
+    },
+  ];
 }
 
 /** The households' half of the day's bookkeeping, a few hours after daily() so the two don't land in one tick. */
-function dailyLate(city: City): void {
-  dailyHouseholds(city);
-  // Visible-trip sampling needs current residents and jobs every day.
-  city.trips.refresh();
-  rebuildVacancies(city);
-  rebuildOpenJobs(city);
+function dailyLate(city: City): (() => void)[] {
+  return [
+    sliced(city, dailyHouseholds(city)),
+    // Visible-trip sampling needs current residents and jobs every day.
+    () => city.trips.refresh(),
+    () => {
+      rebuildVacancies(city);
+      rebuildOpenJobs(city);
+    },
+  ];
 }
 
 function rebuildVacancies(city: City): void {
@@ -513,7 +594,8 @@ function gridCell(x: number, z: number): number {
   return clamp(Math.floor(z / GRID_CELL), 0, GRID_RES - 1) * GRID_RES + clamp(Math.floor(x / GRID_CELL), 0, GRID_RES - 1);
 }
 
-function dailyBuildings(city: City): void {
+/** Yields between slices of buildings (the same work, in the same order, spread over frames). */
+function* dailyBuildings(city: City): Generator<void, void> {
   const cov = city.coverage;
   const lvMap = city.landValue;
   const stats = city.stats;
@@ -562,7 +644,10 @@ function dailyBuildings(city: City): void {
   const removeList: number[] = [];
   let abandonedToday = 0;
   const grids = cov.grids;
+  const slice = Math.max(400, Math.ceil(city.buildings.all.size / 5));
+  let done = 0;
   for (const b of city.buildings.all.values()) {
+    if (++done % slice === 0) yield;
     // One grid lookup per building; the coverage, land-value and district maps share the grid.
     const ci = gridCell(b.cx, b.cz);
     b.district = city.districts.grid[ci];
@@ -733,10 +818,12 @@ function abandon(city: City, b: Building): void {
   b.age = 0;
 }
 
-function dailyHouseholds(city: City): void {
+function* dailyHouseholds(city: City): Generator<void, void> {
   const pop = city.population;
   const rng = city.rng;
+  const slice = Math.max(2000, Math.ceil(pop.count / 6));
   for (let i = 0; i < pop.count; i++) {
+    if (i > 0 && i % slice === 0) yield;
     if (!pop.alive[i]) continue;
     const home = city.buildings.get(pop.home[i]);
     if (!home) {
@@ -790,7 +877,7 @@ export function refreshStats(city: City): void {
   s.unemployment = pop.workerCount > 0 ? (pop.workerCount - pop.employed) / pop.workerCount : 0;
 }
 
-export function demandInputs(city: City): DemandInputs {
+export function demandInputs(city: City, educatedEmployed?: number): DemandInputs {
   const jobs = { commercial: 0, industrial: 0, office: 0, service: 0 };
   const filled = { commercial: 0, industrial: 0, office: 0, service: 0 };
   let lvSum = 0, lvN = 0;
@@ -808,7 +895,8 @@ export function demandInputs(city: City): DemandInputs {
     }
   }
   let score = 0;
-  for (const kind of COVERAGE_KINDS) score += city.coverage.averageFor(kind, city.buildings);
+  const avg = city.coverage.averages(city.buildings);
+  for (const kind of COVERAGE_KINDS) score += avg[kind];
   score /= COVERAGE_KINDS.length;
   let vol = 0, wsum = 0;
   for (const [id, v] of city.traffic.volume) {
@@ -817,11 +905,7 @@ export function demandInputs(city: City): DemandInputs {
     wsum += v;
   }
   const pop = city.population;
-  let eduEmployed = 0;
-  for (let i = 0; i < pop.count; i++) {
-    if (!pop.alive[i]) continue;
-    for (let k = 0; k < pop.educated[i]; k++) if (pop.job[i * 2 + k]) eduEmployed++;
-  }
+  const eduEmployed = educatedEmployed ?? countEducatedEmployed(city);
   const t = city.economy.taxes;
   return {
     connected: !!city.outsidePoint(),
@@ -848,6 +932,17 @@ export function demandInputs(city: City): DemandInputs {
     reputation: city.people.reputation(),
     commute: city.mobility.stats && city.mobility.effect > 0 ? { minutes: city.mobility.stats.avgCommute, effect: city.mobility.effect } : undefined,
   };
+}
+
+/** Educated workers in work (a pass over every household). */
+function countEducatedEmployed(city: City): number {
+  const pop = city.population;
+  let n = 0;
+  for (let i = 0; i < pop.count; i++) {
+    if (!pop.alive[i]) continue;
+    for (let k = 0; k < pop.educated[i]; k++) if (pop.job[i * 2 + k]) n++;
+  }
+  return n;
 }
 
 function recordHistory(city: City): void {

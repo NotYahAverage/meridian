@@ -86,12 +86,13 @@ export class VehicleRenderer {
         this.lastH[i] = v.heading[i];
         this.pitch[i] = this.roll[i] = 0;
       }
+      const h = v.drawnHeading(i);
       const acc = (sp - this.lastV[i]) / dt;
-      let dh = v.heading[i] - this.lastH[i];
+      let dh = h - this.lastH[i];
       dh = Math.atan2(Math.sin(dh), Math.cos(dh));
       const lat = sp * (dh / dt);
       this.lastV[i] = sp;
-      this.lastH[i] = v.heading[i];
+      this.lastH[i] = h;
       this.spin[i] = (this.spin[i] + (sp * dt) / WHEEL_R[v.model[i]]) % (Math.PI * 2);
       // Nose down under braking, up a touch when pulling away; lean out of the turn.
       const tp = Math.max(-0.035, Math.min(0.02, acc * 0.0065));
@@ -117,18 +118,19 @@ export class VehicleRenderer {
     const loC = this.lo.colors!;
     for (let i = 0; i < v.max; i++) {
       if (!v.active[i]) continue;
-      const x = v.x[i], y = v.y[i], z = v.z[i];
+      const x = v.drawnX(i), y = v.drawnY(i), z = v.drawnZ(i);
       const dx = x - cam.x, dy = y - cam.y, dz = z - cam.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       if (beyondDetail(x, z, 0, focus.x, focus.z)) continue;
       // Off screen (behind or beside the camera): not drawn, so not written either.
       if (!view.sees(x, y, z, 8)) continue;
       const model = v.model[i];
+      const heading = v.drawnHeading(i);
       const col = this.color(v.color[i]);
       if (d2 < HI_DIST * HI_DIST) {
         const pool = this.hi[model];
         const k = counts[model]++;
-        writeMatrix(pool.matrices, k * 16, x, y, z, v.heading[i], 1);
+        writeMatrix(pool.matrices, k * 16, x, y, z, heading, 1);
         const c = pool.colors!;
         c[k * 3] = col.r;
         c[k * 3 + 1] = col.g;
@@ -141,12 +143,12 @@ export class VehicleRenderer {
         ex[k * 4 + 2] = this.spin[i];
         ex[k * 4 + 3] = Math.round(this.pitch[i] * 1000 + 100) * 256 + Math.round(this.roll[i] * 1000 + 100);
         if (night > 0.2 && d2 < 520 * 520 && model !== VM_BIKE) {
-          writeMatrix(beamM, beams * 16, x, y, z, v.heading[i], 1);
+          writeMatrix(beamM, beams * 16, x, y, z, heading, 1);
           beams++;
         }
       } else {
         if (v.fade[i] < 0.5) continue;
-        writeMatrix(loM, lo * 16, x, y, z, v.heading[i], VEHICLE_LENGTH[model], VEHICLE_HEIGHT[model], VEHICLE_WIDTH[model]);
+        writeMatrix(loM, lo * 16, x, y, z, heading, VEHICLE_LENGTH[model], VEHICLE_HEIGHT[model], VEHICLE_WIDTH[model]);
         this.tmpColor.copy(col);
         loC[lo * 3] = col.r;
         loC[lo * 3 + 1] = col.g;

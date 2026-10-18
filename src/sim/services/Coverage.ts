@@ -187,10 +187,15 @@ export class Coverage {
 
   /** Average coverage weighted by residents (all kinds worked out in one pass, cached until coverage changes). */
   averageFor(kind: CoverageKind, buildings: Buildings): number {
+    return this.averages(buildings)[kind];
+  }
+
+  /** Every kind's average coverage, weighted by residents (one pass over the buildings). */
+  averages(buildings: Buildings): Record<CoverageKind, number> {
     let residents = 0;
     for (const b of buildings.all.values()) residents += b.residents;
     const c = this.avgCache;
-    if (c && c.version === this.version && c.residents === residents) return c.values[kind];
+    if (c && c.version === this.version && c.residents === residents) return c.values;
     const sums = {} as Record<CoverageKind, number>;
     for (const k of COVERAGE_KINDS) sums[k] = 0;
     let w = 0;
@@ -204,7 +209,7 @@ export class Coverage {
     }
     for (const k of COVERAGE_KINDS) sums[k] = w > 0 ? sums[k] / w : 0;
     this.avgCache = { version: this.version, residents, values: sums };
-    return sums[kind];
+    return sums;
   }
 }
 

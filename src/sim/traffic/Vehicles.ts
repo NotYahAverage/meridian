@@ -134,6 +134,9 @@ const hash = (a: number, b: number) => {
  * - stopping for people on crossings;
  * - drivers stuck for a while rerouting with what they can see and know (not always well).
  */
+/** Vehicle steps a real second at most (faster frames are drawn between steps). */
+const STEP_HZ = 60;
+
 export class Vehicles {
   readonly max: number;
   readonly active: Uint8Array;
@@ -145,6 +148,19 @@ export class Vehicles {
   readonly y: Float32Array;
   readonly z: Float32Array;
   readonly heading: Float32Array;
+  /**
+   * Where each vehicle was before the last step, and how far (0..1) drawing has moved on from
+   * there towards where it is now: cars step at a fixed rate and are drawn in between.
+   */
+  readonly px: Float32Array;
+  readonly py: Float32Array;
+  readonly pz: Float32Array;
+  readonly ph: Float32Array;
+  private pSerial: Uint32Array;
+  alpha = 1;
+  private realAcc = 0;
+  private simAcc = 0;
+  private lastGap = 1 / 60;
   readonly speed: Float32Array;
   /** 1 while braking hard / stopped (for brake lights). */
   readonly braking: Uint8Array;
@@ -285,6 +301,11 @@ export class Vehicles {
     this.y = new Float32Array(max);
     this.z = new Float32Array(max);
     this.heading = new Float32Array(max);
+    this.px = new Float32Array(max);
+    this.py = new Float32Array(max);
+    this.pz = new Float32Array(max);
+    this.ph = new Float32Array(max);
+    this.pSerial = new Uint32Array(max);
     this.speed = new Float32Array(max);
     this.braking = new Uint8Array(max);
     this.indicator = new Int8Array(max);
@@ -1005,7 +1026,56 @@ export class Vehicles {
     this.vTurn[i] = ang < 0.12 ? vmax : Math.max(3.2, Math.min(vmax, Math.sqrt(this.alat[i] * (chord / (2 * Math.sin(ang / 2))))));
   }
 
-  update(dt: number): void {
+  /**
+   * Advances by `dt` of simulated time. Given the real time too (`realDt`), steps at most
+   * STEP_HZ times a real second, however fast frames come, and drawing interpolates between.
+   */
+  update(dt: number, realDt?: number): void {
+    if (realDt === undefined) {
+      this.step(dt);
+      this.alpha = 1;
+      return;
+    }
+    this.realAcc += realDt;
+    this.simAcc += dt;
+    if (this.realAcc < 1 / STEP_HZ) {
+      this.alpha = Math.min(1, this.realAcc / this.lastGap);
+      return;
+    }
+    for (let i = 0; i < this.max; i++) {
+      if (!this.active[i]) continue;
+      this.px[i] = this.x[i];
+      this.py[i] = this.y[i];
+      this.pz[i] = this.z[i];
+      this.ph[i] = this.heading[i];
+      this.pSerial[i] = this.serial[i];
+    }
+    this.step(this.simAcc);
+    // Slow frames: no interpolation (each frame steps, drawn where it is).
+    this.lastGap = this.realAcc;
+    this.alpha = this.realAcc > 1.5 / STEP_HZ ? 1 : 0;
+    this.realAcc = 0;
+    this.simAcc = 0;
+  }
+
+  /** Where vehicle `i` is drawn this frame (between its last two steps). */
+  drawnX(i: number): number {
+    return this.pSerial[i] !== this.serial[i] ? this.x[i] : this.px[i] + (this.x[i] - this.px[i]) * this.alpha;
+  }
+  drawnY(i: number): number {
+    return this.pSerial[i] !== this.serial[i] ? this.y[i] : this.py[i] + (this.y[i] - this.py[i]) * this.alpha;
+  }
+  drawnZ(i: number): number {
+    return this.pSerial[i] !== this.serial[i] ? this.z[i] : this.pz[i] + (this.z[i] - this.pz[i]) * this.alpha;
+  }
+  drawnHeading(i: number): number {
+    if (this.pSerial[i] !== this.serial[i]) return this.heading[i];
+    let d = this.heading[i] - this.ph[i];
+    d = Math.atan2(Math.sin(d), Math.cos(d));
+    return this.ph[i] + d * this.alpha;
+  }
+
+  private step(dt: number): void {
     if (dt <= 0) return;
     this.frame++;
     this.rerouteBudget = 3;
