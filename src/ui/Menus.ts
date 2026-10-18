@@ -317,6 +317,8 @@ export class SettingsDialog extends Modal {
         s.dayNight = v !== 'noon';
         s.dayOnly = v === 'day';
       }),
+      chk('Show FPS', !!s.showFps, (v) => (s.showFps = v)),
+      chk('Show frame time (ms)', !!s.showFrameTime, (v) => (s.showFrameTime = v)),
       chk('Problem icons over buildings', s.showIcons, (v) => (s.showIcons = v)),
       rng('Traffic density', s.trafficDensity, (v) => (s.trafficDensity = v), 0.25, 1.5, 0.05),
       sel('Large city mode', s.largeCityMode ?? 'auto', [['auto', `Automatic (from ${LARGE_CITY_POPULATION.toLocaleString('en-US')} residents)`], ['on', 'On'], ['off', 'Off']], (v) => (s.largeCityMode = v as 'auto' | 'on' | 'off')),

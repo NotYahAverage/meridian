@@ -1336,3 +1336,9 @@ canvas { touch-action: none; /* map */ }
 .rs-outcome.wanted { background: var(--accent-soft); }
 .rs-plan.wanted { border-color: var(--accent); }
 .rs-goal-miss { display: flex; align-items: center; gap: 6px; }
+
+/* Frames per second and frame time (Settings). */
+.perf-meter { position: absolute; top: calc(var(--top) + 8px); left: 50%; transform: translateX(-50%); display: flex; gap: 10px; padding: 3px 10px; border-radius: var(--radius-sm); background: var(--float); border: 1px solid var(--line); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--good); pointer-events: auto; white-space: nowrap; }
+.perf-meter .perf-ms { color: var(--text-2); font-weight: 500; }
+.perf-meter.warn { color: var(--warn); }
+.perf-meter.bad { color: var(--bad); }

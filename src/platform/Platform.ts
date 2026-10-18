@@ -176,6 +176,9 @@ export interface Settings {
   uiScale: number;
   /** Interface look: the original, or the Command style (switchable in Settings to compare). */
   uiStyle?: UiStyle;
+  /** Frames per second, and frame time, at the top of the screen. */
+  showFps?: boolean;
+  showFrameTime?: boolean;
 }
 
 export type UiStyle = 'classic' | 'command';

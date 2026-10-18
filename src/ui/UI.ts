@@ -16,6 +16,7 @@ import { DiscoveryDialog, ResearchDialog } from './ResearchDialog';
 import { ResearchTracker } from './ResearchTracker';
 import { DesignStudio } from './DesignStudio';
 import { LoadingScreen, MainMenu, Modal, NewCityDialog, PauseMenu, SaveLoadDialog, SettingsDialog } from './Menus';
+import { PerfMeter } from './PerfMeter';
 import { BudgetPanel, DistrictsPanel, GoalsPanel, LogPanel, OverlaysPanel, type Panel, type PanelId, PoliciesPanel, LandPanel, StatsPanel, TransitPanel } from './Panels';
 
 class ConfirmDialog extends Modal {
@@ -98,6 +99,7 @@ export class UI {
   readonly confirmDialog: ConfirmDialog;
   readonly choiceDialog: ChoiceDialog;
   readonly saveStatus: SaveStatus;
+  readonly perf: PerfMeter;
   readonly topbar: TopBar;
   readonly toolbar: Toolbar;
   readonly toasts: Toasts;
@@ -150,6 +152,7 @@ export class UI {
     this.confirmDialog = new ConfirmDialog(game);
     this.choiceDialog = new ChoiceDialog(game);
     this.saveStatus = new SaveStatus(() => this.hud);
+    this.perf = new PerfMeter(game);
     this.modals = [this.newCity, this.scenarios, this.scenarioResult, this.newspaper, this.saveLoad, this.settings, this.help, this.research, this.studio, this.discovery, this.pause, this.confirmDialog, this.choiceDialog];
     this.topbar = new TopBar(game);
     this.toolbar = new Toolbar(game);
@@ -191,7 +194,7 @@ export class UI {
     this.labels = h('div', { class: 'district-labels' });
     this.tracker = new ResearchTracker(game);
     this.leftStack = h('div', { class: 'left-stack' }, this.info, this.inspector.el, this.tracker.el);
-    this.chrome = h('div', { class: 'hud-chrome' }, this.topbar.el, tb.rail, this.leftStack, this.layersHost, this.legend, this.toasts.el, this.saveStatus.el, tb.el, this.milestoneBanner.el);
+    this.chrome = h('div', { class: 'hud-chrome' }, this.topbar.el, tb.rail, this.leftStack, this.layersHost, this.legend, this.toasts.el, this.saveStatus.el, this.perf.el, tb.el, this.milestoneBanner.el);
     this.hud = h('div', { class: 'hud hidden' }, this.streets.el, this.labels, this.bubbles.el, this.chrome, this.cursor.el);
     this.applyScale();
     window.addEventListener('resize', () => this.applyScale());
@@ -436,6 +439,7 @@ export class UI {
     if (this.game.state !== 'playing') return;
     toggle(this.hud, 'left-open', !this.info.classList.contains('hidden') || !this.inspector.el.classList.contains('hidden'));
     this.topbar.update(dt);
+    this.perf.update();
     // The readout follows the pointer over the map only, never over panels.
     this.cursor.update(this.game.input.pointer.inside ? this.game.tool.label() : null);
     this.inspector.update(dt);
