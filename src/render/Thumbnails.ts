@@ -151,6 +151,8 @@ export class Thumbnails {
         this.camera.aspect = ow / oh;
         this.build(job.spec);
         r.clear();
+        // The main scene redraws its shadows only every other frame; a preview needs its own each time.
+        r.shadowMap.needsUpdate = true;
         r.render(this.scene, this.camera);
         if (this.out.width !== ow || this.out.height !== oh) {
           this.out.width = ow;
@@ -172,6 +174,8 @@ export class Thumbnails {
       r.setClearColor(clear, clearA);
       [g.uNight.value, g.uHour.value, g.uDesat.value, g.uWet.value, g.uSnow.value, g.uRain.value] = saved;
       g.uCloudShadow.value.copy(cloud);
+      // ...and the main frame that follows redraws its own.
+      r.shadowMap.needsUpdate = true;
     }
   }
 
