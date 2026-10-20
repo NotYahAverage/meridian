@@ -364,7 +364,7 @@ function house(g: GeoBuilder, b: GenInput, r: Rng, k: Kit): void {
   const fh = Math.min(3.3, k.fh);
   const plinth = a.heavy > 0.3 || k.look.base === 'stone' ? 0.6 : 0.4;
   const lift = k.has('pilotis') ? 2.7 : 0;
-  g.box(x0 - 0.12, z0 - 0.12, x1 + 0.12, z1 + 0.12, 0, plinth, { color: hex(k.look.baseColor), pattern: P.STONE, seed: s, fh: 30 }, null);
+  g.box(x0 - 0.12, z0 - 0.12, x1 + 0.12, z1 + 0.12, 0, plinth, { color: hex(k.look.baseColor), pattern: P.STONE, seed: s, fh: 30 }, { color: hex(k.look.baseColor), pattern: P.STONE, seed: s, fh: 30 });
   let top = plinth + lift + floors * fh;
   if (lift) {
     // Lifted on columns: a small glazed entrance under, a carport beside it.
@@ -607,6 +607,8 @@ function block(g: GeoBuilder, b: GenInput, r: Rng, k: Kit, use: BlockUse): void 
     const lx = (g0.x0 + g0.x1) / 2;
     g.box(lx - 4, g0.z0 + 2.5, lx + 4, g0.z1 - 2.5, 0, lift, { color: hex(0x3e4a52), pattern: P.GLASS, seed: k.s, fh: lift, bay: 1.6 }, null);
     g.quad([g0.x0, lift, g0.z0], [g0.x1, lift, g0.z0], [g0.x1, lift, g0.z1], [g0.x0, lift, g0.z1], [0, -1, 0], k.plain, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+    // ...and its top, where the block above doesn't cover it (seen from above it would be open to the ground).
+    g.flat(g0.x0, g0.z0, g0.x1, g0.z1, lift, k.membrane);
   } else if (arcade) {
     // Arcade: a colonnade along the street, the shopfronts set back behind it.
     const depth = 2.6;
@@ -618,6 +620,7 @@ function block(g: GeoBuilder, b: GenInput, r: Rng, k: Kit, use: BlockUse): void 
       g.box(cx - 0.35, g0.z0, cx + 0.35, g0.z0 + 0.7, 0, gh, colM, null);
     }
     g.quad([g0.x0, gh, g0.z0], [g0.x1, gh, g0.z0], [g0.x1, gh, g0.z0 + depth], [g0.x0, gh, g0.z0 + depth], [0, -1, 0], k.trim, [[0, 0], [1, 0], [1, 1], [0, 1]]);
+    g.flat(g0.x0, g0.z0, g0.x1, g0.z0 + depth, gh, k.membrane);
     g.wall(g0.x1, g0.z0, g0.x0, g0.z0, gh - 0.9, gh, colM);
     g.ground(g0.x0, g0.z0, g0.x1, g0.z0 + depth, { color: hex(0xb8b0a2), pattern: P.PAVING, seed: s }, 0.06);
   } else if (shops) {

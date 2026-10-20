@@ -303,9 +303,11 @@ function apartmentBlock(g: Parameters<Gen>[0], b: Parameters<Gen>[1], r: Paramet
     // Balcony floors line up with the facade's floor lines (multiples of the floor height).
     for (let y = gh + fh; y <= h - fh + 0.1; y += fh) {
       for (let k = 0; k < cells; k++) {
-        const on = pattern === 'pairs' ? k % 3 === 0 && k + 1 < cells : pattern === 'alternate' ? k % 2 === 0 : k >= Math.floor(cells / 2) - 1 && k <= Math.floor(cells / 2);
+        // 'centre' is one balcony over the middle two bays (two neighbours a hand apart read as a clash).
+        const mid = Math.max(0, Math.floor(cells / 2) - 1);
+        const on = pattern === 'pairs' ? k % 3 === 0 && k + 1 < cells : pattern === 'alternate' ? k % 2 === 0 : k === mid;
         if (!on) continue;
-        const span = pattern === 'pairs' ? 2 : 1;
+        const span = pattern === 'pairs' || (pattern === 'centre' && cells > 1) ? 2 : 1;
         const bx0 = mx0 + k * bayW + 0.25, bx1 = mx0 + (k + span) * bayW - 0.25;
         balcony(g, bx0, bx1, mz0, y + 0.02, 1.35, slab, rail);
       }

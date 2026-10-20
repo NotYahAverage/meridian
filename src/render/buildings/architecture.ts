@@ -113,17 +113,15 @@ export function balcony(g: GeoBuilder, x0: number, x1: number, z: number, y: num
   const glass = rail.pattern === P.GLASS_PLAIN;
   const y0 = glass ? y + 0.12 : y;
   const top = y + 1.05;
-  if (glass) {
-    g.wall(x1, zf, x0, zf, y, y0, slab);
-  }
-  g.wall(x1, zf, x0, zf, y0, top, rail);
-  g.wall(x0, zf + 0.05, x1, zf + 0.05, y0, top, rail);
-  g.wall(x0, zf, x0, z, y0, top, rail);
-  g.wall(x0 + 0.05, z, x0 + 0.05, zf, y0, top, rail);
-  g.wall(x1, z, x1, zf, y0, top, rail);
-  g.wall(x1 - 0.05, zf, x1 - 0.05, z, y0, top, rail);
+  const t = 0.08;
+  // The balustrade is made of thin solid panels (one outer face each way), not pairs of walls a
+  // hair apart, so no two surfaces sit close enough to flicker against each other at a distance.
+  if (glass) g.box(x0, zf, x1, zf + t, y, y0, slab, null, { sides: [true, true, false, true] });
+  g.box(x0, zf, x1, zf + t, y0, top, rail, null);
+  g.box(x0, zf + t, x0 + t, z, y0, top, rail, null, { sides: [false, true, false, true] });
+  g.box(x1 - t, zf + t, x1, z, y0, top, rail, null, { sides: [false, true, false, true] });
   // Handrail capping the front.
-  g.box(x0, zf - 0.02, x1, zf + 0.07, top, top + 0.06, slab, slab, { sides: [true, true, true, true] });
+  g.box(x0, zf - 0.02, x1, zf + t + 0.02, top, top + 0.06, slab, slab, { sides: [true, true, true, true] });
 }
 
 /** Sloped canvas awning over a shop window (street face at z), with a valance. */
